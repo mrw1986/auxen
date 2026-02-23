@@ -33,6 +33,7 @@ class AuxenSettings(Adw.PreferencesWindow):
         self._tidal_provider = None
         self._local_provider = None
         self._player = None
+        self._notification_service = None
 
         self.set_default_size(600, 700)
 
@@ -50,7 +51,12 @@ class AuxenSettings(Adw.PreferencesWindow):
     # ---- Public API ----
 
     def set_services(
-        self, db=None, tidal_provider=None, local_provider=None, player=None
+        self,
+        db=None,
+        tidal_provider=None,
+        local_provider=None,
+        player=None,
+        notification_service=None,
     ) -> None:
         """Wire backend services to the settings dialog.
 
@@ -64,11 +70,14 @@ class AuxenSettings(Adw.PreferencesWindow):
             LocalProvider instance for rescanning.
         player:
             Player instance for applying playback settings.
+        notification_service:
+            NotificationService for toggling desktop notifications.
         """
         self._db = db
         self._tidal_provider = tidal_provider
         self._local_provider = local_provider
         self._player = player
+        self._notification_service = notification_service
 
         # Load current settings from database
         self._load_settings()
@@ -169,6 +178,17 @@ class AuxenSettings(Adw.PreferencesWindow):
             "notify::selected", self._on_replaygain_mode_changed
         )
         group.add(self._replaygain_mode)
+
+        # Track notifications
+        self._notifications = Adw.SwitchRow(
+            title="Show Track Notifications",
+            subtitle="Display a notification when the track changes",
+        )
+        self._notifications.set_active(True)
+        self._notifications.connect(
+            "notify::active", self._on_notifications_toggled
+        )
+        group.add(self._notifications)
 
         # Equalizer
         eq_row = Adw.ActionRow(
@@ -303,6 +323,16 @@ class AuxenSettings(Adw.PreferencesWindow):
         except Exception:
             logger.warning(
                 "Failed to load replaygain_mode", exc_info=True
+            )
+
+        try:
+            # Load notification preference
+            notif_raw = self._db.get_setting("notifications_enabled")
+            if notif_raw is not None:
+                self._notifications.set_active(notif_raw == "1")
+        except Exception:
+            logger.warning(
+                "Failed to load notifications_enabled", exc_info=True
             )
 
         # Check Tidal login status
@@ -442,6 +472,21 @@ class AuxenSettings(Adw.PreferencesWindow):
                 logger.warning(
                     "Failed to apply replaygain_mode", exc_info=True
                 )
+
+    def _on_notifications_toggled(self, row: Adw.SwitchRow, _pspec) -> None:
+        """Persist the notification toggle and update the service."""
+        active = row.get_active()
+        if self._db is not None:
+            try:
+                self._db.set_setting(
+                    "notifications_enabled", "1" if active else "0"
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to save notifications_enabled", exc_info=True
+                )
+        if self._notification_service is not None:
+            self._notification_service.set_enabled(active)
 
     def _on_open_equalizer(self, _button: Gtk.Button) -> None:
         """Open the equalizer dialog via the parent window."""
