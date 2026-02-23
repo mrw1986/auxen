@@ -630,6 +630,54 @@ class Database:
             for row in cur.fetchall()
         ]
 
+    def get_artist_albums(self, artist: str) -> list[dict]:
+        """Get all albums by a specific artist.
+
+        Returns a list of dicts with keys: album, track_count, year, source.
+        Ordered by year descending (newest first), then album name.
+        """
+        cur = self._conn.execute(
+            """
+            SELECT album,
+                   COUNT(*) AS track_count,
+                   MAX(year) AS year,
+                   source
+            FROM tracks
+            WHERE (artist = ? OR album_artist = ?)
+              AND album IS NOT NULL AND album != ''
+            GROUP BY album, source
+            ORDER BY year DESC, album COLLATE NOCASE ASC
+            """,
+            (artist, artist),
+        )
+        return [
+            {
+                "album": row["album"],
+                "track_count": row["track_count"],
+                "year": row["year"],
+                "source": row["source"],
+            }
+            for row in cur.fetchall()
+        ]
+
+    def get_artist_tracks(self, artist: str) -> list[Track]:
+        """Get all tracks by a specific artist.
+
+        Returns Track objects ordered by album, disc number, track number.
+        """
+        cur = self._conn.execute(
+            """
+            SELECT * FROM tracks
+            WHERE artist = ? OR album_artist = ?
+            ORDER BY album COLLATE NOCASE ASC,
+                     disc_number ASC,
+                     track_number ASC,
+                     title COLLATE NOCASE ASC
+            """,
+            (artist, artist),
+        )
+        return [self._row_to_track(r) for r in cur.fetchall()]
+
     def get_track_count(self, source: Source | None = None) -> int:
         """Get total track count, optionally filtered by source."""
         if source is not None:

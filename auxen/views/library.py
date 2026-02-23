@@ -300,6 +300,9 @@ class LibraryView(Gtk.Box):
             Callable[[str, str], None]
         ] = None
         self._on_play_track: Optional[Callable] = None
+        self._on_artist_clicked: Optional[
+            Callable[[str], None]
+        ] = None
 
         # Context menu callbacks
         self._context_callbacks: Optional[dict] = None
@@ -566,6 +569,7 @@ class LibraryView(Gtk.Box):
         self,
         on_album_clicked: Callable[[str, str], None] | None = None,
         on_play_track: Callable | None = None,
+        on_artist_clicked: Callable[[str], None] | None = None,
     ) -> None:
         """Set callback functions for user actions.
 
@@ -575,9 +579,12 @@ class LibraryView(Gtk.Box):
             Called with (album_name, artist) when an album card is clicked.
         on_play_track:
             Called with a Track object when a track is clicked.
+        on_artist_clicked:
+            Called with artist_name when an artist row is clicked.
         """
         self._on_album_clicked = on_album_clicked
         self._on_play_track = on_play_track
+        self._on_artist_clicked = on_artist_clicked
 
     def set_context_callbacks(
         self,
@@ -930,36 +937,44 @@ class LibraryView(Gtk.Box):
     ) -> None:
         """Handle an artist row being clicked.
 
-        Filters the library to show only that artist's tracks.
+        Navigates to the artist detail page if the callback is set,
+        otherwise filters the library to show only that artist's tracks.
         """
         artist_name = getattr(row, "_artist_name", None)
-        if artist_name is not None:
-            # Switch to tracks view filtered by this artist
-            self._active_view = "tracks"
-            # Update view toggle buttons
-            for btn in self._view_buttons:
-                view_name = getattr(btn, "_view_name", "")
-                btn.handler_block_by_func(self._on_view_toggled)
-                btn.set_active(view_name == "tracks")
-                btn.handler_unblock_by_func(self._on_view_toggled)
-            self._update_sort_options()
-            # Filter tracks to this artist
-            source = self._get_source_filter()
-            filtered = [
-                t
-                for t in self._all_tracks
-                if t.artist == artist_name
-                and (source is None or t.source == source)
-            ]
-            self._clear_list_box(self._track_list)
-            if not filtered:
-                self._content_stack.set_visible_child_name("empty")
-                return
-            for track in filtered:
-                row = _make_track_row(track)
-                self._attach_context_gesture(row, track)
-                self._track_list.append(row)
-            self._content_stack.set_visible_child_name("tracks")
+        if artist_name is None:
+            return
+
+        # Navigate to artist detail page if callback is wired
+        if self._on_artist_clicked is not None:
+            self._on_artist_clicked(artist_name)
+            return
+
+        # Fallback: switch to tracks view filtered by this artist
+        self._active_view = "tracks"
+        # Update view toggle buttons
+        for btn in self._view_buttons:
+            view_name = getattr(btn, "_view_name", "")
+            btn.handler_block_by_func(self._on_view_toggled)
+            btn.set_active(view_name == "tracks")
+            btn.handler_unblock_by_func(self._on_view_toggled)
+        self._update_sort_options()
+        # Filter tracks to this artist
+        source = self._get_source_filter()
+        filtered = [
+            t
+            for t in self._all_tracks
+            if t.artist == artist_name
+            and (source is None or t.source == source)
+        ]
+        self._clear_list_box(self._track_list)
+        if not filtered:
+            self._content_stack.set_visible_child_name("empty")
+            return
+        for track in filtered:
+            track_row = _make_track_row(track)
+            self._attach_context_gesture(track_row, track)
+            self._track_list.append(track_row)
+        self._content_stack.set_visible_child_name("tracks")
 
     def _on_track_row_activated(
         self, _list_box: Gtk.ListBox, row: Gtk.ListBoxRow
