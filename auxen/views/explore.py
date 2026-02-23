@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Callable, Optional
 
 import gi
@@ -191,8 +192,9 @@ class ExploreView(Gtk.ScrolledWindow):
         self._content_box.set_visible(False)
         self._spinner_box.set_visible(True)
 
-        # Fetch data in an idle callback to avoid blocking the UI
-        GLib.idle_add(self._fetch_content)
+        # Fetch data in a background thread to avoid blocking the UI
+        thread = threading.Thread(target=self._fetch_content_thread, daemon=True)
+        thread.start()
 
     # ------------------------------------------------------------------
     # Internal: build widgets
@@ -419,43 +421,34 @@ class ExploreView(Gtk.ScrolledWindow):
         self._content_box.set_visible(True)
         self._spinner_box.set_visible(False)
 
-    def _fetch_content(self) -> bool:
-        """Fetch explore content from Tidal (runs in idle callback).
-
-        Returns False to remove the idle source.
-        """
+    def _fetch_content_thread(self) -> None:
+        """Fetch explore content from Tidal in a background thread."""
         if self._tidal_provider is None:
-            self._show_login_state()
-            return False
+            GLib.idle_add(self._show_login_state)
+            return
 
         try:
-            # Fetch genres
             genres = self._tidal_provider.get_genres()
-            self._populate_genres(genres)
-
-            # Fetch new releases
             releases = self._tidal_provider.get_new_releases(limit=12)
             if not releases:
-                # Fall back to featured albums
                 releases = self._tidal_provider.get_featured_albums(limit=12)
-            self._populate_releases(releases)
-
-            # Fetch top tracks
             tracks = self._tidal_provider.get_top_tracks(limit=20)
-            self._populate_tracks(tracks)
 
-            self._show_content_state()
+            def _apply_results() -> bool:
+                self._populate_genres(genres)
+                self._populate_releases(releases)
+                self._populate_tracks(tracks)
+                self._show_content_state()
+                has_genres = len(genres) > 0
+                self._genre_header.set_visible(has_genres)
+                self._genre_flow.set_visible(has_genres)
+                return False
 
-            # Hide genre section if no genres available
-            has_genres = len(genres) > 0
-            self._genre_header.set_visible(has_genres)
-            self._genre_flow.set_visible(has_genres)
+            GLib.idle_add(_apply_results)
 
         except Exception:
             logger.warning("Failed to fetch explore content", exc_info=True)
-            self._show_login_state()
-
-        return False
+            GLib.idle_add(self._show_login_state)
 
     def _populate_genres(self, genres: list[str]) -> None:
         """Fill the genre flow box with pill buttons."""

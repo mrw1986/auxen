@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Callable, Optional
 
 import gi
@@ -172,8 +173,9 @@ class MixesView(Gtk.ScrolledWindow):
         self._content_box.set_visible(False)
         self._spinner_box.set_visible(True)
 
-        # Fetch data in an idle callback to avoid blocking the UI
-        GLib.idle_add(self._fetch_content)
+        # Fetch data in a background thread to avoid blocking the UI
+        thread = threading.Thread(target=self._fetch_content_thread, daemon=True)
+        thread.start()
 
     # ------------------------------------------------------------------
     # Internal: build widgets
@@ -389,46 +391,40 @@ class MixesView(Gtk.ScrolledWindow):
         self._content_box.set_visible(True)
         self._spinner_box.set_visible(False)
 
-    def _fetch_content(self) -> bool:
-        """Fetch mixes and playlists from Tidal (runs in idle callback).
-
-        Returns False to remove the idle source.
-        """
+    def _fetch_content_thread(self) -> None:
+        """Fetch mixes and playlists from Tidal in a background thread."""
         if self._tidal_provider is None:
-            self._show_login_state()
-            return False
+            GLib.idle_add(self._show_login_state)
+            return
 
         try:
-            # Fetch personalized mixes
             mixes = self._tidal_provider.get_mixes(limit=12)
-            self._populate_mixes(mixes)
-
-            # Fetch user playlists
             playlists = self._tidal_provider.get_user_playlists(limit=20)
-            self._populate_playlists(playlists)
 
-            self._show_content_state()
+            def _apply_results() -> bool:
+                self._populate_mixes(mixes)
+                self._populate_playlists(playlists)
+                self._show_content_state()
 
-            # Hide sections if empty
-            has_mixes = len(mixes) > 0
-            self._mixes_header.set_visible(has_mixes)
-            self._mixes_grid.set_visible(has_mixes)
+                has_mixes = len(mixes) > 0
+                self._mixes_header.set_visible(has_mixes)
+                self._mixes_grid.set_visible(has_mixes)
 
-            has_playlists = len(playlists) > 0
-            self._playlists_header.set_visible(has_playlists)
-            self._playlists_grid.set_visible(has_playlists)
+                has_playlists = len(playlists) > 0
+                self._playlists_header.set_visible(has_playlists)
+                self._playlists_grid.set_visible(has_playlists)
 
-            # If both are empty, show a note
-            if not has_mixes and not has_playlists:
-                self._show_login_state()
+                if not has_mixes and not has_playlists:
+                    self._show_login_state()
+                return False
+
+            GLib.idle_add(_apply_results)
 
         except Exception:
             logger.warning(
                 "Failed to fetch mixes content", exc_info=True
             )
-            self._show_login_state()
-
-        return False
+            GLib.idle_add(self._show_login_state)
 
     def _populate_mixes(self, mixes: list[dict]) -> None:
         """Fill the mixes grid with mix cards."""

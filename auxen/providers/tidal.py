@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -86,11 +87,13 @@ class TidalProvider(ContentProvider):
             return False
 
     def logout(self) -> None:
-        """Delete the persisted session file."""
+        """Delete the persisted session file and clear in-memory auth."""
         try:
             SESSION_FILE.unlink(missing_ok=True)
         except OSError:
             pass
+        # Create a fresh session so is_logged_in returns False immediately.
+        self._session = tidalapi.Session()
 
     # ------------------------------------------------------------------
     # Content provider interface
@@ -448,14 +451,20 @@ class TidalProvider(ContentProvider):
     # ------------------------------------------------------------------
 
     def _save_session(self) -> None:
-        """Persist the current OAuth tokens to disk."""
+        """Persist the current OAuth tokens to disk with restricted permissions."""
         data = {
             "token_type": self._session.token_type,
             "access_token": self._session.access_token,
             "refresh_token": self._session.refresh_token,
             "expiry_time": self._session.expiry_time,
         }
-        SESSION_FILE.write_text(json.dumps(data))
+        content = json.dumps(data)
+        # Write with 0o600 to prevent other users from reading tokens.
+        fd = os.open(str(SESSION_FILE), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, content.encode())
+        finally:
+            os.close(fd)
 
     def _tidal_track_to_model(self, tidal_track: Any) -> Track:
         """Convert a ``tidalapi.Track`` to our Track dataclass."""

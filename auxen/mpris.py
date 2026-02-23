@@ -115,6 +115,9 @@ class MprisService:
         self.on_previous: Optional[Callable[[], None]] = None
         self.on_seek: Optional[Callable[[int], None]] = None  # microseconds
         self.on_raise: Optional[Callable[[], None]] = None
+        self.on_volume_changed: Optional[Callable[[float], None]] = None
+        self.on_loop_changed: Optional[Callable[[str], None]] = None
+        self.on_shuffle_changed: Optional[Callable[[bool], None]] = None
 
         # Parse introspection XML ---------------------------------------
         self._node_info = Gio.DBusNodeInfo.new_for_xml(_MPRIS_XML)
@@ -311,12 +314,16 @@ class MprisService:
         if interface_name == _IFACE_PLAYER:
             if property_name == "Volume":
                 self._volume = value.get_double()
+                if self.on_volume_changed is not None:
+                    self.on_volume_changed(self._volume)
                 self.emit_properties_changed(
                     _IFACE_PLAYER, {"Volume": GLib.Variant("d", self._volume)}
                 )
                 return True
             if property_name == "LoopStatus":
                 self._loop_status = value.get_string()
+                if self.on_loop_changed is not None:
+                    self.on_loop_changed(self._loop_status)
                 self.emit_properties_changed(
                     _IFACE_PLAYER,
                     {"LoopStatus": GLib.Variant("s", self._loop_status)},
@@ -324,6 +331,8 @@ class MprisService:
                 return True
             if property_name == "Shuffle":
                 self._shuffle = value.get_boolean()
+                if self.on_shuffle_changed is not None:
+                    self.on_shuffle_changed(self._shuffle)
                 self.emit_properties_changed(
                     _IFACE_PLAYER,
                     {"Shuffle": GLib.Variant("b", self._shuffle)},

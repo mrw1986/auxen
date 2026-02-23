@@ -444,22 +444,23 @@ class AuxenApp(Adw.Application):
         def _scan_thread() -> None:
             try:
                 tracks = self.local_provider.scan()
-                for track in tracks:
-                    track_id = self.db.insert_track(track)
-                    # Also record the local file mapping
-                    if track.source_id:
-                        import os
+                with self.db.batch() as db:
+                    for track in tracks:
+                        track_id = db.insert_track(track)
+                        # Also record the local file mapping
+                        if track.source_id:
+                            import os
 
-                        try:
-                            stat = os.stat(track.source_id)
-                            self.db.insert_local_file(
-                                track_id=track_id,
-                                file_path=track.source_id,
-                                file_size=stat.st_size,
-                                file_modified_at=str(stat.st_mtime),
-                            )
-                        except OSError:
-                            pass
+                            try:
+                                stat = os.stat(track.source_id)
+                                db.insert_local_file(
+                                    track_id=track_id,
+                                    file_path=track.source_id,
+                                    file_size=stat.st_size,
+                                    file_modified_at=str(stat.st_mtime),
+                                )
+                            except OSError:
+                                pass
                 logger.info("Scanned %d local tracks", len(tracks))
             except Exception:
                 logger.warning("Initial scan failed", exc_info=True)
@@ -546,6 +547,34 @@ class AuxenApp(Adw.Application):
                 win.present()
 
         self.mpris.on_raise = _mpris_raise
+
+        def _mpris_volume(vol: float) -> None:
+            if self.player is not None:
+                self.player.volume = vol
+
+        self.mpris.on_volume_changed = _mpris_volume
+
+        def _mpris_loop(status: str) -> None:
+            if self.player is None:
+                return
+            from auxen.queue import RepeatMode
+
+            mpris_to_repeat = {
+                "None": RepeatMode.OFF,
+                "Track": RepeatMode.TRACK,
+                "Playlist": RepeatMode.QUEUE,
+            }
+            mode = mpris_to_repeat.get(status)
+            if mode is not None:
+                self.player.queue.repeat_mode = mode
+
+        self.mpris.on_loop_changed = _mpris_loop
+
+        def _mpris_shuffle(enabled: bool) -> None:
+            if self.player is not None and enabled:
+                self.player.queue.shuffle()
+
+        self.mpris.on_shuffle_changed = _mpris_shuffle
 
     # ------------------------------------------------------------------
     # Player signal handlers

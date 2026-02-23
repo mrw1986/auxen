@@ -560,8 +560,9 @@ class AuxenSettings(Adw.PreferencesWindow):
                         pass
 
                 tracks = self._local_provider.scan()
-                for track in tracks:
-                    self._db.insert_track(track)
+                with self._db.batch() as db:
+                    for track in tracks:
+                        db.insert_track(track)
                 logger.info("Rescanned: found %d tracks", len(tracks))
             except Exception:
                 logger.warning("Rescan failed", exc_info=True)

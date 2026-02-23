@@ -460,6 +460,11 @@ class Player(GObject.Object):
             track = self.queue.next()
             if track is not None:
                 self.emit("track-changed", track)
+                # Trigger fade-in for the gapless-transitioned track.
+                if self._crossfade is not None and self._crossfade.enabled:
+                    self._crossfade.start_fade_in(
+                        self, self._target_volume
+                    )
             else:
                 self.stop()
 

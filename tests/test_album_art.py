@@ -213,8 +213,8 @@ class TestCacheBehavior:
         service = AlbumArtService()
         track = _make_track(track_id=42, source_id="/fake.mp3")
 
-        # Pre-populate cache
-        service._cache[42] = "cached_pixbuf"
+        # Pre-populate cache with (track_id, width, height) tuple key
+        service._cache[(42, 48, 48)] = "cached_pixbuf"
 
         result = service.get_art_for_track(track)
         assert result == "cached_pixbuf"
@@ -230,16 +230,16 @@ class TestCacheBehavior:
         )
 
         service.get_art_for_track(track)
-        assert 99 in service._cache
-        assert service._cache[99] is None
+        assert (99, 48, 48) in service._cache
+        assert service._cache[(99, 48, 48)] is None
 
     def test_cache_eviction_when_full(self) -> None:
         """Oldest entries are evicted when cache exceeds max size."""
         service = AlbumArtService()
 
-        # Fill cache beyond limit
+        # Fill cache beyond limit (use tuple keys matching new format)
         for i in range(105):
-            service._cache[i] = f"pixbuf_{i}"
+            service._cache[(i, 48, 48)] = f"pixbuf_{i}"
 
         # Cache should not exceed 100 after a get_art_for_track call
         # that adds a new entry.  But the direct dict manipulation
@@ -266,16 +266,16 @@ class TestCacheBehavior:
     def test_cache_lru_order(self) -> None:
         """Accessing a cached entry should move it to the end (most recent)."""
         service = AlbumArtService()
-        service._cache[1] = "first"
-        service._cache[2] = "second"
-        service._cache[3] = "third"
+        service._cache[(1, 48, 48)] = "first"
+        service._cache[(2, 48, 48)] = "second"
+        service._cache[(3, 48, 48)] = "third"
 
         # Access entry 1, moving it to end
         track = _make_track(track_id=1, source_id="/fake.mp3")
         service.get_art_for_track(track)
 
         keys = list(service._cache.keys())
-        assert keys[-1] == 1  # should now be last
+        assert keys[-1] == (1, 48, 48)  # should now be last
 
 
 # ---------------------------------------------------------------------------
@@ -442,7 +442,7 @@ class TestAsyncCallback:
     def test_async_callback_with_cached_result(self) -> None:
         """Async should return cached result quickly."""
         service = AlbumArtService()
-        service._cache[42] = "cached_art"
+        service._cache[(42, 48, 48)] = "cached_art"
 
         track = _make_track(track_id=42, source_id="/fake.mp3")
 

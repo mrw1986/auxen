@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+import threading
 
 import gi
 
@@ -530,10 +531,7 @@ class SearchView(Gtk.Box):
     ) -> None:
         """Remove a single item from search history."""
         if self._db is not None:
-            self._db._conn.execute(
-                "DELETE FROM search_history WHERE query = ?", (query,)
-            )
-            self._db._conn.commit()
+            self._db.delete_search_history_item(query)
         self._refresh_history()
 
     def _on_clear_history_clicked(self, button: Gtk.Button) -> None:
@@ -576,8 +574,14 @@ class SearchView(Gtk.Box):
             except Exception:
                 logger.warning("Failed to save search history", exc_info=True)
 
-        results = self._do_search(query)
-        self._populate_results(results)
+        # Run the search in a background thread to avoid blocking the UI
+        # (especially Tidal network calls).
+        def _search_thread() -> None:
+            results = self._do_search(query)
+            GLib.idle_add(self._populate_results, results)
+
+        thread = threading.Thread(target=_search_thread, daemon=True)
+        thread.start()
         # Return False to prevent GLib from repeating the timeout.
         return GLib.SOURCE_REMOVE
 
@@ -649,6 +653,7 @@ class SearchView(Gtk.Box):
                     "source": track.source.value,
                     "duration": _format_duration(track.duration),
                     "_track": track,
+                    "_source_id": track.source_id,
                 })
         except Exception:
             logger.warning("Database search failed", exc_info=True)
@@ -659,9 +664,10 @@ class SearchView(Gtk.Box):
                 if self._tidal_provider.is_logged_in:
                     tidal_tracks = self._tidal_provider.search(query, limit=10)
                     # Track source_ids already seen to avoid duplicates
-                    seen_ids = {r.get("_source_id") for r in results if r.get("_source_id")}
+                    seen_ids = {r["_source_id"] for r in results if r.get("_source_id")}
                     for track in tidal_tracks:
                         if track.source_id not in seen_ids:
+                            seen_ids.add(track.source_id)
                             results.append({
                                 "title": track.title,
                                 "artist": track.artist,
@@ -669,6 +675,7 @@ class SearchView(Gtk.Box):
                                 "source": track.source.value,
                                 "duration": _format_duration(track.duration),
                                 "_track": track,
+                                "_source_id": track.source_id,
                             })
             except Exception:
                 logger.warning("Tidal search failed", exc_info=True)

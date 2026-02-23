@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -106,7 +107,9 @@ class Database:
         path = Path(db_path) if db_path else _DEFAULT_DB_PATH
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        self._conn = sqlite3.connect(str(path))
+        self._db_path = str(path)
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
@@ -118,45 +121,114 @@ class Database:
 
     def close(self) -> None:
         """Close the database connection."""
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
+
+    # ------------------------------------------------------------------
+    # Batch operations
+    # ------------------------------------------------------------------
+
+    class _BatchContext:
+        """Context manager that defers commits until the block exits."""
+
+        def __init__(self, db: "Database") -> None:
+            self._db = db
+
+        def __enter__(self) -> "Database":
+            self._db._lock.acquire()
+            self._db._conn.execute("BEGIN")
+            return self._db
+
+        def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+            try:
+                if exc_type is None:
+                    self._db._conn.commit()
+                else:
+                    self._db._conn.rollback()
+            finally:
+                self._db._lock.release()
+
+    def batch(self) -> _BatchContext:
+        """Return a context manager for batched writes.
+
+        Within the ``with`` block, individual methods skip their own
+        ``commit()`` calls and a single ``COMMIT`` is issued when the
+        block exits successfully.  On exception the transaction is
+        rolled back.
+
+        Usage::
+
+            with db.batch() as db:
+                for track in tracks:
+                    db.insert_track(track)
+        """
+        return self._BatchContext(self)
 
     # ------------------------------------------------------------------
     # Tracks
     # ------------------------------------------------------------------
 
     def insert_track(self, track: Track) -> int:
-        """Insert or replace a track. Returns the row id."""
-        cur = self._conn.execute(
-            """
-            INSERT OR REPLACE INTO tracks
-                (title, artist, album, album_artist, genre, year,
-                 duration, track_number, disc_number, source, source_id,
-                 bitrate, format, sample_rate, bit_depth, album_art_url,
-                 match_group_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                track.title,
-                track.artist,
-                track.album,
-                track.album_artist,
-                track.genre,
-                track.year,
-                track.duration,
-                track.track_number,
-                track.disc_number,
-                track.source.value,
-                track.source_id,
-                track.bitrate,
-                track.format,
-                track.sample_rate,
-                track.bit_depth,
-                track.album_art_url,
-                track.match_group_id,
-            ),
-        )
-        self._conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        """Insert or update a track. Returns the row id.
+
+        Uses ON CONFLICT DO UPDATE to preserve existing row IDs and
+        avoid breaking foreign key references from child tables.
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                INSERT INTO tracks
+                    (title, artist, album, album_artist, genre, year,
+                     duration, track_number, disc_number, source, source_id,
+                     bitrate, format, sample_rate, bit_depth, album_art_url,
+                     match_group_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source, source_id) DO UPDATE SET
+                    title       = excluded.title,
+                    artist      = excluded.artist,
+                    album       = excluded.album,
+                    album_artist = excluded.album_artist,
+                    genre       = excluded.genre,
+                    year        = excluded.year,
+                    duration    = excluded.duration,
+                    track_number = excluded.track_number,
+                    disc_number = excluded.disc_number,
+                    bitrate     = excluded.bitrate,
+                    format      = excluded.format,
+                    sample_rate = excluded.sample_rate,
+                    bit_depth   = excluded.bit_depth,
+                    album_art_url = excluded.album_art_url,
+                    match_group_id = excluded.match_group_id
+                """,
+                (
+                    track.title,
+                    track.artist,
+                    track.album,
+                    track.album_artist,
+                    track.genre,
+                    track.year,
+                    track.duration,
+                    track.track_number,
+                    track.disc_number,
+                    track.source.value,
+                    track.source_id,
+                    track.bitrate,
+                    track.format,
+                    track.sample_rate,
+                    track.bit_depth,
+                    track.album_art_url,
+                    track.match_group_id,
+                ),
+            )
+            self._conn.commit()
+            # On conflict, lastrowid is 0; retrieve the actual id.
+            if cur.lastrowid == 0 or cur.lastrowid is None:
+                row = self._conn.execute(
+                    "SELECT id FROM tracks WHERE source = ? AND source_id = ?",
+                    (track.source.value, track.source_id),
+                ).fetchone()
+                return row["id"] if row else 0
+            return cur.lastrowid
 
     def get_track(self, track_id: int) -> Optional[Track]:
         """Fetch a single track by its primary key."""
@@ -203,16 +275,17 @@ class Database:
 
     def record_play(self, track_id: int) -> None:
         """Increment play_count and update last_played_at."""
-        self._conn.execute(
-            """
-            UPDATE tracks
-            SET play_count = play_count + 1,
-                last_played_at = datetime('now')
-            WHERE id = ?
-            """,
-            (track_id,),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE tracks
+                SET play_count = play_count + 1,
+                    last_played_at = datetime('now')
+                WHERE id = ?
+                """,
+                (track_id,),
+            )
+            self._conn.commit()
 
     def search(self, query: str) -> list[Track]:
         """Search tracks by title, artist, or album (case-insensitive LIKE)."""
@@ -233,22 +306,26 @@ class Database:
 
     def set_favorite(self, track_id: int, is_favorite: bool) -> None:
         """Add or remove a track from favorites."""
-        if is_favorite:
-            # Look up match_group_id from the track
-            track = self.get_track(track_id)
-            match_group = track.match_group_id if track else None
-            self._conn.execute(
-                """
-                INSERT OR REPLACE INTO favorites (track_id, match_group_id)
-                VALUES (?, ?)
-                """,
-                (track_id, match_group),
-            )
-        else:
-            self._conn.execute(
-                "DELETE FROM favorites WHERE track_id = ?", (track_id,)
-            )
-        self._conn.commit()
+        with self._lock:
+            if is_favorite:
+                # Look up match_group_id from the track
+                row = self._conn.execute(
+                    "SELECT match_group_id FROM tracks WHERE id = ?",
+                    (track_id,),
+                ).fetchone()
+                match_group = row["match_group_id"] if row else None
+                self._conn.execute(
+                    """
+                    INSERT OR IGNORE INTO favorites (track_id, match_group_id)
+                    VALUES (?, ?)
+                    """,
+                    (track_id, match_group),
+                )
+            else:
+                self._conn.execute(
+                    "DELETE FROM favorites WHERE track_id = ?", (track_id,)
+                )
+            self._conn.commit()
 
     def is_favorite(self, track_id: int) -> bool:
         """Check whether a track is favorited."""
@@ -314,11 +391,12 @@ class Database:
 
     def set_setting(self, key: str, value: str) -> None:
         """Write a setting (insert or update)."""
-        self._conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-            (key, value),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+            self._conn.commit()
 
     # ------------------------------------------------------------------
     # Local files
@@ -332,15 +410,20 @@ class Database:
         file_modified_at: str,
     ) -> None:
         """Record a local file entry linked to a track."""
-        self._conn.execute(
-            """
-            INSERT OR REPLACE INTO local_files
-                (track_id, file_path, file_size, file_modified_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (track_id, file_path, file_size, file_modified_at),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO local_files
+                    (track_id, file_path, file_size, file_modified_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(file_path) DO UPDATE SET
+                    track_id = excluded.track_id,
+                    file_size = excluded.file_size,
+                    file_modified_at = excluded.file_modified_at
+                """,
+                (track_id, file_path, file_size, file_modified_at),
+            )
+            self._conn.commit()
 
     def get_local_file_path(self, track_id: int) -> Optional[str]:
         """Return the file path for a local track, or None."""
@@ -381,12 +464,13 @@ class Database:
 
     def set_match_group(self, track_ids: list[int], group_id: str) -> None:
         """Assign a match group id to multiple tracks."""
-        for tid in track_ids:
-            self._conn.execute(
-                "UPDATE tracks SET match_group_id = ? WHERE id = ?",
-                (group_id, tid),
-            )
-        self._conn.commit()
+        with self._lock:
+            for tid in track_ids:
+                self._conn.execute(
+                    "UPDATE tracks SET match_group_id = ? WHERE id = ?",
+                    (group_id, tid),
+                )
+            self._conn.commit()
 
     # ------------------------------------------------------------------
     # Playlists
@@ -394,12 +478,13 @@ class Database:
 
     def create_playlist(self, name: str, color: str = "#d4a039") -> int:
         """Create a new playlist. Returns playlist ID."""
-        cur = self._conn.execute(
-            "INSERT INTO playlists (name, color) VALUES (?, ?)",
-            (name, color),
-        )
-        self._conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO playlists (name, color) VALUES (?, ?)",
+                (name, color),
+            )
+            self._conn.commit()
+            return cur.lastrowid  # type: ignore[return-value]
 
     def get_playlists(self) -> list[dict]:
         """Get all playlists as dicts with id, name, color, track_count."""
@@ -449,31 +534,34 @@ class Database:
 
     def delete_playlist(self, playlist_id: int) -> None:
         """Delete a playlist and its track associations."""
-        self._conn.execute(
-            "DELETE FROM playlist_tracks WHERE playlist_id = ?",
-            (playlist_id,),
-        )
-        self._conn.execute(
-            "DELETE FROM playlists WHERE id = ?",
-            (playlist_id,),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM playlist_tracks WHERE playlist_id = ?",
+                (playlist_id,),
+            )
+            self._conn.execute(
+                "DELETE FROM playlists WHERE id = ?",
+                (playlist_id,),
+            )
+            self._conn.commit()
 
     def rename_playlist(self, playlist_id: int, name: str) -> None:
         """Rename a playlist."""
-        self._conn.execute(
-            "UPDATE playlists SET name = ? WHERE id = ?",
-            (name, playlist_id),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE playlists SET name = ? WHERE id = ?",
+                (name, playlist_id),
+            )
+            self._conn.commit()
 
     def update_playlist_color(self, playlist_id: int, color: str) -> None:
         """Update the color of a playlist."""
-        self._conn.execute(
-            "UPDATE playlists SET color = ? WHERE id = ?",
-            (color, playlist_id),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE playlists SET color = ? WHERE id = ?",
+                (color, playlist_id),
+            )
+            self._conn.commit()
 
     def add_track_to_playlist(
         self, playlist_id: int, track_id: int
@@ -482,38 +570,40 @@ class Database:
 
         If the track is already in the playlist, this is a no-op.
         """
-        cur = self._conn.execute(
-            "SELECT 1 FROM playlist_tracks "
-            "WHERE playlist_id = ? AND track_id = ?",
-            (playlist_id, track_id),
-        )
-        if cur.fetchone() is not None:
-            return
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT 1 FROM playlist_tracks "
+                "WHERE playlist_id = ? AND track_id = ?",
+                (playlist_id, track_id),
+            )
+            if cur.fetchone() is not None:
+                return
 
-        cur = self._conn.execute(
-            "SELECT COALESCE(MAX(position), -1) + 1 "
-            "FROM playlist_tracks WHERE playlist_id = ?",
-            (playlist_id,),
-        )
-        next_pos = cur.fetchone()[0]
+            cur = self._conn.execute(
+                "SELECT COALESCE(MAX(position), -1) + 1 "
+                "FROM playlist_tracks WHERE playlist_id = ?",
+                (playlist_id,),
+            )
+            next_pos = cur.fetchone()[0]
 
-        self._conn.execute(
-            "INSERT INTO playlist_tracks "
-            "(playlist_id, track_id, position) VALUES (?, ?, ?)",
-            (playlist_id, track_id, next_pos),
-        )
-        self._conn.commit()
+            self._conn.execute(
+                "INSERT INTO playlist_tracks "
+                "(playlist_id, track_id, position) VALUES (?, ?, ?)",
+                (playlist_id, track_id, next_pos),
+            )
+            self._conn.commit()
 
     def remove_track_from_playlist(
         self, playlist_id: int, track_id: int
     ) -> None:
         """Remove a track from a playlist."""
-        self._conn.execute(
-            "DELETE FROM playlist_tracks "
-            "WHERE playlist_id = ? AND track_id = ?",
-            (playlist_id, track_id),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM playlist_tracks "
+                "WHERE playlist_id = ? AND track_id = ?",
+                (playlist_id, track_id),
+            )
+            self._conn.commit()
 
     def get_playlist_tracks(self, playlist_id: int) -> list[Track]:
         """Get all tracks in a playlist, ordered by position."""
@@ -535,30 +625,31 @@ class Database:
 
         Shifts other tracks to accommodate the move.
         """
-        cur = self._conn.execute(
-            """
-            SELECT track_id FROM playlist_tracks
-            WHERE playlist_id = ?
-            ORDER BY position
-            """,
-            (playlist_id,),
-        )
-        track_ids = [row["track_id"] for row in cur.fetchall()]
-
-        if track_id not in track_ids:
-            return
-
-        track_ids.remove(track_id)
-        new_position = max(0, min(new_position, len(track_ids)))
-        track_ids.insert(new_position, track_id)
-
-        for pos, tid in enumerate(track_ids):
-            self._conn.execute(
-                "UPDATE playlist_tracks SET position = ? "
-                "WHERE playlist_id = ? AND track_id = ?",
-                (pos, playlist_id, tid),
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT track_id FROM playlist_tracks
+                WHERE playlist_id = ?
+                ORDER BY position
+                """,
+                (playlist_id,),
             )
-        self._conn.commit()
+            track_ids = [row["track_id"] for row in cur.fetchall()]
+
+            if track_id not in track_ids:
+                return
+
+            track_ids.remove(track_id)
+            new_position = max(0, min(new_position, len(track_ids)))
+            track_ids.insert(new_position, track_id)
+
+            for pos, tid in enumerate(track_ids):
+                self._conn.execute(
+                    "UPDATE playlist_tracks SET position = ? "
+                    "WHERE playlist_id = ? AND track_id = ?",
+                    (pos, playlist_id, tid),
+                )
+            self._conn.commit()
 
     # ------------------------------------------------------------------
     # Library browsing
@@ -724,15 +815,16 @@ class Database:
     ) -> int:
         """Insert a play history record. Returns the new row id."""
         played_at = datetime.now(UTC).isoformat()
-        cur = self._conn.execute(
-            """
-            INSERT INTO play_history (track_id, played_at, duration_listened)
-            VALUES (?, ?, ?)
-            """,
-            (track_id, played_at, duration_listened),
-        )
-        self._conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                INSERT INTO play_history (track_id, played_at, duration_listened)
+                VALUES (?, ?, ?)
+                """,
+                (track_id, played_at, duration_listened),
+            )
+            self._conn.commit()
+            return cur.lastrowid  # type: ignore[return-value]
 
     def get_play_history(self, limit: int = 50) -> list[dict]:
         """Return play history entries in reverse chronological order.
@@ -993,15 +1085,16 @@ class Database:
         creating a duplicate entry.
         """
         now = datetime.now(UTC).isoformat()
-        self._conn.execute(
-            """
-            INSERT INTO search_history (query, searched_at)
-            VALUES (?, ?)
-            ON CONFLICT(query) DO UPDATE SET searched_at = ?
-            """,
-            (query, now, now),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO search_history (query, searched_at)
+                VALUES (?, ?)
+                ON CONFLICT(query) DO UPDATE SET searched_at = ?
+                """,
+                (query, now, now),
+            )
+            self._conn.commit()
 
     def get_search_history(self, limit: int = 10) -> list[str]:
         """Return recent search queries, newest first.
@@ -1019,8 +1112,17 @@ class Database:
 
     def clear_search_history(self) -> None:
         """Delete all search history entries."""
-        self._conn.execute("DELETE FROM search_history")
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute("DELETE FROM search_history")
+            self._conn.commit()
+
+    def delete_search_history_item(self, query: str) -> None:
+        """Delete a single search history entry."""
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM search_history WHERE query = ?", (query,)
+            )
+            self._conn.commit()
 
     # ------------------------------------------------------------------
     # Internal

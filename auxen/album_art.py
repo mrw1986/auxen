@@ -40,7 +40,7 @@ class AlbumArtService:
     """
 
     def __init__(self) -> None:
-        self._cache: OrderedDict[int, Any] = OrderedDict()
+        self._cache: OrderedDict[tuple[int, int, int], Any] = OrderedDict()
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -53,10 +53,11 @@ class AlbumArtService:
         The result is cached by ``track.id``.  Pass *width*/*height* to
         control the output size (default 48x48 for the now-playing bar).
         """
-        cache_key = track.id
-        if cache_key is None:
+        if track.id is None:
             # No stable ID -- skip caching, just load
             return self._load_art(track, width, height)
+
+        cache_key = (track.id, width, height)
 
         with self._lock:
             if cache_key in self._cache:
