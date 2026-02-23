@@ -18,6 +18,7 @@ from auxen.views.favorites import FavoritesView
 from auxen.views.home import HomePage
 from auxen.views.library import LibraryView
 from auxen.views.lyrics_panel import LyricsPanel
+from auxen.views.mixes import MixesView
 from auxen.views.now_playing import NowPlayingBar
 from auxen.views.queue_panel import QueuePanel
 from auxen.views.playlist_view import PlaylistView
@@ -93,6 +94,11 @@ class AuxenWindow(Adw.ApplicationWindow):
             if name == "explore":
                 self._explore_view = ExploreView()
                 self._stack.add_named(self._explore_view, name)
+                continue
+
+            if name == "mixes":
+                self._mixes_view = MixesView()
+                self._stack.add_named(self._mixes_view, name)
                 continue
 
             if name == "favorites":
@@ -242,6 +248,14 @@ class AuxenWindow(Adw.ApplicationWindow):
                 on_login=self._on_explore_login,
             )
 
+        # --- Mixes View -> Tidal Provider ---
+        if app.tidal_provider is not None:
+            self._mixes_view.set_tidal_provider(app.tidal_provider)
+            self._mixes_view.set_callbacks(
+                on_play_mix=self._on_mixes_play_mix,
+                on_login=self._on_mixes_login,
+            )
+
         # --- Sidebar -> Database (playlists) ---
         if app.db is not None:
             self._sidebar.set_database(app.db)
@@ -385,6 +399,35 @@ class AuxenWindow(Adw.ApplicationWindow):
 
     def _on_explore_login(self) -> None:
         """Handle login request from the explore page."""
+        self._open_settings()
+
+    # ------------------------------------------------------------------
+    # Mixes page callbacks
+    # ------------------------------------------------------------------
+
+    def _on_mixes_play_mix(self, tidal_id: str, name: str) -> None:
+        """Handle a mix/playlist card click from the mixes view."""
+        if (
+            self._app_ref
+            and self._app_ref.tidal_provider is not None
+            and self._app_ref.player is not None
+        ):
+            try:
+                tracks = self._app_ref.tidal_provider.get_playlist_tracks(
+                    tidal_id
+                )
+                if tracks:
+                    self._app_ref.player.play_queue(
+                        tracks, start_index=0
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to load mix tracks for %s", name,
+                    exc_info=True,
+                )
+
+    def _on_mixes_login(self) -> None:
+        """Handle login request from the mixes page."""
         self._open_settings()
 
     # ------------------------------------------------------------------
@@ -593,4 +636,13 @@ class AuxenWindow(Adw.ApplicationWindow):
             except Exception:
                 logger.warning(
                     "Failed to refresh explore page", exc_info=True
+                )
+
+        # Refresh mixes page when switching to it
+        if page_name == "mixes":
+            try:
+                self._mixes_view.refresh()
+            except Exception:
+                logger.warning(
+                    "Failed to refresh mixes page", exc_info=True
                 )

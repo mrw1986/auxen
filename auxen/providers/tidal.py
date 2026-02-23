@@ -295,6 +295,146 @@ class TidalProvider(ContentProvider):
             return []
 
     # ------------------------------------------------------------------
+    # Mixes & User Playlists
+    # ------------------------------------------------------------------
+
+    def get_mixes(self, limit: int = 12) -> list[dict]:
+        """Get user's personalized mixes from Tidal.
+
+        Returns a list of dicts with keys: name, description, cover_url,
+        tidal_id, track_count.  Returns an empty list if not logged in
+        or on API failure.
+
+        Tries the user's mixes via the home/explore page first; falls
+        back to the user's playlists if no dedicated mixes are found.
+        """
+        try:
+            if not self.is_logged_in:
+                return []
+
+            mixes: list[dict] = []
+
+            # Attempt 1: Look for Mix items on the explore/home page
+            try:
+                explore_page = self._session.explore()
+                for category in explore_page:
+                    cat_title = getattr(category, "title", "") or ""
+                    items = getattr(category, "items", None)
+                    if items is None:
+                        continue
+                    for item in items:
+                        if len(mixes) >= limit:
+                            break
+                        # tidalapi exposes Mix objects on some page categories
+                        type_name = type(item).__name__
+                        if type_name == "Mix" or "mix" in cat_title.lower():
+                            name = (
+                                getattr(item, "title", None)
+                                or getattr(item, "name", None)
+                                or "Mix"
+                            )
+                            desc = (
+                                getattr(item, "sub_title", None)
+                                or getattr(item, "description", None)
+                                or ""
+                            )
+                            cover = getattr(item, "cover", None) or ""
+                            cover_url = None
+                            if cover:
+                                cover_url = (
+                                    f"https://resources.tidal.com/images/"
+                                    f"{cover.replace('-', '/')}/640x640.jpg"
+                                )
+                            item_id = getattr(item, "id", "") or ""
+                            track_count = getattr(
+                                item, "num_tracks", None
+                            ) or getattr(item, "number_of_tracks", 0)
+                            mixes.append({
+                                "name": name,
+                                "description": desc,
+                                "cover_url": cover_url,
+                                "tidal_id": str(item_id),
+                                "track_count": track_count,
+                            })
+            except Exception:
+                logger.debug("explore page mix scan failed", exc_info=True)
+
+            if mixes:
+                return mixes[:limit]
+
+            # Attempt 2: Fall back to user's playlists
+            playlists = self.get_user_playlists(limit=limit)
+            for pl in playlists:
+                mixes.append({
+                    "name": pl["name"],
+                    "description": pl.get("description", ""),
+                    "cover_url": pl.get("cover_url"),
+                    "tidal_id": pl["tidal_id"],
+                    "track_count": pl.get("track_count", 0),
+                })
+
+            return mixes[:limit]
+        except Exception:
+            logger.debug("get_mixes failed", exc_info=True)
+            return []
+
+    def get_user_playlists(self, limit: int = 20) -> list[dict]:
+        """Get the authenticated user's Tidal playlists.
+
+        Returns a list of dicts with keys: name, description, cover_url,
+        tidal_id, track_count.  Returns an empty list if not logged in
+        or on API failure.
+        """
+        try:
+            if not self.is_logged_in:
+                return []
+
+            tidal_playlists = self._session.user.playlists()
+            playlists: list[dict] = []
+            for pl in tidal_playlists:
+                if len(playlists) >= limit:
+                    break
+                cover = getattr(pl, "image", None) or getattr(
+                    pl, "picture", None
+                ) or getattr(pl, "square_image", None) or ""
+                cover_url = None
+                if cover:
+                    cover_url = (
+                        f"https://resources.tidal.com/images/"
+                        f"{cover.replace('-', '/')}/640x640.jpg"
+                    )
+                desc = getattr(pl, "description", None) or ""
+                track_count = getattr(
+                    pl, "num_tracks", None
+                ) or getattr(pl, "number_of_tracks", 0)
+                playlists.append({
+                    "name": pl.name,
+                    "description": desc,
+                    "cover_url": cover_url,
+                    "tidal_id": str(pl.id),
+                    "track_count": track_count,
+                })
+            return playlists[:limit]
+        except Exception:
+            logger.debug("get_user_playlists failed", exc_info=True)
+            return []
+
+    def get_playlist_tracks(self, playlist_id: str) -> list["Track"]:
+        """Get tracks from a Tidal playlist by its ID.
+
+        Returns a list of Track models.
+        """
+        try:
+            if not self.is_logged_in:
+                return []
+            playlist = self._session.playlist(playlist_id)
+            tidal_tracks = playlist.tracks()
+            return [self._tidal_track_to_model(t) for t in tidal_tracks]
+        except Exception:
+            logger.debug("get_playlist_tracks failed", exc_info=True)
+            return []
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 

@@ -1127,6 +1127,102 @@ button.flat:hover {
 }
 
 /* =============================================================
+   MIXES PAGE
+   ============================================================= */
+
+/* -- Header section -- */
+
+.mixes-header {
+    padding: 4px 0;
+}
+
+/* -- Login prompt card — centred with subtle card styling -- */
+
+.mixes-login-prompt {
+    background-color: #1c1b22;
+    border-radius: 16px;
+    padding: 48px 32px;
+    border: 1px solid rgba(240, 236, 228, 0.06);
+    max-width: 480px;
+}
+
+.mixes-login-prompt image {
+    color: #00c4cc;
+}
+
+/* -- Mix card — larger card with gradient overlay -- */
+
+.mix-card {
+    min-width: 200px;
+    border-radius: 12px;
+    overflow: hidden;
+    transition: all 250ms ease;
+    border: 1px solid rgba(240, 236, 228, 0.06);
+}
+
+.mix-card:hover {
+    border-color: rgba(212, 160, 57, 0.3);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* -- Mix card art area -- */
+
+.mix-card-art {
+    min-width: 200px;
+    min-height: 200px;
+    background: linear-gradient(
+        135deg,
+        rgba(212, 160, 57, 0.15) 0%,
+        rgba(28, 27, 34, 0.9) 60%,
+        #1c1b22 100%
+    );
+    border-radius: 12px 12px 0 0;
+}
+
+.mix-card-art-playlist {
+    background: linear-gradient(
+        135deg,
+        rgba(0, 196, 204, 0.12) 0%,
+        rgba(28, 27, 34, 0.9) 60%,
+        #1c1b22 100%
+    );
+}
+
+/* -- Text overlay at bottom of card -- */
+
+.mix-card-text-overlay {
+    padding: 12px;
+    background: linear-gradient(
+        to top,
+        rgba(12, 11, 15, 0.95) 0%,
+        rgba(12, 11, 15, 0.6) 60%,
+        transparent 100%
+    );
+}
+
+/* -- Mix card title — bold text over gradient -- */
+
+.mix-card-title {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: #f0ece4;
+}
+
+/* -- Mix card description — smaller text -- */
+
+.mix-card-description {
+    font-size: 0.75rem;
+    color: #a39e93;
+}
+
+/* -- Mixes section spacing -- */
+
+.mixes-section {
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+
+/* =============================================================
    QUEUE PANEL
    ============================================================= */
 
