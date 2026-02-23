@@ -31,6 +31,7 @@ class AuxenApp(Adw.Application):
         self.local_provider = None
         self.tidal_provider = None
         self.mpris = None
+        self.sleep_timer = None
 
         # Play history tracking
         self._current_track_start: float | None = None
@@ -136,6 +137,13 @@ class AuxenApp(Adw.Application):
         self.add_action(queue_action)
         self.set_accels_for_action("app.toggle-queue", ["<Control>k"])
 
+        sleep_timer_action = Gio.SimpleAction.new("sleep-timer", None)
+        sleep_timer_action.connect(
+            "activate", self._on_sleep_timer_action
+        )
+        self.add_action(sleep_timer_action)
+        self.set_accels_for_action("app.sleep-timer", ["<Control>t"])
+
         # --- CSS ---
         css_provider = Gtk.CssProvider()
         css_path = Path(__file__).resolve().parent.parent / "data" / "style.css"
@@ -206,6 +214,20 @@ class AuxenApp(Adw.Application):
         except Exception:
             logger.warning(
                 "Failed to initialize MPRIS service", exc_info=True
+            )
+
+        # --- Sleep Timer ---
+        try:
+            from auxen.sleep_timer import SleepTimer
+
+            self.sleep_timer = SleepTimer(
+                on_expire=self._on_sleep_timer_expire,
+                on_tick=self._on_sleep_timer_tick,
+                on_fade_step=self._on_sleep_timer_fade,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to initialize sleep timer", exc_info=True
             )
 
         # --- Player signal handlers ---
@@ -545,3 +567,34 @@ class AuxenApp(Adw.Application):
         win = self.props.active_window
         if win is not None:
             win.toggle_queue_panel()
+
+    def _on_sleep_timer_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        win = self.props.active_window
+        if win is not None:
+            win.open_sleep_timer()
+
+    # ------------------------------------------------------------------
+    # Sleep timer callbacks
+    # ------------------------------------------------------------------
+
+    def _on_sleep_timer_expire(self) -> None:
+        """Pause playback when the sleep timer expires."""
+        if self.player is not None:
+            self.player.pause()
+        # Update the window indicator.
+        win = self.get_active_window()
+        if win is not None:
+            win.set_sleep_timer_active(False)
+
+    def _on_sleep_timer_tick(self, remaining_seconds: int) -> None:
+        """Forward timer tick to the active window for UI updates."""
+        win = self.get_active_window()
+        if win is not None:
+            win.on_sleep_timer_tick(remaining_seconds)
+
+    def _on_sleep_timer_fade(self, volume_fraction: float) -> None:
+        """Adjust player volume during fade-out."""
+        if self.player is not None:
+            self.player.volume = volume_fraction * 0.7

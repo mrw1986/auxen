@@ -55,6 +55,7 @@ class NowPlayingBar(Gtk.Box):
         self._favorite_active = False
         self._lyrics_active = False
         self._queue_active = False
+        self._sleep_timer_active = False
 
         self.add_css_class("now-playing-bar")
 
@@ -240,6 +241,28 @@ class NowPlayingBar(Gtk.Box):
         right.set_valign(Gtk.Align.CENTER)
         right.set_halign(Gtk.Align.END)
 
+        # Sleep timer active indicator (pulsing dot)
+        self._sleep_timer_indicator = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=4,
+        )
+        self._sleep_timer_indicator.set_valign(Gtk.Align.CENTER)
+        self._sleep_timer_indicator.set_visible(False)
+
+        sleep_dot = Gtk.Box()
+        sleep_dot.add_css_class("sleep-timer-active-indicator")
+        sleep_dot.set_size_request(8, 8)
+        self._sleep_timer_indicator.append(sleep_dot)
+
+        sleep_icon = Gtk.Image.new_from_icon_name(
+            "weather-clear-night-symbolic"
+        )
+        sleep_icon.set_pixel_size(14)
+        sleep_icon.set_opacity(0.7)
+        self._sleep_timer_indicator.append(sleep_icon)
+
+        right.append(self._sleep_timer_indicator)
+
         # Quality badge
         self._quality_badge = Gtk.Label(label="")
         self._quality_badge.add_css_class("now-playing-quality-badge")
@@ -333,6 +356,11 @@ class NowPlayingBar(Gtk.Box):
             else "media-playback-start-symbolic"
         )
         self._play_btn.set_icon_name(icon)
+
+    def set_sleep_timer_active(self, active: bool) -> None:
+        """Show or hide the sleep timer indicator dot."""
+        self._sleep_timer_active = active
+        self._sleep_timer_indicator.set_visible(active)
 
     # ── Internal handlers ─────────────────────────────────
 

@@ -1577,3 +1577,67 @@ button.flat:hover {
     color: #6b6860;
     opacity: 0.3;
 }
+
+/* =============================================================
+   SLEEP TIMER DIALOG
+   ============================================================= */
+
+/* -- Dialog container -- */
+
+.sleep-timer-dialog {
+    background-color: #0c0b0f;
+}
+
+/* -- Preset buttons — pill-shaped, amber accent on hover -- */
+
+.sleep-timer-preset-btn {
+    border-radius: 9999px;
+    padding: 8px 20px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    background-color: #1c1b22;
+    color: #a39e93;
+    border: 1px solid rgba(240, 236, 228, 0.08);
+    min-height: 0;
+    transition: all 200ms ease;
+}
+
+.sleep-timer-preset-btn:hover {
+    background-color: rgba(212, 160, 57, 0.15);
+    color: #d4a039;
+    border-color: rgba(212, 160, 57, 0.3);
+}
+
+.sleep-timer-preset-btn:active {
+    background-color: rgba(212, 160, 57, 0.25);
+    color: #d4a039;
+}
+
+/* -- Countdown display — large, amber, monospaced -- */
+
+.sleep-timer-countdown {
+    font-size: 2.5rem;
+    font-weight: 800;
+    font-family: monospace;
+    color: #d4a039;
+    letter-spacing: 2px;
+}
+
+/* -- Active indicator — pulsing amber dot in now-playing bar -- */
+
+.sleep-timer-active-indicator {
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 9999px;
+    background-color: #d4a039;
+    animation: sleep-timer-pulse 2s ease-in-out infinite;
+}
+
+@keyframes sleep-timer-pulse {
+    0%, 100% {
+        opacity: 1.0;
+    }
+    50% {
+        opacity: 0.3;
+    }
+}

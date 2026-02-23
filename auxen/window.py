@@ -27,6 +27,7 @@ from auxen.views.playlist_view import PlaylistView
 from auxen.views.search import SearchView
 from auxen.views.settings import AuxenSettings
 from auxen.views.sidebar import AuxenSidebar
+from auxen.views.sleep_timer_dialog import SleepTimerDialog
 from auxen.views.stats import StatsView
 
 logger = logging.getLogger(__name__)
@@ -742,6 +743,35 @@ class AuxenWindow(Adw.ApplicationWindow):
         currently_visible = self._queue_panel.get_visible()
         self._on_queue_toggle(not currently_visible)
         self._now_playing.set_queue_active(not currently_visible)
+
+    # ------------------------------------------------------------------
+    # Sleep timer
+    # ------------------------------------------------------------------
+
+    def open_sleep_timer(self) -> None:
+        """Create and present the sleep timer dialog."""
+        if self._app_ref and self._app_ref.sleep_timer is not None:
+            dialog = SleepTimerDialog(
+                sleep_timer=self._app_ref.sleep_timer,
+                transient_for=self,
+            )
+            dialog.present()
+            self._sleep_timer_dialog = dialog
+
+    def set_sleep_timer_active(self, active: bool) -> None:
+        """Update the now-playing bar sleep timer indicator."""
+        self._now_playing.set_sleep_timer_active(active)
+
+    def on_sleep_timer_tick(self, remaining_seconds: int) -> None:
+        """Handle a sleep timer tick — update the indicator and dialog."""
+        self._now_playing.set_sleep_timer_active(remaining_seconds > 0)
+        # Update the dialog if it exists and is still open.
+        dialog = getattr(self, "_sleep_timer_dialog", None)
+        if dialog is not None:
+            try:
+                dialog.update_countdown(remaining_seconds)
+            except Exception:
+                pass
 
     def adjust_volume(self, delta: float) -> None:
         """Adjust the volume slider by *delta* (e.g. +5.0 or -5.0).
