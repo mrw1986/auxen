@@ -886,6 +886,8 @@ class AuxenWindow(Adw.ApplicationWindow):
 
     def _switch_page(self, page_name: str) -> None:
         """Switch the content stack to the requested page."""
+        if not hasattr(self, "_stack"):
+            return
         child = self._stack.get_child_by_name(page_name)
         if child:
             self._stack.set_visible_child_name(page_name)

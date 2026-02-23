@@ -574,6 +574,8 @@ class FavoritesView(Gtk.ScrolledWindow):
 
     def _refresh_list(self) -> None:
         """Rebuild the favorites list from current filter/sort state."""
+        if not hasattr(self, "_favorites_list"):
+            return
         # Clear existing rows
         while True:
             row = self._favorites_list.get_row_at_index(0)
