@@ -30,6 +30,7 @@ from auxen.views.search import SearchView
 from auxen.views.settings import AuxenSettings
 from auxen.views.sidebar import AuxenSidebar
 from auxen.views.sleep_timer_dialog import SleepTimerDialog
+from auxen.views.smart_playlist_view import SmartPlaylistView
 from auxen.views.stats import StatsView
 
 logger = logging.getLogger(__name__)
@@ -64,11 +65,14 @@ class AuxenWindow(Adw.ApplicationWindow):
 
         split_view = Adw.NavigationSplitView()
 
+        self._smart_playlist_service = None
+
         # ---- Sidebar ----
         self._sidebar = AuxenSidebar(
             on_navigate=self._switch_page,
             on_settings=self._open_settings,
             on_playlist_selected=self._on_playlist_selected,
+            on_smart_playlist_selected=self._on_smart_playlist_selected,
         )
         sidebar_page = Adw.NavigationPage.new(self._sidebar, "Sidebar")
         split_view.set_sidebar(sidebar_page)
@@ -161,6 +165,18 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._playlist_view.on_play_all = self._on_playlist_play_all
         self._playlist_view.on_back = self._on_playlist_back
         self._stack.add_named(self._playlist_view, "playlist-detail")
+
+        # ---- Smart Playlist Detail Page (programmatic navigation only) ----
+        self._smart_playlist_view = SmartPlaylistView()
+        self._smart_playlist_view.set_callbacks(
+            on_play_track=self._on_smart_playlist_play_track,
+            on_play_all=self._on_smart_playlist_play_all,
+            on_back=self._on_smart_playlist_back,
+            on_refresh=self._on_smart_playlist_refresh,
+        )
+        self._stack.add_named(
+            self._smart_playlist_view, "smart-playlist-detail"
+        )
 
         # Wire home page album click callback
         self._home_page.set_callbacks(
@@ -323,6 +339,13 @@ class AuxenWindow(Adw.ApplicationWindow):
 
         # --- Home Page -> Album Art Service ---
         self._home_page.set_album_art_service(self._album_art_service)
+
+        # --- Smart Playlists -> Service ---
+        if hasattr(app, "smart_playlist_service") and app.smart_playlist_service is not None:
+            self._smart_playlist_service = app.smart_playlist_service
+            self._sidebar.set_smart_playlist_service(
+                app.smart_playlist_service
+            )
 
         # --- Home Page initial refresh ---
         if app.db is not None:
@@ -608,6 +631,63 @@ class AuxenWindow(Adw.ApplicationWindow):
         if self._app_ref and self._app_ref.db is not None:
             self._sidebar.refresh_playlists()
         self._stack.set_visible_child_name(self._previous_page)
+
+    # ------------------------------------------------------------------
+    # Smart playlist detail navigation
+    # ------------------------------------------------------------------
+
+    def _on_smart_playlist_selected(self, smart_id: str) -> None:
+        """Handle a smart playlist selection from the sidebar."""
+        visible = self._stack.get_visible_child_name()
+        if visible and visible != "smart-playlist-detail":
+            self._previous_page = visible
+
+        if self._smart_playlist_service is not None:
+            try:
+                definition = (
+                    self._smart_playlist_service.get_definition(smart_id)
+                )
+                tracks = (
+                    self._smart_playlist_service.get_tracks(smart_id)
+                )
+                if definition is not None:
+                    self._smart_playlist_view.show_playlist(
+                        smart_id, tracks, definition
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to load smart playlist %s",
+                    smart_id,
+                    exc_info=True,
+                )
+        self._stack.set_visible_child_name("smart-playlist-detail")
+
+    def _on_smart_playlist_play_track(self, track) -> None:
+        """Play a single track from the smart playlist view."""
+        if self._app_ref and self._app_ref.player is not None:
+            tracks = self._smart_playlist_view._tracks
+            try:
+                index = tracks.index(track)
+            except ValueError:
+                index = 0
+            self._app_ref.player.play_queue(tracks, start_index=index)
+
+    def _on_smart_playlist_play_all(self, tracks) -> None:
+        """Play all tracks from the smart playlist view."""
+        if (
+            self._app_ref
+            and self._app_ref.player is not None
+            and tracks
+        ):
+            self._app_ref.player.play_queue(tracks, start_index=0)
+
+    def _on_smart_playlist_back(self) -> None:
+        """Navigate back from the smart playlist detail view."""
+        self._stack.set_visible_child_name(self._previous_page)
+
+    def _on_smart_playlist_refresh(self, smart_id: str) -> None:
+        """Re-generate the smart playlist tracks and redisplay."""
+        self._on_smart_playlist_selected(smart_id)
 
     # ------------------------------------------------------------------
     # Settings

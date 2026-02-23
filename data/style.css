@@ -1739,3 +1739,35 @@ button.flat:hover {
         opacity: 0.3;
     }
 }
+
+/* =============================================================
+   SMART PLAYLISTS
+   ============================================================= */
+
+/* -- Header section with gradient background -- */
+
+.smart-playlist-header {
+    padding: 24px;
+    border-radius: 16px;
+    background: linear-gradient(
+        135deg,
+        rgba(212, 160, 57, 0.1) 0%,
+        rgba(155, 89, 182, 0.06) 50%,
+        rgba(28, 27, 34, 0.6) 100%
+    );
+    border: 1px solid rgba(240, 236, 228, 0.06);
+}
+
+/* -- Smart playlist icon in the header -- */
+
+.smart-playlist-icon {
+    color: #d4a039;
+    opacity: 0.9;
+}
+
+/* -- Smart playlist sidebar icon -- */
+
+.smart-playlist-sidebar-icon {
+    color: #d4a039;
+    opacity: 0.7;
+}
