@@ -9,7 +9,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gtk
+from gi.repository import Adw, GLib, Gtk
 
 from auxen.album_art import AlbumArtService
 from auxen.equalizer import Equalizer
@@ -220,7 +220,12 @@ class AuxenWindow(Adw.ApplicationWindow):
         )
         content_box.append(self._now_playing)
 
-        content_page = Adw.NavigationPage.new(content_box, "Content")
+        self._toast_overlay = Adw.ToastOverlay()
+        self._toast_overlay.set_child(content_box)
+
+        content_page = Adw.NavigationPage.new(
+            self._toast_overlay, "Content"
+        )
         split_view.set_content(content_page)
 
         self.set_content(split_view)
@@ -609,7 +614,7 @@ class AuxenWindow(Adw.ApplicationWindow):
 
     def _on_explore_login(self) -> None:
         """Handle login request from the explore page."""
-        self._open_settings()
+        self._start_tidal_login()
 
     # ------------------------------------------------------------------
     # Mixes page callbacks
@@ -644,7 +649,129 @@ class AuxenWindow(Adw.ApplicationWindow):
 
     def _on_mixes_login(self) -> None:
         """Handle login request from the mixes page."""
-        self._open_settings()
+        self._start_tidal_login()
+
+    # ------------------------------------------------------------------
+    # Direct Tidal login flow
+    # ------------------------------------------------------------------
+
+    def _start_tidal_login(self) -> None:
+        """Start the Tidal OAuth login flow with a proper dialog and browser."""
+        import threading
+
+        if self._app_ref is None or self._app_ref.tidal_provider is None:
+            toast = Adw.Toast.new("Tidal provider not available")
+            toast.set_timeout(3)
+            self._show_toast(toast)
+            return
+
+        provider = self._app_ref.tidal_provider
+        if provider.is_logged_in:
+            toast = Adw.Toast.new("Already logged in to Tidal")
+            toast.set_timeout(3)
+            self._show_toast(toast)
+            return
+
+        # Build a dialog showing the login progress
+        dialog = Adw.AlertDialog()
+        dialog.set_heading("Log In to Tidal")
+        dialog.set_body(
+            "Starting Tidal authentication...\n"
+            "Your browser will open shortly."
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.set_response_appearance(
+            "cancel", Adw.ResponseAppearance.DESTRUCTIVE
+        )
+
+        cancelled = threading.Event()
+
+        def _on_dialog_response(_dialog, response):
+            if response == "cancel":
+                cancelled.set()
+
+        dialog.connect("response", _on_dialog_response)
+
+        def _url_callback(url: str) -> None:
+            """Open the browser and update the dialog with the URL."""
+            def _show_url():
+                dialog.set_body(
+                    "A browser window has been opened.\n"
+                    "Complete the login there, then return here.\n\n"
+                    f"If the browser didn't open, visit:\n{url}"
+                )
+                # Open URL in the default browser
+                launcher = Gtk.UriLauncher.new(url)
+                launcher.launch(self, None, None, None)
+                return False
+
+            GLib.idle_add(_show_url)
+
+        def _login_thread() -> None:
+            try:
+                success = provider.login(url_callback=_url_callback)
+                if cancelled.is_set():
+                    return
+
+                def _on_complete():
+                    dialog.force_close()
+                    if success:
+                        toast = Adw.Toast.new("Logged in to Tidal")
+                        toast.set_timeout(3)
+                        self._show_toast(toast)
+                        # Refresh the current view
+                        self._refresh_tidal_views()
+                    else:
+                        toast = Adw.Toast.new("Tidal login failed")
+                        toast.set_timeout(5)
+                        self._show_toast(toast)
+                    return False
+
+                GLib.idle_add(_on_complete)
+            except Exception:
+                logger.warning("Tidal login failed", exc_info=True)
+                if not cancelled.is_set():
+                    def _on_error():
+                        dialog.force_close()
+                        toast = Adw.Toast.new("Tidal login failed")
+                        toast.set_timeout(5)
+                        self._show_toast(toast)
+                        return False
+
+                    GLib.idle_add(_on_error)
+
+        thread = threading.Thread(target=_login_thread, daemon=True)
+        thread.start()
+
+        dialog.choose(self, None, None, None)
+
+    def _show_toast(self, toast: Adw.Toast) -> None:
+        """Show a toast notification via the content toast overlay."""
+        if hasattr(self, "_toast_overlay"):
+            self._toast_overlay.add_toast(toast)
+        else:
+            logger.info("Toast: %s", toast.get_title())
+
+    def _refresh_tidal_views(self) -> None:
+        """Refresh Explore, Mixes, and Favorites views after login."""
+        visible = self._stack.get_visible_child_name()
+        if visible == "explore":
+            self._explore_view.refresh()
+        elif visible == "mixes":
+            self._mixes_view.refresh()
+        elif visible == "favorites":
+            self._favorites_view.refresh()
+        else:
+            # Refresh whichever one the user navigates to next
+            # by triggering a refresh on all tidal views
+            try:
+                self._explore_view.refresh()
+            except Exception:
+                pass
+            try:
+                self._mixes_view.refresh()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Playlist detail navigation

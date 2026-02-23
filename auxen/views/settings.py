@@ -713,8 +713,14 @@ class AuxenSettings(Adw.PreferencesWindow):
         thread.start()
 
     def _show_login_url(self, url: str) -> bool:
-        """Display the Tidal login URL to the user."""
-        self._account_row.set_subtitle(f"Visit: {url}")
+        """Display the Tidal login URL and open it in the browser."""
+        self._account_row.set_subtitle(
+            f"Complete login in browser.\nURL: {url}"
+        )
+        # Open the URL in the default browser
+        parent = self.get_transient_for() or self
+        launcher = Gtk.UriLauncher.new(url)
+        launcher.launch(parent, None, None, None)
         return False
 
     def _on_login_complete(self, success: bool) -> bool:

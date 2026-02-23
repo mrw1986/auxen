@@ -40,15 +40,16 @@ scrollbar {
 }
 
 scrollbar slider {
-    min-width: 4px;
-    min-height: 4px;
+    min-width: 6px;
+    min-height: 6px;
     border-radius: 9999px;
     background-color: rgba(163, 158, 147, 0.25);
     border: none;
 }
 
 scrollbar slider:hover {
-    min-width: 6px;
+    min-width: 8px;
+    min-height: 8px;
     background-color: rgba(212, 160, 57, 0.5);
 }
 
@@ -57,7 +58,8 @@ scrollbar slider:active {
 }
 
 scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
-    min-width: 4px;
+    min-width: 6px;
+    min-height: 6px;
     background-color: rgba(163, 158, 147, 0.2);
 }
 
@@ -116,6 +118,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 
 .navigation-sidebar row:selected {
     background-color: rgba(212, 160, 57, 0.15);
+    border-left: 3px solid #d4a039;
 }
 
 .navigation-sidebar row:selected label {
@@ -124,6 +127,11 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 
 .navigation-sidebar row:selected image {
     color: #d4a039;
+}
+
+/* ── Active selection bar indicator ───────────────────── */
+.navigation-sidebar row:not(:selected) {
+    border-left: 3px solid transparent;
 }
 
 .navigation-sidebar row:hover:not(:selected) {
@@ -156,20 +164,20 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 /* ── Badges (navigation) ──────────────────────────────── */
 
 .nav-badge-local {
-    background-color: #7cb87a;
-    color: #0c0b0f;
+    background-color: rgba(124, 184, 122, 0.15);
+    color: #7cb87a;
     border-radius: 9999px;
-    padding: 1px 8px;
+    padding: 2px 8px;
     font-size: 0.65rem;
     font-weight: 700;
     letter-spacing: 0.3px;
 }
 
 .nav-badge-tidal {
-    background-color: #00c4cc;
-    color: #0c0b0f;
+    background-color: rgba(0, 196, 204, 0.15);
+    color: #00c4cc;
     border-radius: 9999px;
-    padding: 1px 8px;
+    padding: 2px 8px;
     font-size: 0.65rem;
     font-weight: 700;
     letter-spacing: 0.3px;
@@ -499,7 +507,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     min-height: 12px;
     border-radius: 9999px;
     background-color: #f0ece4;
-    margin: -4px;
+    margin: -2px 0;
 }
 
 .now-playing-progress:hover trough {
@@ -509,7 +517,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 .now-playing-progress:hover slider {
     min-width: 14px;
     min-height: 14px;
-    margin: -5px;
+    margin: -2px 0;
 }
 
 .now-playing-time {
@@ -561,7 +569,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     min-height: 10px;
     border-radius: 9999px;
     background-color: #f0ece4;
-    margin: -3px;
+    margin: -1px 0;
 }
 
 .now-playing-volume:hover trough highlight {
@@ -1628,14 +1636,14 @@ button.flat:hover {
     border-radius: 9999px;
     background-color: #d4a039;
     border: 2px solid #f0ece4;
-    margin: -5px;
+    margin: -2px 0;
 }
 
 .equalizer-band-slider:hover slider {
     background-color: #e0b04a;
     min-width: 16px;
     min-height: 16px;
-    margin: -6px;
+    margin: -2px 0;
 }
 
 /* -- Mark at 0 dB (center reference line) -- */
@@ -1945,7 +1953,7 @@ button.flat:hover {
     min-height: 10px;
     border-radius: 9999px;
     background-color: #f0ece4;
-    margin: -4px;
+    margin: -1px 0;
 }
 
 .mini-player-progress:hover trough {
@@ -1955,7 +1963,7 @@ button.flat:hover {
 .mini-player-progress:hover slider {
     min-width: 12px;
     min-height: 12px;
-    margin: -4px;
+    margin: -1px 0;
 }
 
 /* -- Time labels -- */
@@ -1965,4 +1973,106 @@ button.flat:hover {
     font-family: monospace;
     color: #6b6860;
     min-width: 30px;
+}
+
+/* =============================================================
+   CONTENT AREA POLISH
+   ============================================================= */
+
+/* ── Subtle amber glow at top of main content area ──── */
+.content-view-box {
+    background: linear-gradient(
+        180deg,
+        rgba(212, 160, 57, 0.04) 0%,
+        transparent 200px
+    );
+}
+
+/* ── Sidebar border accent — amber glow line on right ─ */
+.sidebar-container {
+    border-right: 1px solid rgba(212, 160, 57, 0.12);
+}
+
+/* ── Now-playing bar — amber glow line on top ────────── */
+.now-playing-bar {
+    border-top: 1px solid rgba(212, 160, 57, 0.2);
+}
+
+/* ── Stat card icon accent rings ────────────────────── */
+.stat-icon-amber {
+    background-color: rgba(212, 160, 57, 0.12);
+    color: #d4a039;
+    border-radius: 10px;
+    min-width: 40px;
+    min-height: 40px;
+}
+
+.stat-icon-tidal {
+    background-color: rgba(0, 196, 204, 0.12);
+    color: #00c4cc;
+    border-radius: 10px;
+    min-width: 40px;
+    min-height: 40px;
+}
+
+.stat-icon-local {
+    background-color: rgba(124, 184, 122, 0.12);
+    color: #7cb87a;
+    border-radius: 10px;
+    min-width: 40px;
+    min-height: 40px;
+}
+
+/* ── Album card hover lift effect ──────────────────── */
+.album-card:hover {
+    background-color: rgba(212, 160, 57, 0.08);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* ── Login prompt button — larger, pill-shaped ─────── */
+.explore-login-prompt button.suggested-action,
+.mixes-login-prompt button.suggested-action {
+    padding: 10px 28px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    border-radius: 9999px;
+    background-color: #d4a039;
+    color: #0c0b0f;
+    transition: all 200ms ease;
+}
+
+.explore-login-prompt button.suggested-action:hover,
+.mixes-login-prompt button.suggested-action:hover {
+    background-color: #e0b04a;
+}
+
+/* ── Tidal login prompt icon — tidal blue ──────────── */
+.explore-login-prompt .title-1,
+.mixes-login-prompt .title-1 {
+    font-weight: 700;
+    letter-spacing: -0.3px;
+}
+
+/* ── Switch — amber when active ────────────────────── */
+switch:checked {
+    background-color: rgba(212, 160, 57, 0.5);
+}
+
+switch:checked slider {
+    background-color: #d4a039;
+}
+
+/* ── Popover menus — dark theme ────────────────────── */
+popover contents {
+    background-color: #1c1b22;
+    border: 1px solid rgba(240, 236, 228, 0.08);
+    border-radius: 12px;
+}
+
+/* ── Tooltip styling ───────────────────────────────── */
+tooltip {
+    background-color: #25242d;
+    color: #f0ece4;
+    border: 1px solid rgba(240, 236, 228, 0.1);
+    border-radius: 8px;
 }

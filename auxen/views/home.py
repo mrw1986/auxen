@@ -251,6 +251,7 @@ class HomePage(Gtk.ScrolledWindow):
             orientation=Gtk.Orientation.VERTICAL,
             spacing=24,
         )
+        root.add_css_class("content-view-box")
         root.set_margin_top(24)
         root.set_margin_bottom(24)
         root.set_margin_start(32)
@@ -460,26 +461,50 @@ class HomePage(Gtk.ScrolledWindow):
     ) -> tuple[Gtk.Box, Gtk.Label]:
         """Build a stat card widget and return (card, value_label)."""
         card = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=8,
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=14,
         )
         card.add_css_class("stat-card")
         card.set_margin_top(4)
         card.set_margin_bottom(4)
 
+        # Icon in a tinted background box
+        icon_box = Gtk.Box(
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER,
+        )
         icon = Gtk.Image.new_from_icon_name(icon_name)
-        icon.set_pixel_size(24)
-        if accent_class:
-            icon.add_css_class(accent_class)
-        card.append(icon)
+        icon.set_pixel_size(20)
+        icon_box.append(icon)
+
+        # Apply icon background class based on accent
+        if accent_class == "stat-accent-tidal":
+            icon_box.add_css_class("stat-icon-tidal")
+        elif accent_class == "stat-accent-local":
+            icon_box.add_css_class("stat-icon-local")
+        else:
+            icon_box.add_css_class("stat-icon-amber")
+
+        card.append(icon_box)
+
+        # Value + label text column
+        text_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=2,
+        )
+        text_box.set_valign(Gtk.Align.CENTER)
 
         value_label = Gtk.Label(label=value)
+        value_label.set_xalign(0)
         value_label.add_css_class("stat-card-value")
-        card.append(value_label)
+        text_box.append(value_label)
 
         text_label = Gtk.Label(label=label)
+        text_label.set_xalign(0)
         text_label.add_css_class("stat-card-label")
-        card.append(text_label)
+        text_box.append(text_label)
+
+        card.append(text_box)
 
         return card, value_label
 
