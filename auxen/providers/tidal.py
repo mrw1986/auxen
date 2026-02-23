@@ -73,10 +73,15 @@ class TidalProvider(ContentProvider):
 
         *url_callback* receives the full verification URL if provided;
         otherwise the URL is printed to stdout.  Returns True on success.
+
+        A local reference to the session is held throughout the flow so
+        that a concurrent ``logout()`` (which replaces ``self._session``)
+        cannot corrupt the in-progress login.
         """
         try:
             with self._session_lock:
-                login, future = self._session.login_oauth()
+                session = self._session
+                login, future = session.login_oauth()
             url = login.verification_uri_complete
 
             if url_callback is not None:
@@ -85,6 +90,17 @@ class TidalProvider(ContentProvider):
                 print(f"Visit https://{url} to log in to Tidal")
 
             future.result()
+
+            # Re-check that our session is still the active one.  If
+            # logout() replaced it while we were waiting, discard the
+            # login result — the user explicitly logged out.
+            with self._session_lock:
+                if self._session is not session:
+                    logger.info(
+                        "Tidal login completed but session was replaced "
+                        "by a concurrent logout — discarding."
+                    )
+                    return False
             self._save_session()
             return True
         except Exception:

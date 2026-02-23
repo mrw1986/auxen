@@ -386,6 +386,8 @@ class Player(GObject.Object):
 
     def stop(self) -> None:
         """Stop playback entirely."""
+        self._play_generation += 1
+        self._uri_cache.clear()
         if self._crossfade is not None:
             self._crossfade.cancel()
         self._pipeline.set_state(Gst.State.NULL)
@@ -437,6 +439,7 @@ class Player(GObject.Object):
         self, tracks: list[Track], start_index: int = 0
     ) -> None:
         """Replace the queue and start playing from *start_index*."""
+        self._uri_cache.clear()
         self.queue.replace(tracks)
         if tracks and 0 <= start_index < len(tracks):
             self.queue.jump_to(start_index)
@@ -450,6 +453,8 @@ class Player(GObject.Object):
 
     def dispose(self) -> None:
         """Release GStreamer resources."""
+        self._play_generation += 1
+        self._uri_cache.clear()
         if self._crossfade is not None:
             self._crossfade.cancel()
         self._stop_position_polling()
@@ -471,14 +476,17 @@ class Player(GObject.Object):
         Called from a background thread after ``play_track`` starts
         playback.  The cached URI is consumed by ``_on_about_to_finish``
         so the GStreamer streaming thread never blocks on a network call.
-        """
-        next_index = self.queue.position + 1
-        tracks = self.queue.tracks
 
-        if next_index < len(tracks):
-            next_track = tracks[next_index]
-        elif self.queue.repeat_mode.value == "queue" and tracks:
-            next_track = tracks[0]
+        Uses an atomic queue snapshot to avoid race conditions with the
+        main thread.
+        """
+        snap = self.queue.snapshot()
+        next_index = snap.position + 1
+
+        if next_index < len(snap.tracks):
+            next_track = snap.tracks[next_index]
+        elif snap.repeat_mode.value == "queue" and snap.tracks:
+            next_track = snap.tracks[0]
         else:
             return
 
@@ -590,13 +598,13 @@ class Player(GObject.Object):
         If crossfade is enabled, a fade-out is started on the current
         track's audio.
         """
-        next_index = self.queue.position + 1
-        tracks = self.queue.tracks
+        snap = self.queue.snapshot()
+        next_index = snap.position + 1
 
-        if next_index < len(tracks):
-            next_track = tracks[next_index]
-        elif self.queue.repeat_mode.value == "queue" and tracks:
-            next_track = tracks[0]
+        if next_index < len(snap.tracks):
+            next_track = snap.tracks[next_index]
+        elif snap.repeat_mode.value == "queue" and snap.tracks:
+            next_track = snap.tracks[0]
         else:
             return
 
