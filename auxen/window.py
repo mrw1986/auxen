@@ -27,6 +27,7 @@ from auxen.views.playlist_view import PlaylistView
 from auxen.views.search import SearchView
 from auxen.views.settings import AuxenSettings
 from auxen.views.sidebar import AuxenSidebar
+from auxen.views.stats import StatsView
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ _PAGES: list[tuple[str, str]] = [
     ("explore", "Explore"),
     ("mixes", "Mixes"),
     ("favorites", "Favorites"),
+    ("stats", "Stats"),
 ]
 
 
@@ -107,6 +109,11 @@ class AuxenWindow(Adw.ApplicationWindow):
             if name == "favorites":
                 self._favorites_view = FavoritesView()
                 self._stack.add_named(self._favorites_view, name)
+                continue
+
+            if name == "stats":
+                self._stats_view = StatsView()
+                self._stack.add_named(self._stats_view, name)
                 continue
 
             placeholder = Gtk.Box(
@@ -292,6 +299,10 @@ class AuxenWindow(Adw.ApplicationWindow):
         # --- Sidebar -> Database (playlists) ---
         if app.db is not None:
             self._sidebar.set_database(app.db)
+
+        # --- Stats View -> Database ---
+        if app.db is not None:
+            self._stats_view.set_database(app.db)
 
         # --- Home Page initial refresh ---
         if app.db is not None:
@@ -695,6 +706,15 @@ class AuxenWindow(Adw.ApplicationWindow):
             except Exception:
                 logger.warning(
                     "Failed to refresh mixes page", exc_info=True
+                )
+
+        # Refresh stats page when switching to it
+        if page_name == "stats" and self._app_ref and self._app_ref.db:
+            try:
+                self._stats_view.refresh()
+            except Exception:
+                logger.warning(
+                    "Failed to refresh stats page", exc_info=True
                 )
 
     # ------------------------------------------------------------------

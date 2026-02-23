@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 
 import gi
 
@@ -30,6 +31,10 @@ class AuxenApp(Adw.Application):
         self.local_provider = None
         self.tidal_provider = None
         self.mpris = None
+
+        # Play history tracking
+        self._current_track_start: float | None = None
+        self._previous_track_id: int | None = None
 
     # ------------------------------------------------------------------
     # Startup
@@ -357,12 +362,37 @@ class AuxenApp(Adw.Application):
                     "Failed to update MPRIS metadata", exc_info=True
                 )
 
-        # Record play in database
+        # Record play history for the *previous* track
+        if (
+            self.db is not None
+            and self._previous_track_id is not None
+            and self._current_track_start is not None
+        ):
+            try:
+                duration_listened = time.monotonic() - self._current_track_start
+                self.db.record_play_history(
+                    self._previous_track_id,
+                    duration_listened=duration_listened,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to record play history", exc_info=True
+                )
+
+        # Record play in database (updates play_count / last_played_at)
         if self.db is not None and track is not None and track.id is not None:
             try:
                 self.db.record_play(track.id)
             except Exception:
                 logger.warning("Failed to record play", exc_info=True)
+
+        # Track the new track for play history duration calculation
+        if track is not None and track.id is not None:
+            self._previous_track_id = track.id
+            self._current_track_start = time.monotonic()
+        else:
+            self._previous_track_id = None
+            self._current_track_start = None
 
     def _on_state_changed(self, _player, state) -> None:
         """Update MPRIS playback status when the player state changes."""

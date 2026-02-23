@@ -1518,3 +1518,62 @@ button.flat:hover {
 .equalizer-enable-switch:checked {
     background-color: rgba(212, 160, 57, 0.4);
 }
+
+/* =============================================================
+   STATS PAGE
+   ============================================================= */
+
+/* -- Header section -- */
+
+.stats-header {
+    padding: 4px 0;
+}
+
+.stats-header-icon {
+    color: #d4a039;
+}
+
+/* -- Stat cards (reuses stat-card-value/stat-card-label from home) -- */
+
+.stats-card {
+    background-color: #1c1b22;
+    border-radius: 16px;
+    padding: 20px;
+    border: 1px solid rgba(240, 236, 228, 0.06);
+    transition: all 250ms ease;
+}
+
+.stats-card:hover {
+    border-color: rgba(240, 236, 228, 0.1);
+}
+
+/* -- Amber accent for stats icons -- */
+
+.stats-accent-amber {
+    color: #d4a039;
+}
+
+/* -- Horizontal bar for top artists/tracks -- */
+
+.stats-bar trough {
+    min-height: 6px;
+    border-radius: 3px;
+    background-color: rgba(240, 236, 228, 0.06);
+}
+
+.stats-bar trough progress {
+    background-color: #d4a039;
+    border-radius: 3px;
+}
+
+/* -- Empty state -- */
+
+.stats-empty-state {
+    color: #6b6860;
+    padding: 48px 16px;
+}
+
+.stats-empty-state image {
+    color: #6b6860;
+    opacity: 0.3;
+}

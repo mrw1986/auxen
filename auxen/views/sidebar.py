@@ -22,6 +22,7 @@ _BROWSE_ITEMS: list[tuple[str, str, str, str | None, str | None]] = [
     ("home", "go-home-symbolic", "Home", None, None),
     ("search", "system-search-symbolic", "Search", None, None),
     ("library", "folder-music-symbolic", "Library", "Local", "nav-badge-local"),
+    ("stats", "utilities-system-monitor-symbolic", "Stats", None, None),
 ]
 
 _TIDAL_ITEMS: list[tuple[str, str, str, str | None, str | None]] = [

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -69,12 +70,23 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT
 );
 
+CREATE TABLE IF NOT EXISTS play_history (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id            INTEGER NOT NULL REFERENCES tracks(id),
+    played_at           TEXT    NOT NULL,
+    duration_listened   REAL
+);
+
 CREATE INDEX IF NOT EXISTS idx_tracks_source
     ON tracks(source);
 CREATE INDEX IF NOT EXISTS idx_tracks_match_group
     ON tracks(match_group_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_title_artist
     ON tracks(title, artist);
+CREATE INDEX IF NOT EXISTS idx_play_history_track_id
+    ON play_history(track_id);
+CREATE INDEX IF NOT EXISTS idx_play_history_played_at
+    ON play_history(played_at);
 """
 
 
@@ -629,6 +641,167 @@ class Database:
             cur = self._conn.execute("SELECT COUNT(*) AS cnt FROM tracks")
         row = cur.fetchone()
         return row["cnt"] if row else 0
+
+    # ------------------------------------------------------------------
+    # Play history
+    # ------------------------------------------------------------------
+
+    def record_play_history(
+        self, track_id: int, duration_listened: float | None = None
+    ) -> int:
+        """Insert a play history record. Returns the new row id."""
+        played_at = datetime.now(UTC).isoformat()
+        cur = self._conn.execute(
+            """
+            INSERT INTO play_history (track_id, played_at, duration_listened)
+            VALUES (?, ?, ?)
+            """,
+            (track_id, played_at, duration_listened),
+        )
+        self._conn.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+    def get_play_history(self, limit: int = 50) -> list[dict]:
+        """Return play history entries in reverse chronological order.
+
+        Each dict contains: id, track_id, played_at, duration_listened,
+        title, artist, album.
+        """
+        cur = self._conn.execute(
+            """
+            SELECT ph.id, ph.track_id, ph.played_at, ph.duration_listened,
+                   t.title, t.artist, t.album
+            FROM play_history ph
+            JOIN tracks t ON t.id = ph.track_id
+            ORDER BY ph.played_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return [
+            {
+                "id": row["id"],
+                "track_id": row["track_id"],
+                "played_at": row["played_at"],
+                "duration_listened": row["duration_listened"],
+                "title": row["title"],
+                "artist": row["artist"],
+                "album": row["album"],
+            }
+            for row in cur.fetchall()
+        ]
+
+    def get_listening_stats(self) -> dict:
+        """Return aggregate listening statistics.
+
+        Returns a dict with:
+            total_tracks_played, total_listen_time_hours,
+            top_artists (list of (artist, play_count) top 10),
+            top_tracks (list of (title, artist, play_count) top 10),
+            most_active_hour (0-23 or None),
+            avg_tracks_per_day (over last 30 days).
+        """
+        # Total tracks played
+        cur = self._conn.execute(
+            "SELECT COUNT(*) AS cnt FROM play_history"
+        )
+        total_tracks_played = cur.fetchone()["cnt"]
+
+        # Total listen time in hours
+        cur = self._conn.execute(
+            "SELECT COALESCE(SUM(duration_listened), 0) AS total "
+            "FROM play_history"
+        )
+        total_seconds = cur.fetchone()["total"]
+        total_listen_time_hours = round(total_seconds / 3600, 1)
+
+        # Top artists (top 10 by play count)
+        cur = self._conn.execute(
+            """
+            SELECT t.artist, COUNT(*) AS play_count
+            FROM play_history ph
+            JOIN tracks t ON t.id = ph.track_id
+            GROUP BY t.artist
+            ORDER BY play_count DESC
+            LIMIT 10
+            """
+        )
+        top_artists = [
+            (row["artist"], row["play_count"]) for row in cur.fetchall()
+        ]
+
+        # Top tracks (top 10 by play count)
+        cur = self._conn.execute(
+            """
+            SELECT t.title, t.artist, COUNT(*) AS play_count
+            FROM play_history ph
+            JOIN tracks t ON t.id = ph.track_id
+            GROUP BY ph.track_id
+            ORDER BY play_count DESC
+            LIMIT 10
+            """
+        )
+        top_tracks = [
+            (row["title"], row["artist"], row["play_count"])
+            for row in cur.fetchall()
+        ]
+
+        # Most active hour (0-23)
+        cur = self._conn.execute(
+            """
+            SELECT CAST(strftime('%H', played_at) AS INTEGER) AS hour,
+                   COUNT(*) AS cnt
+            FROM play_history
+            GROUP BY hour
+            ORDER BY cnt DESC
+            LIMIT 1
+            """
+        )
+        row = cur.fetchone()
+        most_active_hour = row["hour"] if row else None
+
+        # Average tracks per day over last 30 days
+        thirty_days_ago = (
+            datetime.now(UTC) - timedelta(days=30)
+        ).isoformat()
+        cur = self._conn.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM play_history
+            WHERE played_at >= ?
+            """,
+            (thirty_days_ago,),
+        )
+        recent_count = cur.fetchone()["cnt"]
+        avg_tracks_per_day = round(recent_count / 30, 1)
+
+        return {
+            "total_tracks_played": total_tracks_played,
+            "total_listen_time_hours": total_listen_time_hours,
+            "top_artists": top_artists,
+            "top_tracks": top_tracks,
+            "most_active_hour": most_active_hour,
+            "avg_tracks_per_day": avg_tracks_per_day,
+        }
+
+    def get_recently_played_history(self, limit: int = 20) -> list[Track]:
+        """Return most recently played tracks, deduplicated.
+
+        Returns at most *limit* unique Track objects, ordered by the most
+        recent play of each unique track.
+        """
+        cur = self._conn.execute(
+            """
+            SELECT t.*, MAX(ph.played_at) AS latest_play
+            FROM play_history ph
+            JOIN tracks t ON t.id = ph.track_id
+            GROUP BY ph.track_id
+            ORDER BY latest_play DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return [self._row_to_track(r) for r in cur.fetchall()]
 
     # ------------------------------------------------------------------
     # Internal
