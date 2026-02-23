@@ -130,15 +130,26 @@ class Database:
     # ------------------------------------------------------------------
 
     class _BatchContext:
-        """Context manager that defers commits until the block exits."""
+        """Context manager that defers commits until the block exits.
+
+        Nesting is not supported — attempting to enter a batch while
+        already inside one raises RuntimeError.
+        """
 
         def __init__(self, db: "Database") -> None:
             self._db = db
 
         def __enter__(self) -> "Database":
             self._db._lock.acquire()
-            self._db._in_batch = True
-            self._db._conn.execute("BEGIN")
+            try:
+                if self._db._in_batch:
+                    raise RuntimeError("Nested batch() is not supported")
+                self._db._in_batch = True
+                self._db._conn.execute("BEGIN")
+            except BaseException:
+                self._db._in_batch = False
+                self._db._lock.release()
+                raise
             return self._db
 
         def __exit__(self, exc_type, exc_val, exc_tb) -> None:

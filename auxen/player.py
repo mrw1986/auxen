@@ -10,7 +10,7 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, GObject, Gst  # noqa: E402
 
-from auxen.models import Track  # noqa: E402
+from auxen.models import Source, Track  # noqa: E402
 from auxen.queue import PlayQueue  # noqa: E402
 
 if False:  # TYPE_CHECKING
@@ -90,6 +90,8 @@ class Player(GObject.Object):
         self._position_poll_id: Optional[int] = None
         self._crossfade: Optional["CrossfadeService"] = None
         self._target_volume: float = 0.7
+        self._play_generation: int = 0  # guards against stale resolvers
+        self._uri_cache: dict[str, str] = {}  # source_id -> stream URI
 
         # --- ReplayGain + Equalizer + Spectrum audio chain (optional) ---
         self._rgvolume_element: Optional[Gst.Element] = None
@@ -317,15 +319,27 @@ class Player(GObject.Object):
 
         URI resolution (which may involve a Tidal network call) is done
         in a background thread so the GTK main thread is never blocked.
+        A generation counter prevents stale resolvers from overwriting
+        a newer play request.  After starting playback, the next track's
+        URI is prefetched into ``_uri_cache`` for gapless transitions.
         """
         import threading
+
+        self._play_generation += 1
+        gen = self._play_generation
 
         def _resolve_and_play() -> None:
             uri = self._resolve_uri(track)
             if uri is None:
                 return
+            # Cache this track's URI
+            if track.source_id:
+                self._uri_cache[track.source_id] = uri
 
-            def _start_playback(_uri=uri, _track=track):
+            def _start_playback(_uri=uri, _track=track, _gen=gen):
+                # Discard if a newer play_track() was called while resolving
+                if _gen != self._play_generation:
+                    return False
                 self._pipeline.set_state(Gst.State.NULL)
                 self._pipeline.set_property("uri", _uri)
                 self._pipeline.set_state(Gst.State.PLAYING)
@@ -339,6 +353,9 @@ class Player(GObject.Object):
                 return False  # Don't repeat
 
             GLib.idle_add(_start_playback)
+
+            # Prefetch the next track's URI for gapless playback
+            self._prefetch_next_uri()
 
         threading.Thread(target=_resolve_and_play, daemon=True).start()
 
@@ -448,6 +465,34 @@ class Player(GObject.Object):
             return None
         return self._uri_resolver(track)
 
+    def _prefetch_next_uri(self) -> None:
+        """Resolve the next track's URI and store it in ``_uri_cache``.
+
+        Called from a background thread after ``play_track`` starts
+        playback.  The cached URI is consumed by ``_on_about_to_finish``
+        so the GStreamer streaming thread never blocks on a network call.
+        """
+        next_index = self.queue.position + 1
+        tracks = self.queue.tracks
+
+        if next_index < len(tracks):
+            next_track = tracks[next_index]
+        elif self.queue.repeat_mode.value == "queue" and tracks:
+            next_track = tracks[0]
+        else:
+            return
+
+        if not next_track.source_id:
+            return
+
+        # Already cached — nothing to do
+        if next_track.source_id in self._uri_cache:
+            return
+
+        uri = self._resolve_uri(next_track)
+        if uri is not None:
+            self._uri_cache[next_track.source_id] = uri
+
     def _set_state(self, new_state: str) -> None:
         """Update internal state and emit signal."""
         if self._state != new_state:
@@ -531,9 +576,16 @@ class Player(GObject.Object):
     def _on_about_to_finish(self, _pipeline: Gst.Element) -> None:
         """Pre-set the next URI for gapless playback.
 
-        This callback fires shortly before the current stream ends.  We
-        peek at the next track *without* advancing the queue position
-        (the actual advance happens in the EOS handler).
+        This callback fires from the GStreamer streaming thread shortly
+        before the current stream ends.  We peek at the next track
+        *without* advancing the queue position (the actual advance
+        happens in the EOS handler).
+
+        The URI is looked up in ``_uri_cache`` (populated by
+        ``_prefetch_next_uri``) so no network I/O occurs on this thread.
+        If the cache misses (e.g. the user skipped rapidly), gapless
+        playback is skipped and the EOS handler falls back to normal
+        track advancement.
 
         If crossfade is enabled, a fade-out is started on the current
         track's audio.
@@ -548,7 +600,16 @@ class Player(GObject.Object):
         else:
             return
 
-        uri = self._resolve_uri(next_track)
+        # Look up the prefetched URI — never resolve synchronously here
+        uri: Optional[str] = None
+        if next_track.source_id:
+            uri = self._uri_cache.pop(next_track.source_id, None)
+
+        # For local tracks the resolver just builds a file:// URI (no
+        # network I/O), so it is safe to call synchronously as a fallback.
+        if uri is None and next_track.source == Source.LOCAL:
+            uri = self._resolve_uri(next_track)
+
         if uri is not None:
             self._pipeline.set_property("uri", uri)
 

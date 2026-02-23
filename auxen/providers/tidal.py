@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -23,6 +24,7 @@ class TidalProvider(ContentProvider):
 
     def __init__(self) -> None:
         self._session = tidalapi.Session()
+        self._session_lock = threading.Lock()
         SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -32,7 +34,8 @@ class TidalProvider(ContentProvider):
     @property
     def is_logged_in(self) -> bool:
         """Return True when the session is authenticated."""
-        return self._session.check_login()
+        with self._session_lock:
+            return self._session.check_login()
 
     # ------------------------------------------------------------------
     # Auth
@@ -49,12 +52,13 @@ class TidalProvider(ContentProvider):
 
         try:
             data = json.loads(SESSION_FILE.read_text())
-            self._session.load_oauth_session(
-                token_type=data["token_type"],
-                access_token=data["access_token"],
-                refresh_token=data["refresh_token"],
-                expiry_time=data["expiry_time"],
-            )
+            with self._session_lock:
+                self._session.load_oauth_session(
+                    token_type=data["token_type"],
+                    access_token=data["access_token"],
+                    refresh_token=data["refresh_token"],
+                    expiry_time=data["expiry_time"],
+                )
             return True
         except Exception:
             logger.warning("Corrupt Tidal session file — removing it.", exc_info=True)
@@ -71,7 +75,8 @@ class TidalProvider(ContentProvider):
         otherwise the URL is printed to stdout.  Returns True on success.
         """
         try:
-            login, future = self._session.login_oauth()
+            with self._session_lock:
+                login, future = self._session.login_oauth()
             url = login.verification_uri_complete
 
             if url_callback is not None:
@@ -93,7 +98,8 @@ class TidalProvider(ContentProvider):
         except OSError:
             pass
         # Create a fresh session so is_logged_in returns False immediately.
-        self._session = tidalapi.Session()
+        with self._session_lock:
+            self._session = tidalapi.Session()
 
     # ------------------------------------------------------------------
     # Content provider interface
@@ -101,14 +107,16 @@ class TidalProvider(ContentProvider):
 
     def search(self, query: str, limit: int = 20) -> list[Track]:
         """Search Tidal for tracks matching *query*."""
-        results = self._session.search(query, models=[tidalapi.Track], limit=limit)
+        with self._session_lock:
+            results = self._session.search(query, models=[tidalapi.Track], limit=limit)
         tidal_tracks = results.get("tracks", [])
         return [self._tidal_track_to_model(t) for t in tidal_tracks]
 
     def get_stream_uri(self, track: Track) -> str:
         """Resolve a playable stream URL for a Tidal track."""
-        tidal_track = self._session.track(int(track.source_id))
-        return tidal_track.get_url()
+        with self._session_lock:
+            tidal_track = self._session.track(int(track.source_id))
+            return tidal_track.get_url()
 
     # ------------------------------------------------------------------
     # Favorites
@@ -116,21 +124,25 @@ class TidalProvider(ContentProvider):
 
     def get_favorites(self) -> list[Track]:
         """Return the user's favourite Tidal tracks."""
-        tidal_tracks = self._session.user.favorites.tracks()
+        with self._session_lock:
+            tidal_tracks = self._session.user.favorites.tracks()
         return [self._tidal_track_to_model(t) for t in tidal_tracks]
 
     def add_favorite(self, track_id: str) -> None:
         """Add a track to the user's Tidal favourites."""
-        self._session.user.favorites.add_track(int(track_id))
+        with self._session_lock:
+            self._session.user.favorites.add_track(int(track_id))
 
     def remove_favorite(self, track_id: str) -> None:
         """Remove a track from the user's Tidal favourites."""
-        self._session.user.favorites.remove_track(int(track_id))
+        with self._session_lock:
+            self._session.user.favorites.remove_track(int(track_id))
 
     def is_favorite(self, track_id: str) -> bool:
         """Check whether a track is in the user's Tidal favourites."""
         try:
-            fav_tracks = self._session.user.favorites.tracks()
+            with self._session_lock:
+                fav_tracks = self._session.user.favorites.tracks()
             return any(str(t.id) == track_id for t in fav_tracks)
         except Exception:
             logger.warning("Failed to check Tidal favorite status", exc_info=True)
@@ -149,7 +161,8 @@ class TidalProvider(ContentProvider):
         try:
             if not self.is_logged_in:
                 return []
-            explore_page = self._session.explore()
+            with self._session_lock:
+                explore_page = self._session.explore()
             albums: list[dict] = []
             for category in explore_page:
                 items = getattr(category, "items", None)
@@ -188,7 +201,8 @@ class TidalProvider(ContentProvider):
             if not self.is_logged_in:
                 return []
             # Try the explore page first for new-release categories
-            explore_page = self._session.explore()
+            with self._session_lock:
+                explore_page = self._session.explore()
             albums: list[dict] = []
             for category in explore_page:
                 cat_title = getattr(category, "title", "") or ""
@@ -219,9 +233,10 @@ class TidalProvider(ContentProvider):
                 return albums[:limit]
 
             # Fallback: search for new releases
-            results = self._session.search(
-                "new releases", models=[tidalapi.Album], limit=limit
-            )
+            with self._session_lock:
+                results = self._session.search(
+                    "new releases", models=[tidalapi.Album], limit=limit
+                )
             for item in results.get("albums", []):
                 cover = getattr(item, "cover", None) or ""
                 cover_url = None
@@ -254,7 +269,8 @@ class TidalProvider(ContentProvider):
             if not self.is_logged_in:
                 return []
             # Try explore page for track-based categories
-            explore_page = self._session.explore()
+            with self._session_lock:
+                explore_page = self._session.explore()
             tracks: list[Track] = []
             for category in explore_page:
                 items = getattr(category, "items", None)
@@ -267,9 +283,10 @@ class TidalProvider(ContentProvider):
                 return tracks[:limit]
 
             # Fallback: search for popular tracks
-            results = self._session.search(
-                "top hits", models=[tidalapi.Track], limit=limit
-            )
+            with self._session_lock:
+                results = self._session.search(
+                    "top hits", models=[tidalapi.Track], limit=limit
+                )
             for t in results.get("tracks", []):
                 tracks.append(self._tidal_track_to_model(t))
             return tracks[:limit]
@@ -285,7 +302,8 @@ class TidalProvider(ContentProvider):
         try:
             if not self.is_logged_in:
                 return []
-            genres_page = self._session.genres()
+            with self._session_lock:
+                genres_page = self._session.genres()
             genre_names: list[str] = []
             for category in genres_page:
                 cat_title = getattr(category, "title", None)
@@ -328,7 +346,8 @@ class TidalProvider(ContentProvider):
 
             # Attempt 1: Look for Mix items on the explore/home page
             try:
-                explore_page = self._session.explore()
+                with self._session_lock:
+                    explore_page = self._session.explore()
                 for category in explore_page:
                     cat_title = getattr(category, "title", "") or ""
                     items = getattr(category, "items", None)
@@ -401,7 +420,8 @@ class TidalProvider(ContentProvider):
             if not self.is_logged_in:
                 return []
 
-            tidal_playlists = self._session.user.playlists()
+            with self._session_lock:
+                tidal_playlists = self._session.user.playlists()
             playlists: list[dict] = []
             for pl in tidal_playlists:
                 if len(playlists) >= limit:
@@ -439,8 +459,9 @@ class TidalProvider(ContentProvider):
         try:
             if not self.is_logged_in:
                 return []
-            playlist = self._session.playlist(playlist_id)
-            tidal_tracks = playlist.tracks()
+            with self._session_lock:
+                playlist = self._session.playlist(playlist_id)
+                tidal_tracks = playlist.tracks()
             return [self._tidal_track_to_model(t) for t in tidal_tracks]
         except Exception:
             logger.debug("get_playlist_tracks failed", exc_info=True)
@@ -452,12 +473,13 @@ class TidalProvider(ContentProvider):
 
     def _save_session(self) -> None:
         """Persist the current OAuth tokens to disk with restricted permissions."""
-        data = {
-            "token_type": self._session.token_type,
-            "access_token": self._session.access_token,
-            "refresh_token": self._session.refresh_token,
-            "expiry_time": self._session.expiry_time,
-        }
+        with self._session_lock:
+            data = {
+                "token_type": self._session.token_type,
+                "access_token": self._session.access_token,
+                "refresh_token": self._session.refresh_token,
+                "expiry_time": self._session.expiry_time,
+            }
         content = json.dumps(data)
         # Write with 0o600 to prevent other users from reading tokens.
         # fchmod ensures permissions are corrected even if the file
