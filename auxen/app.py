@@ -238,6 +238,26 @@ class AuxenApp(Adw.Application):
                 "position-updated", self._on_position_updated
             )
 
+        # --- Apply stored ReplayGain settings ---
+        if self.player is not None and self.db is not None:
+            try:
+                rg_enabled_raw = self.db.get_setting(
+                    "replaygain_enabled", "1"
+                )
+                rg_enabled = rg_enabled_raw != "0"
+                self.player.set_replaygain_enabled(rg_enabled)
+
+                rg_mode = self.db.get_setting(
+                    "replaygain_mode", "album"
+                )
+                if rg_mode in ("album", "track"):
+                    self.player.set_replaygain_mode(rg_mode)
+            except Exception:
+                logger.warning(
+                    "Failed to apply stored ReplayGain settings",
+                    exc_info=True,
+                )
+
     # ------------------------------------------------------------------
     # Activate
     # ------------------------------------------------------------------

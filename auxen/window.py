@@ -596,6 +596,7 @@ class AuxenWindow(Adw.ApplicationWindow):
                 db=self._app_ref.db,
                 tidal_provider=self._app_ref.tidal_provider,
                 local_provider=self._app_ref.local_provider,
+                player=self._app_ref.player,
             )
         settings.present()
 

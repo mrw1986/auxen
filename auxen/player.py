@@ -78,22 +78,57 @@ class Player(GObject.Object):
         self._uri_resolver: Optional[Callable[[Track], str]] = None
         self._position_poll_id: Optional[int] = None
 
-        # --- Equalizer element (optional) ---
+        # --- ReplayGain + Equalizer audio chain (optional) ---
+        self._rgvolume_element: Optional[Gst.Element] = None
+        self._rglimiter_element: Optional[Gst.Element] = None
         self._equalizer_element: Optional[Gst.Element] = None
+        self._replaygain_enabled: bool = True
+        self._replaygain_mode: str = "album"
         try:
+            rgvolume = Gst.ElementFactory.make("rgvolume", "rgvolume")
+            rglimiter = Gst.ElementFactory.make("rglimiter", "rglimiter")
             eq = Gst.ElementFactory.make("equalizer-10bands", "eq")
             audio_sink = Gst.ElementFactory.make(
                 "autoaudiosink", "audio-out"
             )
+
             if eq is not None and audio_sink is not None:
                 audio_bin = Gst.Bin.new("audio-bin")
-                audio_bin.add(eq)
-                audio_bin.add(audio_sink)
-                eq.link(audio_sink)
-                # Ghost pad so playbin3 can connect to our bin
-                pad = eq.get_static_pad("sink")
-                ghost = Gst.GhostPad.new("sink", pad)
-                audio_bin.add_pad(ghost)
+
+                if rgvolume is not None and rglimiter is not None:
+                    # Full chain: rgvolume -> rglimiter -> eq -> sink
+                    audio_bin.add(rgvolume)
+                    audio_bin.add(rglimiter)
+                    audio_bin.add(eq)
+                    audio_bin.add(audio_sink)
+                    rgvolume.link(rglimiter)
+                    rglimiter.link(eq)
+                    eq.link(audio_sink)
+                    # Ghost pad from rgvolume (head of chain)
+                    pad = rgvolume.get_static_pad("sink")
+                    ghost = Gst.GhostPad.new("sink", pad)
+                    audio_bin.add_pad(ghost)
+                    self._rgvolume_element = rgvolume
+                    self._rglimiter_element = rglimiter
+                    # Apply default ReplayGain settings
+                    rgvolume.set_property("album-mode", True)
+                    rgvolume.set_property("pre-amp", 0.0)
+                    logger.info(
+                        "GStreamer rgvolume + rglimiter elements loaded"
+                    )
+                else:
+                    # Fallback: eq -> sink (no ReplayGain)
+                    audio_bin.add(eq)
+                    audio_bin.add(audio_sink)
+                    eq.link(audio_sink)
+                    pad = eq.get_static_pad("sink")
+                    ghost = Gst.GhostPad.new("sink", pad)
+                    audio_bin.add_pad(ghost)
+                    logger.warning(
+                        "rgvolume or rglimiter not available; "
+                        "ReplayGain disabled"
+                    )
+
                 self._pipeline.set_property("audio-sink", audio_bin)
                 self._equalizer_element = eq
                 logger.info("GStreamer equalizer-10bands element loaded")
@@ -104,7 +139,8 @@ class Player(GObject.Object):
                 )
         except Exception:
             logger.warning(
-                "Failed to set up equalizer element; continuing without it",
+                "Failed to set up audio processing chain; "
+                "continuing without it",
                 exc_info=True,
             )
 
@@ -143,6 +179,51 @@ class Player(GObject.Object):
     def get_equalizer_element(self) -> Optional[Gst.Element]:
         """Return the GStreamer equalizer element, or ``None``."""
         return self._equalizer_element
+
+    # ------------------------------------------------------------------
+    # ReplayGain
+    # ------------------------------------------------------------------
+
+    @property
+    def replaygain_enabled(self) -> bool:
+        """Whether ReplayGain normalization is currently enabled."""
+        return self._replaygain_enabled
+
+    def set_replaygain_enabled(self, enabled: bool) -> None:
+        """Enable or disable ReplayGain volume normalization.
+
+        When enabled, the ``rgvolume`` element applies its normal gain
+        adjustment (pre-amp = 0 dB).  When disabled, the pre-amp is set
+        to ``-60 dB`` which effectively mutes the ReplayGain correction
+        while keeping the element in the pipeline.
+        """
+        self._replaygain_enabled = enabled
+        if self._rgvolume_element is not None:
+            self._rgvolume_element.set_property(
+                "pre-amp", 0.0 if enabled else -60.0
+            )
+
+    def set_replaygain_mode(self, mode: str) -> None:
+        """Set the ReplayGain mode to ``"album"`` or ``"track"``.
+
+        Maps to the ``album-mode`` property of the ``rgvolume`` element:
+        ``True`` for album mode, ``False`` for track mode.
+        """
+        if mode not in ("album", "track"):
+            raise ValueError(
+                f"Invalid ReplayGain mode {mode!r}; "
+                "expected 'album' or 'track'"
+            )
+        self._replaygain_mode = mode
+        if self._rgvolume_element is not None:
+            self._rgvolume_element.set_property(
+                "album-mode", mode == "album"
+            )
+
+    @property
+    def replaygain_mode(self) -> str:
+        """Current ReplayGain mode (``'album'`` or ``'track'``)."""
+        return self._replaygain_mode
 
     # ------------------------------------------------------------------
     # Properties

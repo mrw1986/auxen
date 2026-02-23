@@ -32,6 +32,7 @@ class AuxenSettings(Adw.PreferencesWindow):
         self._db = None
         self._tidal_provider = None
         self._local_provider = None
+        self._player = None
 
         self.set_default_size(600, 700)
 
@@ -48,7 +49,9 @@ class AuxenSettings(Adw.PreferencesWindow):
 
     # ---- Public API ----
 
-    def set_services(self, db=None, tidal_provider=None, local_provider=None) -> None:
+    def set_services(
+        self, db=None, tidal_provider=None, local_provider=None, player=None
+    ) -> None:
         """Wire backend services to the settings dialog.
 
         Parameters
@@ -59,10 +62,13 @@ class AuxenSettings(Adw.PreferencesWindow):
             TidalProvider instance for Tidal auth.
         local_provider:
             LocalProvider instance for rescanning.
+        player:
+            Player instance for applying playback settings.
         """
         self._db = db
         self._tidal_provider = tidal_provider
         self._local_provider = local_provider
+        self._player = player
 
         # Load current settings from database
         self._load_settings()
@@ -148,8 +154,21 @@ class AuxenSettings(Adw.PreferencesWindow):
 
         # ReplayGain
         self._replaygain = Adw.SwitchRow(title="ReplayGain Normalization")
-        self._replaygain.set_active(False)
+        self._replaygain.set_active(True)
+        self._replaygain.connect(
+            "notify::active", self._on_replaygain_toggled
+        )
         group.add(self._replaygain)
+
+        # ReplayGain mode
+        self._replaygain_mode = Adw.ComboRow(title="ReplayGain Mode")
+        mode_model = Gtk.StringList.new(["Album", "Track"])
+        self._replaygain_mode.set_model(mode_model)
+        self._replaygain_mode.set_selected(0)
+        self._replaygain_mode.connect(
+            "notify::selected", self._on_replaygain_mode_changed
+        )
+        group.add(self._replaygain_mode)
 
         # Equalizer
         eq_row = Adw.ActionRow(
@@ -264,6 +283,28 @@ class AuxenSettings(Adw.PreferencesWindow):
         except Exception:
             logger.warning("Failed to load tidal_quality", exc_info=True)
 
+        try:
+            # Load ReplayGain enabled
+            rg_enabled = self._db.get_setting("replaygain_enabled")
+            if rg_enabled is not None:
+                self._replaygain.set_active(rg_enabled == "1")
+        except Exception:
+            logger.warning(
+                "Failed to load replaygain_enabled", exc_info=True
+            )
+
+        try:
+            # Load ReplayGain mode
+            rg_mode = self._db.get_setting("replaygain_mode")
+            if rg_mode is not None:
+                mode_map = {"album": 0, "track": 1}
+                idx = mode_map.get(rg_mode, 0)
+                self._replaygain_mode.set_selected(idx)
+        except Exception:
+            logger.warning(
+                "Failed to load replaygain_mode", exc_info=True
+            )
+
         # Check Tidal login status
         if self._tidal_provider is not None:
             try:
@@ -360,6 +401,47 @@ class AuxenSettings(Adw.PreferencesWindow):
         """Re-enable the rescan button on the main thread."""
         self._rescan_btn.set_sensitive(True)
         return False
+
+    def _on_replaygain_toggled(self, row: Adw.SwitchRow, _pspec) -> None:
+        """Persist and apply ReplayGain enabled/disabled."""
+        enabled = row.get_active()
+        if self._db is not None:
+            try:
+                self._db.set_setting(
+                    "replaygain_enabled", "1" if enabled else "0"
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to save replaygain_enabled", exc_info=True
+                )
+        if self._player is not None:
+            try:
+                self._player.set_replaygain_enabled(enabled)
+            except Exception:
+                logger.warning(
+                    "Failed to apply replaygain_enabled", exc_info=True
+                )
+
+    def _on_replaygain_mode_changed(
+        self, row: Adw.ComboRow, _pspec
+    ) -> None:
+        """Persist and apply ReplayGain mode change."""
+        idx = row.get_selected()
+        mode = "album" if idx == 0 else "track"
+        if self._db is not None:
+            try:
+                self._db.set_setting("replaygain_mode", mode)
+            except Exception:
+                logger.warning(
+                    "Failed to save replaygain_mode", exc_info=True
+                )
+        if self._player is not None:
+            try:
+                self._player.set_replaygain_mode(mode)
+            except Exception:
+                logger.warning(
+                    "Failed to apply replaygain_mode", exc_info=True
+                )
 
     def _on_open_equalizer(self, _button: Gtk.Button) -> None:
         """Open the equalizer dialog via the parent window."""
