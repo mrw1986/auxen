@@ -279,9 +279,11 @@ class AuxenWindow(Adw.ApplicationWindow):
                 tidal_provider=app.tidal_provider,
             )
 
-        # --- Favorites View -> Database ---
+        # --- Favorites View -> Database + Tidal ---
         if app.db is not None:
             self._favorites_view.set_database(app.db)
+        if app.tidal_provider is not None:
+            self._favorites_view.set_tidal_provider(app.tidal_provider)
 
         # --- Library View -> Database + callbacks ---
         if app.db is not None:
@@ -598,6 +600,7 @@ class AuxenWindow(Adw.ApplicationWindow):
                 local_provider=self._app_ref.local_provider,
                 player=self._app_ref.player,
                 notification_service=self._app_ref.notification_service,
+                favorites_sync=self._app_ref.favorites_sync,
             )
         settings.present()
 
@@ -932,12 +935,36 @@ class AuxenWindow(Adw.ApplicationWindow):
                 )
 
     def _on_context_toggle_favorite(self, track) -> None:
-        """Toggle the favorite state of a track."""
+        """Toggle the favorite state of a track.
+
+        Also updates Tidal favourites when the track is a Tidal track
+        and the Tidal provider is available.
+        """
         if self._app_ref and self._app_ref.db is not None:
             try:
                 if track.id is not None:
                     is_fav = self._app_ref.db.is_favorite(track.id)
                     self._app_ref.db.set_favorite(track.id, not is_fav)
+
+                    # Sync the toggle to Tidal if applicable
+                    if (
+                        getattr(track, "is_tidal", False)
+                        and self._app_ref.tidal_provider is not None
+                    ):
+                        try:
+                            if is_fav:
+                                self._app_ref.tidal_provider.remove_favorite(
+                                    track.source_id
+                                )
+                            else:
+                                self._app_ref.tidal_provider.add_favorite(
+                                    track.source_id
+                                )
+                        except Exception:
+                            logger.warning(
+                                "Failed to sync favorite toggle to Tidal",
+                                exc_info=True,
+                            )
             except Exception:
                 logger.warning(
                     "Failed to toggle favorite from context menu",

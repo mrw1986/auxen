@@ -33,6 +33,7 @@ class AuxenApp(Adw.Application):
         self.mpris = None
         self.sleep_timer = None
         self.notification_service = None
+        self.favorites_sync = None
 
         # Play history tracking
         self._current_track_start: float | None = None
@@ -145,6 +146,14 @@ class AuxenApp(Adw.Application):
         self.add_action(sleep_timer_action)
         self.set_accels_for_action("app.sleep-timer", ["<Control>t"])
 
+        sync_favorites_action = Gio.SimpleAction.new(
+            "sync-tidal-favorites", None
+        )
+        sync_favorites_action.connect(
+            "activate", self._on_sync_favorites_action
+        )
+        self.add_action(sync_favorites_action)
+
         # --- CSS ---
         css_provider = Gtk.CssProvider()
         css_path = Path(__file__).resolve().parent.parent / "data" / "style.css"
@@ -199,6 +208,21 @@ class AuxenApp(Adw.Application):
             logger.warning(
                 "Failed to initialize Tidal provider", exc_info=True
             )
+
+        # --- Favorites Sync Service ---
+        if self.db is not None and self.tidal_provider is not None:
+            try:
+                from auxen.favorites_sync import FavoritesSyncService
+
+                self.favorites_sync = FavoritesSyncService(
+                    db=self.db,
+                    tidal_provider=self.tidal_provider,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to initialize favorites sync service",
+                    exc_info=True,
+                )
 
         # --- URI resolver ---
         if self.player is not None:
@@ -288,6 +312,9 @@ class AuxenApp(Adw.Application):
         # Trigger initial library scan in the background
         GLib.idle_add(self._initial_scan)
 
+        # Trigger Tidal favorites sync in the background
+        GLib.idle_add(self._initial_favorites_sync)
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -367,6 +394,44 @@ class AuxenApp(Adw.Application):
             except Exception:
                 logger.warning("Failed to refresh home page", exc_info=True)
         return False  # Don't repeat
+
+    def _initial_favorites_sync(self) -> bool:
+        """Trigger a Tidal favorites sync in the background on startup."""
+        if self.favorites_sync is None:
+            return False
+
+        def _on_sync_result(result) -> None:
+            logger.info(
+                "Tidal favorites sync: added_local=%d, added_tidal=%d, "
+                "already_synced=%d",
+                result.added_local,
+                result.added_tidal,
+                result.already_synced,
+            )
+            if result.errors:
+                for err in result.errors:
+                    logger.warning("Favorites sync error: %s", err)
+
+        self.favorites_sync.sync_async(_on_sync_result)
+        return False  # Don't repeat
+
+    def _on_sync_favorites_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        """Handle the manual sync-tidal-favorites action."""
+        if self.favorites_sync is None:
+            return
+
+        def _on_result(result) -> None:
+            logger.info(
+                "Manual Tidal favorites sync: added_local=%d, "
+                "added_tidal=%d, already_synced=%d",
+                result.added_local,
+                result.added_tidal,
+                result.already_synced,
+            )
+
+        self.favorites_sync.sync_async(_on_result)
 
     # ------------------------------------------------------------------
     # MPRIS wiring

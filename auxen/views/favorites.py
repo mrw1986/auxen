@@ -246,6 +246,7 @@ class FavoritesView(Gtk.ScrolledWindow):
         self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         self._db = None
+        self._tidal_provider = None
         self._all_favorites: list[dict[str, str | int]] = list(
             _SAMPLE_FAVORITES
         )
@@ -404,6 +405,10 @@ class FavoritesView(Gtk.ScrolledWindow):
         self._load_from_db()
         self._refresh_list()
 
+    def set_tidal_provider(self, tidal_provider) -> None:
+        """Wire the Tidal provider for syncing favorites on toggle."""
+        self._tidal_provider = tidal_provider
+
     def refresh(self) -> None:
         """Reload favorites from the database and refresh the display."""
         if self._db is not None:
@@ -503,10 +508,32 @@ class FavoritesView(Gtk.ScrolledWindow):
             logger.warning("Failed to load favorites from database", exc_info=True)
 
     def _on_unfavorite(self, track_id: int) -> None:
-        """Remove a track from favorites via the database."""
+        """Remove a track from favorites via the database.
+
+        If the track is a Tidal track and the Tidal provider is
+        available, also remove it from Tidal favourites.
+        """
         if self._db is not None:
             try:
+                # Check if this is a Tidal track before removing
+                track_obj = self._track_objects.get(track_id)
                 self._db.set_favorite(track_id, False)
+
+                # Also remove from Tidal if applicable
+                if (
+                    track_obj is not None
+                    and self._tidal_provider is not None
+                    and getattr(track_obj, "is_tidal", False)
+                ):
+                    try:
+                        self._tidal_provider.remove_favorite(
+                            track_obj.source_id
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to remove Tidal favorite", exc_info=True
+                        )
+
                 self._load_from_db()
                 self._refresh_list()
             except Exception:

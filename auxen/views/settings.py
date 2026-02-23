@@ -34,6 +34,7 @@ class AuxenSettings(Adw.PreferencesWindow):
         self._local_provider = None
         self._player = None
         self._notification_service = None
+        self._favorites_sync = None
 
         self.set_default_size(600, 700)
 
@@ -57,6 +58,7 @@ class AuxenSettings(Adw.PreferencesWindow):
         local_provider=None,
         player=None,
         notification_service=None,
+        favorites_sync=None,
     ) -> None:
         """Wire backend services to the settings dialog.
 
@@ -72,12 +74,15 @@ class AuxenSettings(Adw.PreferencesWindow):
             Player instance for applying playback settings.
         notification_service:
             NotificationService for toggling desktop notifications.
+        favorites_sync:
+            FavoritesSyncService for syncing Tidal favourites.
         """
         self._db = db
         self._tidal_provider = tidal_provider
         self._local_provider = local_provider
         self._player = player
         self._notification_service = notification_service
+        self._favorites_sync = favorites_sync
 
         # Load current settings from database
         self._load_settings()
@@ -233,6 +238,21 @@ class AuxenSettings(Adw.PreferencesWindow):
             subtitle="\u2014",
         )
         group.add(self._subscription_row)
+
+        # Sync Tidal Favorites button
+        sync_row = Adw.ActionRow(
+            title="Sync Tidal Favorites",
+            subtitle="Two-way sync between local and Tidal favorites",
+        )
+        self._sync_btn = Gtk.Button(
+            icon_name="emblem-synchronizing-symbolic",
+            valign=Gtk.Align.CENTER,
+        )
+        self._sync_btn.add_css_class("flat")
+        self._sync_btn.connect("clicked", self._on_sync_favorites)
+        sync_row.add_suffix(self._sync_btn)
+        sync_row.set_activatable_widget(self._sync_btn)
+        group.add(sync_row)
 
         return group
 
@@ -546,3 +566,26 @@ class AuxenSettings(Adw.PreferencesWindow):
         else:
             self._account_row.set_subtitle("Login failed")
         return False
+
+    def _on_sync_favorites(self, _button: Gtk.Button) -> None:
+        """Trigger a two-way Tidal favorites sync."""
+        if self._favorites_sync is None:
+            return
+
+        self._sync_btn.set_sensitive(False)
+
+        def _on_result(result) -> None:
+            self._sync_btn.set_sensitive(True)
+            parts = []
+            if result.added_local:
+                parts.append(f"{result.added_local} added locally")
+            if result.added_tidal:
+                parts.append(f"{result.added_tidal} added to Tidal")
+            if result.already_synced:
+                parts.append(f"{result.already_synced} already synced")
+            if result.errors:
+                parts.append(f"{len(result.errors)} error(s)")
+            summary = ", ".join(parts) if parts else "Nothing to sync"
+            logger.info("Favorites sync result: %s", summary)
+
+        self._favorites_sync.sync_async(_on_result)
