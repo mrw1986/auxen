@@ -13,6 +13,7 @@ gi.require_version("Adw", "1")
 from gi.repository import GLib, Gtk, Pango
 
 from auxen.models import Source
+from auxen.views.context_menu import TrackContextMenu
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +273,8 @@ def _make_track_row(track) -> Gtk.ListBoxRow:
     row = Gtk.ListBoxRow()
     row.set_child(row_box)
     row.set_activatable(True)
+    # Store track reference for context menu
+    row._track_data = track  # type: ignore[attr-defined]
     return row
 
 
@@ -297,6 +300,10 @@ class LibraryView(Gtk.Box):
             Callable[[str, str], None]
         ] = None
         self._on_play_track: Optional[Callable] = None
+
+        # Context menu callbacks
+        self._context_callbacks: Optional[dict] = None
+        self._get_playlists: Optional[Callable] = None
 
         # Track data caches
         self._all_tracks: list = []
@@ -572,6 +579,71 @@ class LibraryView(Gtk.Box):
         self._on_album_clicked = on_album_clicked
         self._on_play_track = on_play_track
 
+    def set_context_callbacks(
+        self,
+        callbacks: dict,
+        get_playlists: Callable,
+    ) -> None:
+        """Set callback functions for the right-click context menu."""
+        self._context_callbacks = callbacks
+        self._get_playlists = get_playlists
+
+    # ------------------------------------------------------------------
+    # Context menu helpers
+    # ------------------------------------------------------------------
+
+    def _attach_context_gesture(
+        self, row: Gtk.ListBoxRow, track
+    ) -> None:
+        """Attach a right-click gesture to a track row."""
+        if self._context_callbacks is None or track is None:
+            return
+
+        gesture = Gtk.GestureClick(button=3)
+
+        def _on_right_click(_gesture, _n_press, x, y, trk=track):
+            self._show_track_context_menu(row, x, y, trk)
+
+        gesture.connect("pressed", _on_right_click)
+        row.add_controller(gesture)
+
+    def _show_track_context_menu(
+        self, widget: Gtk.Widget, x: float, y: float, track
+    ) -> None:
+        """Create and display a context menu for a track."""
+        if self._context_callbacks is None:
+            return
+
+        playlists = []
+        if self._get_playlists is not None:
+            playlists = self._get_playlists()
+
+        callbacks = {
+            "on_play": lambda t=track: self._context_callbacks["on_play"](t),
+            "on_play_next": lambda t=track: self._context_callbacks["on_play_next"](t),
+            "on_add_to_queue": lambda t=track: self._context_callbacks["on_add_to_queue"](t),
+            "on_add_to_playlist": lambda pid, t=track: self._context_callbacks["on_add_to_playlist"](t, pid),
+            "on_new_playlist": lambda t=track: self._context_callbacks["on_new_playlist"](t),
+            "on_toggle_favorite": lambda t=track: self._context_callbacks["on_toggle_favorite"](t),
+            "on_go_to_album": lambda t=track: self._context_callbacks["on_go_to_album"](t),
+        }
+
+        track_data = {
+            "id": getattr(track, "id", None),
+            "title": getattr(track, "title", ""),
+            "artist": getattr(track, "artist", ""),
+            "album": getattr(track, "album", ""),
+            "source": getattr(track, "source", None),
+            "is_favorite": False,
+        }
+
+        menu = TrackContextMenu(
+            track_data=track_data,
+            callbacks=callbacks,
+            playlists=playlists,
+        )
+        menu.show(widget, x, y)
+
     # ------------------------------------------------------------------
     # View mode switching
     # ------------------------------------------------------------------
@@ -828,7 +900,9 @@ class LibraryView(Gtk.Box):
             return
 
         for track in sorted_tracks:
-            self._track_list.append(_make_track_row(track))
+            row = _make_track_row(track)
+            self._attach_context_gesture(row, track)
+            self._track_list.append(row)
 
         self._content_stack.set_visible_child_name("tracks")
 
@@ -882,7 +956,9 @@ class LibraryView(Gtk.Box):
                 self._content_stack.set_visible_child_name("empty")
                 return
             for track in filtered:
-                self._track_list.append(_make_track_row(track))
+                row = _make_track_row(track)
+                self._attach_context_gesture(row, track)
+                self._track_list.append(row)
             self._content_stack.set_visible_child_name("tracks")
 
     def _on_track_row_activated(

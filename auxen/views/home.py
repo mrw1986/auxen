@@ -13,6 +13,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gtk, Pango
 
+from auxen.views.context_menu import TrackContextMenu
+
 logger = logging.getLogger(__name__)
 
 # Placeholder album data: (title, artist, source)
@@ -132,7 +134,8 @@ def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
 
 
 def _make_recently_played_row(
-    title: str, artist: str, duration: str, source: str
+    title: str, artist: str, duration: str, source: str,
+    track=None,
 ) -> Gtk.ListBoxRow:
     """Build a row for the 'Recently Played' list."""
     row_box = Gtk.Box(
@@ -205,6 +208,8 @@ def _make_recently_played_row(
 
     row = Gtk.ListBoxRow()
     row.set_child(row_box)
+    # Store track reference for context menu
+    row._track_data = track  # type: ignore[attr-defined]
     return row
 
 
@@ -222,6 +227,10 @@ class HomePage(Gtk.ScrolledWindow):
         self._on_album_clicked: Optional[
             Callable[[str, str], None]
         ] = None
+
+        # Context menu callbacks
+        self._context_callbacks: Optional[dict] = None
+        self._get_playlists: Optional[Callable] = None
 
         # Root container
         root = Gtk.Box(
@@ -375,14 +384,15 @@ class HomePage(Gtk.ScrolledWindow):
             if recently_played:
                 self._clear_list_box(self._recent_list)
                 for track in recently_played:
-                    self._recent_list.append(
-                        _make_recently_played_row(
-                            title=track.title,
-                            artist=track.artist,
-                            duration=_format_duration(track.duration),
-                            source=track.source.value,
-                        )
+                    row = _make_recently_played_row(
+                        title=track.title,
+                        artist=track.artist,
+                        duration=_format_duration(track.duration),
+                        source=track.source.value,
+                        track=track,
                     )
+                    self._attach_context_gesture(row, track)
+                    self._recent_list.append(row)
         except Exception:
             logger.warning("Failed to refresh home page", exc_info=True)
 
@@ -460,6 +470,23 @@ class HomePage(Gtk.ScrolledWindow):
         """
         self._on_album_clicked = on_album_clicked
 
+    def set_context_callbacks(
+        self,
+        callbacks: dict,
+        get_playlists: Callable,
+    ) -> None:
+        """Set callback functions for the right-click context menu.
+
+        Parameters
+        ----------
+        callbacks:
+            Dict of context menu action callbacks (on_play, etc.).
+        get_playlists:
+            Callable returning current list of user playlists.
+        """
+        self._context_callbacks = callbacks
+        self._get_playlists = get_playlists
+
     def _on_album_card_activated(
         self,
         _flow_box: Gtk.FlowBox,
@@ -474,6 +501,60 @@ class HomePage(Gtk.ScrolledWindow):
             and self._on_album_clicked is not None
         ):
             self._on_album_clicked(album_title, album_artist)
+
+    def _attach_context_gesture(self, row: Gtk.ListBoxRow, track) -> None:
+        """Attach a right-click gesture to a row for the context menu."""
+        if self._context_callbacks is None or track is None:
+            return
+
+        gesture = Gtk.GestureClick(button=3)
+
+        def _on_right_click(_gesture, _n_press, x, y, trk=track):
+            self._show_track_context_menu(row, x, y, trk)
+
+        gesture.connect("pressed", _on_right_click)
+        row.add_controller(gesture)
+
+    def _show_track_context_menu(
+        self, widget: Gtk.Widget, x: float, y: float, track
+    ) -> None:
+        """Create and display a context menu for a track."""
+        if self._context_callbacks is None:
+            return
+
+        from auxen.views.context_menu import TrackContextMenu
+
+        is_favorite = False
+        playlists = []
+        if self._get_playlists is not None:
+            playlists = self._get_playlists()
+
+        # Build track-specific callbacks that capture the track reference
+        callbacks = {
+            "on_play": lambda t=track: self._context_callbacks["on_play"](t),
+            "on_play_next": lambda t=track: self._context_callbacks["on_play_next"](t),
+            "on_add_to_queue": lambda t=track: self._context_callbacks["on_add_to_queue"](t),
+            "on_add_to_playlist": lambda pid, t=track: self._context_callbacks["on_add_to_playlist"](t, pid),
+            "on_new_playlist": lambda t=track: self._context_callbacks["on_new_playlist"](t),
+            "on_toggle_favorite": lambda t=track: self._context_callbacks["on_toggle_favorite"](t),
+            "on_go_to_album": lambda t=track: self._context_callbacks["on_go_to_album"](t),
+        }
+
+        track_data = {
+            "id": getattr(track, "id", None),
+            "title": getattr(track, "title", ""),
+            "artist": getattr(track, "artist", ""),
+            "album": getattr(track, "album", ""),
+            "source": getattr(track, "source", None),
+            "is_favorite": is_favorite,
+        }
+
+        menu = TrackContextMenu(
+            track_data=track_data,
+            callbacks=callbacks,
+            playlists=playlists,
+        )
+        menu.show(widget, x, y)
 
     def _on_filter_toggled(self, toggled_btn: Gtk.ToggleButton) -> None:
         """Enforce radio-button behavior: only one filter active at a time."""

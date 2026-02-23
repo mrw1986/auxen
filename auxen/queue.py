@@ -88,6 +88,18 @@ class PlayQueue:
 
         return True
 
+    def insert_after_current(self, track: Track) -> None:
+        """Insert *track* immediately after the current position.
+
+        If the queue is empty, the track becomes the only item and
+        position stays at 0.
+        """
+        if not self._tracks:
+            self._tracks.append(track)
+            return
+        insert_pos = self._position + 1
+        self._tracks.insert(insert_pos, track)
+
     def clear(self) -> None:
         """Remove all tracks and reset position."""
         self._tracks.clear()

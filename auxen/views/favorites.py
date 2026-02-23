@@ -11,6 +11,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import GLib, Gtk, Pango
 
+from auxen.views.context_menu import TrackContextMenu
+
 logger = logging.getLogger(__name__)
 
 # Placeholder favorite tracks: (title, artist, album, source, quality, duration, date_added_sort_key)
@@ -113,6 +115,7 @@ def _format_duration(seconds: float | None) -> str:
 def _make_favorite_row(
     track: dict[str, str | int],
     on_unfavorite=None,
+    track_obj=None,
 ) -> Gtk.ListBoxRow:
     """Build a single row for the favorites list."""
     row_box = Gtk.Box(
@@ -227,6 +230,8 @@ def _make_favorite_row(
 
     row = Gtk.ListBoxRow()
     row.set_child(row_box)
+    # Store track object reference for context menu
+    row._track_obj = track_obj  # type: ignore[attr-defined]
     return row
 
 
@@ -246,6 +251,12 @@ class FavoritesView(Gtk.ScrolledWindow):
         )
         self._active_filter: str = "All"
         self._active_sort: str = "Date Added"
+
+        # Context menu callbacks
+        self._context_callbacks: dict | None = None
+        self._get_playlists = None
+        # Track objects keyed by track_id for context menu use
+        self._track_objects: dict[int, object] = {}
 
         # Root container
         root = Gtk.Box(
@@ -399,6 +410,69 @@ class FavoritesView(Gtk.ScrolledWindow):
             self._load_from_db()
         self._refresh_list()
 
+    def set_context_callbacks(
+        self,
+        callbacks: dict,
+        get_playlists,
+    ) -> None:
+        """Set callback functions for the right-click context menu."""
+        self._context_callbacks = callbacks
+        self._get_playlists = get_playlists
+
+    # ---- Context menu helpers ----
+
+    def _attach_context_gesture(
+        self, row: Gtk.ListBoxRow, track
+    ) -> None:
+        """Attach a right-click gesture to a favorites row."""
+        if self._context_callbacks is None or track is None:
+            return
+
+        gesture = Gtk.GestureClick(button=3)
+
+        def _on_right_click(_gesture, _n_press, x, y, trk=track):
+            self._show_track_context_menu(row, x, y, trk)
+
+        gesture.connect("pressed", _on_right_click)
+        row.add_controller(gesture)
+
+    def _show_track_context_menu(
+        self, widget: Gtk.Widget, x: float, y: float, track
+    ) -> None:
+        """Create and display a context menu for a track."""
+        if self._context_callbacks is None:
+            return
+
+        playlists = []
+        if self._get_playlists is not None:
+            playlists = self._get_playlists()
+
+        callbacks = {
+            "on_play": lambda t=track: self._context_callbacks["on_play"](t),
+            "on_play_next": lambda t=track: self._context_callbacks["on_play_next"](t),
+            "on_add_to_queue": lambda t=track: self._context_callbacks["on_add_to_queue"](t),
+            "on_add_to_playlist": lambda pid, t=track: self._context_callbacks["on_add_to_playlist"](t, pid),
+            "on_new_playlist": lambda t=track: self._context_callbacks["on_new_playlist"](t),
+            "on_toggle_favorite": lambda t=track: self._context_callbacks["on_toggle_favorite"](t),
+            "on_go_to_album": lambda t=track: self._context_callbacks["on_go_to_album"](t),
+        }
+
+        track_data = {
+            "id": getattr(track, "id", None),
+            "title": getattr(track, "title", ""),
+            "artist": getattr(track, "artist", ""),
+            "album": getattr(track, "album", ""),
+            "source": getattr(track, "source", None),
+            "is_favorite": True,  # We're in the favorites view
+        }
+
+        menu = TrackContextMenu(
+            track_data=track_data,
+            callbacks=callbacks,
+            playlists=playlists,
+        )
+        menu.show(widget, x, y)
+
     # ---- Internal helpers ----
 
     def _load_from_db(self) -> None:
@@ -410,6 +484,7 @@ class FavoritesView(Gtk.ScrolledWindow):
             tracks = self._db.get_favorites()
             if tracks:
                 self._all_favorites = []
+                self._track_objects = {}
                 for track in tracks:
                     self._all_favorites.append({
                         "title": track.title,
@@ -421,6 +496,8 @@ class FavoritesView(Gtk.ScrolledWindow):
                         "date_added": track.added_at or "",
                         "track_id": track.id,
                     })
+                    if track.id is not None:
+                        self._track_objects[track.id] = track
             # If tracks is empty, keep existing placeholder data
         except Exception:
             logger.warning("Failed to load favorites from database", exc_info=True)
@@ -483,9 +560,13 @@ class FavoritesView(Gtk.ScrolledWindow):
         unfavorite_cb = self._on_unfavorite if self._db is not None else None
 
         for track in sorted_tracks:
-            self._favorites_list.append(
-                _make_favorite_row(track, on_unfavorite=unfavorite_cb)
+            track_id = track.get("track_id")
+            track_obj = self._track_objects.get(track_id) if track_id else None
+            row = _make_favorite_row(
+                track, on_unfavorite=unfavorite_cb, track_obj=track_obj
             )
+            self._attach_context_gesture(row, track_obj)
+            self._favorites_list.append(row)
 
         self._content_stack.set_visible_child_name("list")
 

@@ -12,6 +12,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import GLib, Gtk, Pango
 
+from auxen.views.context_menu import TrackContextMenu
+
 logger = logging.getLogger(__name__)
 
 # Placeholder data pools for generating fake search results.
@@ -65,6 +67,7 @@ def _make_result_row(
     album: str,
     source: str,
     duration: str,
+    track=None,
 ) -> Gtk.ListBoxRow:
     """Build a single search result row."""
     row_box = Gtk.Box(
@@ -150,6 +153,8 @@ def _make_result_row(
 
     row = Gtk.ListBoxRow()
     row.set_child(row_box)
+    # Store track reference for context menu
+    row._track_data = track  # type: ignore[attr-defined]
     return row
 
 
@@ -170,6 +175,10 @@ class SearchView(Gtk.Box):
         self._debounce_id: int | None = None
         self._db = None
         self._tidal_provider = None
+
+        # Context menu callbacks
+        self._context_callbacks: dict | None = None
+        self._get_playlists: object = None
 
         # ---- Search entry ----
         entry_box = Gtk.Box(
@@ -257,6 +266,69 @@ class SearchView(Gtk.Box):
         self._db = db
         self._tidal_provider = tidal_provider
 
+    def set_context_callbacks(
+        self,
+        callbacks: dict,
+        get_playlists,
+    ) -> None:
+        """Set callback functions for the right-click context menu."""
+        self._context_callbacks = callbacks
+        self._get_playlists = get_playlists
+
+    # ---- Context menu helpers ----
+
+    def _attach_context_gesture(
+        self, row: Gtk.ListBoxRow, track
+    ) -> None:
+        """Attach a right-click gesture to a search result row."""
+        if self._context_callbacks is None or track is None:
+            return
+
+        gesture = Gtk.GestureClick(button=3)
+
+        def _on_right_click(_gesture, _n_press, x, y, trk=track):
+            self._show_track_context_menu(row, x, y, trk)
+
+        gesture.connect("pressed", _on_right_click)
+        row.add_controller(gesture)
+
+    def _show_track_context_menu(
+        self, widget: Gtk.Widget, x: float, y: float, track
+    ) -> None:
+        """Create and display a context menu for a track."""
+        if self._context_callbacks is None:
+            return
+
+        playlists = []
+        if self._get_playlists is not None:
+            playlists = self._get_playlists()
+
+        callbacks = {
+            "on_play": lambda t=track: self._context_callbacks["on_play"](t),
+            "on_play_next": lambda t=track: self._context_callbacks["on_play_next"](t),
+            "on_add_to_queue": lambda t=track: self._context_callbacks["on_add_to_queue"](t),
+            "on_add_to_playlist": lambda pid, t=track: self._context_callbacks["on_add_to_playlist"](t, pid),
+            "on_new_playlist": lambda t=track: self._context_callbacks["on_new_playlist"](t),
+            "on_toggle_favorite": lambda t=track: self._context_callbacks["on_toggle_favorite"](t),
+            "on_go_to_album": lambda t=track: self._context_callbacks["on_go_to_album"](t),
+        }
+
+        track_data = {
+            "id": getattr(track, "id", None),
+            "title": getattr(track, "title", ""),
+            "artist": getattr(track, "artist", ""),
+            "album": getattr(track, "album", ""),
+            "source": getattr(track, "source", None),
+            "is_favorite": False,
+        }
+
+        menu = TrackContextMenu(
+            track_data=track_data,
+            callbacks=callbacks,
+            playlists=playlists,
+        )
+        menu.show(widget, x, y)
+
     # ---- Empty state builder ----
 
     @staticmethod
@@ -337,13 +409,16 @@ class SearchView(Gtk.Box):
             return
 
         for result in results:
+            track = result.get("_track")
             row = _make_result_row(
                 title=result["title"],
                 artist=result["artist"],
                 album=result["album"],
                 source=result["source"],
                 duration=result["duration"],
+                track=track,
             )
+            self._attach_context_gesture(row, track)
             self._results_list.append(row)
 
         self._results_stack.set_visible_child_name("results")
@@ -379,6 +454,7 @@ class SearchView(Gtk.Box):
                     "album": track.album or "",
                     "source": track.source.value,
                     "duration": _format_duration(track.duration),
+                    "_track": track,
                 })
         except Exception:
             logger.warning("Database search failed", exc_info=True)
@@ -398,6 +474,7 @@ class SearchView(Gtk.Box):
                                 "album": track.album or "",
                                 "source": track.source.value,
                                 "duration": _format_duration(track.duration),
+                                "_track": track,
                             })
             except Exception:
                 logger.warning("Tidal search failed", exc_info=True)
