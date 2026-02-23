@@ -32,6 +32,7 @@ class NowPlayingBar(Gtk.Box):
         on_previous: Callable[[], None] | None = None,
         on_shuffle: Callable[[bool], None] | None = None,
         on_repeat: Callable[[bool], None] | None = None,
+        on_lyrics_toggle: Callable[[bool], None] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(
@@ -44,11 +45,13 @@ class NowPlayingBar(Gtk.Box):
         self._on_previous = on_previous
         self._on_shuffle = on_shuffle
         self._on_repeat = on_repeat
+        self._on_lyrics_toggle = on_lyrics_toggle
 
         self._is_playing = False
         self._shuffle_active = False
         self._repeat_active = False
         self._favorite_active = False
+        self._lyrics_active = False
 
         self.add_css_class("now-playing-bar")
 
@@ -260,6 +263,19 @@ class NowPlayingBar(Gtk.Box):
         self._volume_scale.add_css_class("now-playing-volume")
         right.append(self._volume_scale)
 
+        # Lyrics toggle button
+        self._lyrics_btn = Gtk.ToggleButton()
+        self._lyrics_btn.set_icon_name(
+            "accessories-text-editor-symbolic"
+        )
+        self._lyrics_btn.add_css_class("flat")
+        self._lyrics_btn.add_css_class("now-playing-control-btn")
+        self._lyrics_btn.add_css_class("lyrics-toggle-btn")
+        self._lyrics_btn.set_valign(Gtk.Align.CENTER)
+        self._lyrics_btn.set_tooltip_text("Lyrics")
+        self._lyrics_btn.connect("toggled", self._on_lyrics_toggled)
+        right.append(self._lyrics_btn)
+
         # Queue button
         queue_btn = Gtk.Button.new_from_icon_name("view-list-symbolic")
         queue_btn.add_css_class("flat")
@@ -373,6 +389,31 @@ class NowPlayingBar(Gtk.Box):
         print(  # noqa: T201
             f"[NowPlaying] favorite -> {self._favorite_active}"
         )
+
+    def _on_lyrics_toggled(self, btn: Gtk.ToggleButton) -> None:
+        self._lyrics_active = btn.get_active()
+        if self._lyrics_active:
+            btn.add_css_class("active")
+        else:
+            btn.remove_css_class("active")
+
+        if self._on_lyrics_toggle:
+            self._on_lyrics_toggle(self._lyrics_active)
+        else:
+            print(  # noqa: T201
+                f"[NowPlaying] lyrics -> {self._lyrics_active}"
+            )
+
+    def set_lyrics_active(self, active: bool) -> None:
+        """Programmatically set the lyrics toggle state without triggering callback."""
+        self._lyrics_active = active
+        self._lyrics_btn.handler_block_by_func(self._on_lyrics_toggled)
+        self._lyrics_btn.set_active(active)
+        if active:
+            self._lyrics_btn.add_css_class("active")
+        else:
+            self._lyrics_btn.remove_css_class("active")
+        self._lyrics_btn.handler_unblock_by_func(self._on_lyrics_toggled)
 
     def _on_queue_clicked(self, _btn: Gtk.Button) -> None:
         print("[NowPlaying] queue")  # noqa: T201
