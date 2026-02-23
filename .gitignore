@@ -6,3 +6,4 @@ dist/
 *.egg-info/
 .venv/
 session.json
+.claude/worktrees/
