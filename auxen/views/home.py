@@ -10,8 +10,9 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
+gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import Gtk, Pango
+from gi.repository import GdkPixbuf, Gtk, Pango
 
 from auxen.views.context_menu import TrackContextMenu
 
@@ -89,6 +90,7 @@ def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
     art_box.add_css_class("album-art-placeholder")
     art_box.set_size_request(160, 160)
 
+    # Placeholder icon (shown when no art is available)
     art_icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
     art_icon.set_pixel_size(48)
     art_icon.set_opacity(0.4)
@@ -96,6 +98,15 @@ def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
     art_icon.set_valign(Gtk.Align.CENTER)
     art_icon.set_vexpand(True)
     art_box.append(art_icon)
+
+    # Album art image (hidden until loaded)
+    art_image = Gtk.Image()
+    art_image.set_size_request(120, 120)
+    art_image.set_halign(Gtk.Align.CENTER)
+    art_image.set_valign(Gtk.Align.CENTER)
+    art_image.add_css_class("album-card-art-image")
+    art_image.set_visible(False)
+    art_box.append(art_image)
 
     overlay.set_child(art_box)
 
@@ -130,6 +141,9 @@ def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
     # Store album/artist data for click handling
     child._album_title = title  # type: ignore[attr-defined]
     child._album_artist = artist  # type: ignore[attr-defined]
+    # Store references to art widgets for async loading
+    child._art_icon = art_icon  # type: ignore[attr-defined]
+    child._art_image = art_image  # type: ignore[attr-defined]
     return child
 
 
@@ -371,13 +385,14 @@ class HomePage(Gtk.ScrolledWindow):
             if recently_added:
                 self._clear_flow_box(self._album_grid)
                 for track in recently_added:
-                    self._album_grid.append(
-                        _make_album_card(
-                            title=track.album or track.title,
-                            artist=track.artist,
-                            source=track.source.value,
-                        )
+                    card = _make_album_card(
+                        title=track.album or track.title,
+                        artist=track.artist,
+                        source=track.source.value,
                     )
+                    self._album_grid.append(card)
+                    # Load album art asynchronously
+                    self.load_album_art_for_card(card, track)
 
             # Recently played — update the list if we have data
             recently_played = db.get_recently_played(limit=8)
@@ -404,6 +419,35 @@ class HomePage(Gtk.ScrolledWindow):
             self._tidal_value_label.set_label(str(tidal))
         if self._local_value_label is not None:
             self._local_value_label.set_label(str(local))
+
+    def set_album_art_service(self, art_service) -> None:
+        """Set the AlbumArtService instance for loading album art."""
+        self._album_art_service = art_service
+
+    def load_album_art_for_card(
+        self, child: Gtk.FlowBoxChild, track
+    ) -> None:
+        """Load album art asynchronously for an album card.
+
+        *child* is a FlowBoxChild created by ``_make_album_card`` and
+        *track* is a Track object whose art should be loaded.
+        """
+        art_service = getattr(self, "_album_art_service", None)
+        if art_service is None or track is None:
+            return
+
+        art_icon = getattr(child, "_art_icon", None)
+        art_image = getattr(child, "_art_image", None)
+        if art_icon is None or art_image is None:
+            return
+
+        def _on_art_loaded(pixbuf: GdkPixbuf.Pixbuf | None) -> None:
+            if pixbuf is not None:
+                art_image.set_from_pixbuf(pixbuf)
+                art_image.set_visible(True)
+                art_icon.set_visible(False)
+
+        art_service.get_art_async(track, _on_art_loaded, width=120, height=120)
 
     # ---- Internal helpers ----
 

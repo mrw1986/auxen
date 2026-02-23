@@ -11,6 +11,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk
 
+from auxen.album_art import AlbumArtService
 from auxen.equalizer import Equalizer
 from auxen.lyrics import LyricsService
 from auxen.views.album_detail import AlbumDetailView
@@ -57,6 +58,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._app_ref = None
         self._previous_page: str = "home"
         self._lyrics_service = LyricsService()
+        self._album_art_service = AlbumArtService()
         self._current_track = None
         self._equalizer: Equalizer | None = None
 
@@ -319,6 +321,9 @@ class AuxenWindow(Adw.ApplicationWindow):
         if app.db is not None:
             self._stats_view.set_database(app.db)
 
+        # --- Home Page -> Album Art Service ---
+        self._home_page.set_album_art_service(self._album_art_service)
+
         # --- Home Page initial refresh ---
         if app.db is not None:
             try:
@@ -348,6 +353,14 @@ class AuxenWindow(Adw.ApplicationWindow):
                 artist=track.artist,
                 quality_label=track.quality_label,
                 source=track.source.value,
+            )
+            # Load album art asynchronously for the now-playing bar
+            self._now_playing.set_album_art(None)  # clear while loading
+            self._album_art_service.get_art_async(
+                track,
+                self._now_playing.set_album_art,
+                width=48,
+                height=48,
             )
             # Highlight the current track in album detail if visible
             self._album_detail.set_current_track(track.id)
@@ -420,6 +433,16 @@ class AuxenWindow(Adw.ApplicationWindow):
             tracks=tracks,
             source=source,
         )
+
+        # Load album art for the detail header (use first track)
+        if tracks:
+            self._album_art_service.get_art_async(
+                tracks[0],
+                self._album_detail.set_album_art,
+                width=200,
+                height=200,
+            )
+
         self._stack.set_visible_child_name("album-detail")
 
     def _on_album_play_track(self, track) -> None:

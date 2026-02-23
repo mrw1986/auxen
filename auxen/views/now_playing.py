@@ -8,8 +8,9 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
+gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import Gtk, Pango
+from gi.repository import GdkPixbuf, Gtk, Pango
 
 
 def _format_time(seconds: float) -> str:
@@ -84,23 +85,36 @@ class NowPlayingBar(Gtk.Box):
         )
         left.set_valign(Gtk.Align.CENTER)
 
-        # Album art placeholder
-        art_box = Gtk.Box(
+        # Album art container
+        self._art_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             halign=Gtk.Align.CENTER,
             valign=Gtk.Align.CENTER,
         )
-        art_box.add_css_class("now-playing-art")
-        art_box.set_size_request(48, 48)
+        self._art_box.add_css_class("now-playing-art")
+        self._art_box.set_size_request(48, 48)
 
-        art_icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
-        art_icon.set_pixel_size(24)
-        art_icon.set_opacity(0.4)
-        art_icon.set_halign(Gtk.Align.CENTER)
-        art_icon.set_valign(Gtk.Align.CENTER)
-        art_icon.set_vexpand(True)
-        art_box.append(art_icon)
-        left.append(art_box)
+        # Placeholder icon (shown when no album art is available)
+        self._art_placeholder = Gtk.Image.new_from_icon_name(
+            "audio-x-generic-symbolic"
+        )
+        self._art_placeholder.set_pixel_size(24)
+        self._art_placeholder.set_opacity(0.4)
+        self._art_placeholder.set_halign(Gtk.Align.CENTER)
+        self._art_placeholder.set_valign(Gtk.Align.CENTER)
+        self._art_placeholder.set_vexpand(True)
+
+        # Actual album art image (hidden until art is loaded)
+        self._art_image = Gtk.Image()
+        self._art_image.set_size_request(48, 48)
+        self._art_image.set_halign(Gtk.Align.CENTER)
+        self._art_image.set_valign(Gtk.Align.CENTER)
+        self._art_image.add_css_class("now-playing-art-image")
+        self._art_image.set_visible(False)
+
+        self._art_box.append(self._art_placeholder)
+        self._art_box.append(self._art_image)
+        left.append(self._art_box)
 
         # Title + Artist
         text_box = Gtk.Box(
@@ -356,6 +370,16 @@ class NowPlayingBar(Gtk.Box):
             else "media-playback-start-symbolic"
         )
         self._play_btn.set_icon_name(icon)
+
+    def set_album_art(self, pixbuf: GdkPixbuf.Pixbuf | None) -> None:
+        """Set the album art image, or fall back to placeholder if None."""
+        if pixbuf is not None:
+            self._art_image.set_from_pixbuf(pixbuf)
+            self._art_image.set_visible(True)
+            self._art_placeholder.set_visible(False)
+        else:
+            self._art_image.set_visible(False)
+            self._art_placeholder.set_visible(True)
 
     def set_sleep_timer_active(self, active: bool) -> None:
         """Show or hide the sleep timer indicator dot."""

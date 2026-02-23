@@ -9,8 +9,9 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
+gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import Gtk, Pango
+from gi.repository import GdkPixbuf, Gtk, Pango
 
 from auxen.models import Track
 
@@ -108,23 +109,36 @@ class AlbumDetailView(Gtk.ScrolledWindow):
         self._header.set_margin_start(32)
         self._header.set_margin_end(32)
 
-        # Album art placeholder
-        art_box = Gtk.Box(
+        # Album art container
+        self._art_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             halign=Gtk.Align.CENTER,
             valign=Gtk.Align.CENTER,
         )
-        art_box.add_css_class("album-detail-art")
-        art_box.set_size_request(200, 200)
+        self._art_box.add_css_class("album-detail-art")
+        self._art_box.set_size_request(200, 200)
 
-        art_icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
-        art_icon.set_pixel_size(64)
-        art_icon.set_opacity(0.4)
-        art_icon.set_halign(Gtk.Align.CENTER)
-        art_icon.set_valign(Gtk.Align.CENTER)
-        art_icon.set_vexpand(True)
-        art_box.append(art_icon)
-        self._header.append(art_box)
+        # Placeholder icon
+        self._art_placeholder = Gtk.Image.new_from_icon_name(
+            "audio-x-generic-symbolic"
+        )
+        self._art_placeholder.set_pixel_size(64)
+        self._art_placeholder.set_opacity(0.4)
+        self._art_placeholder.set_halign(Gtk.Align.CENTER)
+        self._art_placeholder.set_valign(Gtk.Align.CENTER)
+        self._art_placeholder.set_vexpand(True)
+
+        # Actual album art image (hidden until art is loaded)
+        self._art_image = Gtk.Image()
+        self._art_image.set_size_request(200, 200)
+        self._art_image.set_halign(Gtk.Align.CENTER)
+        self._art_image.set_valign(Gtk.Align.CENTER)
+        self._art_image.add_css_class("album-detail-art-image")
+        self._art_image.set_visible(False)
+
+        self._art_box.append(self._art_placeholder)
+        self._art_box.append(self._art_image)
+        self._header.append(self._art_box)
 
         # Info column
         info_box = Gtk.Box(
@@ -232,6 +246,9 @@ class AlbumDetailView(Gtk.ScrolledWindow):
         """Populate the view with album data."""
         self._tracks = list(tracks)
 
+        # Reset album art to placeholder
+        self.set_album_art(None)
+
         # Update header
         self._title_label.set_label(album_name)
         self._artist_label.set_label(artist)
@@ -265,6 +282,16 @@ class AlbumDetailView(Gtk.ScrolledWindow):
         for i, track in enumerate(tracks):
             row = self._make_track_row(track, i)
             self._track_list.append(row)
+
+    def set_album_art(self, pixbuf: GdkPixbuf.Pixbuf | None) -> None:
+        """Set the album header art, or fall back to placeholder if None."""
+        if pixbuf is not None:
+            self._art_image.set_from_pixbuf(pixbuf)
+            self._art_image.set_visible(True)
+            self._art_placeholder.set_visible(False)
+        else:
+            self._art_image.set_visible(False)
+            self._art_placeholder.set_visible(True)
 
     def set_current_track(self, track_id: int | None) -> None:
         """Highlight the currently playing track in the list."""

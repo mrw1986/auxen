@@ -324,6 +324,12 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     border-radius: 6px;
 }
 
+/* ── Album Card Art Image (home page grid) ────────────── */
+
+.album-card-art-image {
+    border-radius: 10px 10px 0 0;
+}
+
 /* ── Source Badges (pill-shaped) ────────────────────────── */
 
 .source-badge-tidal {
@@ -419,6 +425,12 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     min-height: 48px;
     border-radius: 6px;
     background-color: #1c1b22;
+}
+
+/* ── Now-Playing Album Art Image — rounded corners ────── */
+
+.now-playing-art-image {
+    border-radius: 6px;
 }
 
 /* ── Play Button — circular, amber, slightly larger ────── */
@@ -818,6 +830,12 @@ button.flat:hover {
     background-color: #25242d;
     border-radius: 12px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Album Detail Art Image — rounded corners ────────── */
+
+.album-detail-art-image {
+    border-radius: 12px;
 }
 
 /* -- Album title -- */
