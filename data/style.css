@@ -1,3 +1,10 @@
+/* ═══════════════════════════════════════════════════════════
+   Auxen — Warm Amber Dark Theme
+   Design reference: ui-mockup.html
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Libadwaita @define-color overrides ───────────────────── */
+
 @define-color accent_bg_color #d4a039;
 @define-color accent_fg_color #0c0b0f;
 @define-color accent_color #d4a039;
@@ -5,18 +12,73 @@
 @define-color window_fg_color #f0ece4;
 @define-color headerbar_bg_color #0c0b0f;
 @define-color headerbar_fg_color #f0ece4;
+@define-color headerbar_border_color rgba(240, 236, 228, 0.06);
 @define-color sidebar_bg_color #141318;
 @define-color sidebar_fg_color #f0ece4;
 @define-color card_bg_color #1c1b22;
 @define-color card_fg_color #f0ece4;
 @define-color view_bg_color #0c0b0f;
 @define-color view_fg_color #f0ece4;
+@define-color popover_bg_color #1c1b22;
+@define-color popover_fg_color #f0ece4;
+@define-color dialog_bg_color #1c1b22;
+@define-color dialog_fg_color #f0ece4;
+
+/* ── Global Transitions ───────────────────────────────────── */
+
+row,
+button,
+label,
+image {
+    transition: all 200ms ease;
+}
+
+/* ── Scrollbar Styling — thin, amber thumb ────────────────── */
+
+scrollbar {
+    background-color: transparent;
+}
+
+scrollbar slider {
+    min-width: 4px;
+    min-height: 4px;
+    border-radius: 9999px;
+    background-color: rgba(163, 158, 147, 0.25);
+    border: none;
+}
+
+scrollbar slider:hover {
+    min-width: 6px;
+    background-color: rgba(212, 160, 57, 0.5);
+}
+
+scrollbar slider:active {
+    background-color: rgba(212, 160, 57, 0.7);
+}
+
+scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
+    min-width: 4px;
+    background-color: rgba(163, 158, 147, 0.2);
+}
+
+/* ── Focus Ring — amber glow ──────────────────────────────── */
+
+*:focus-visible {
+    outline-color: rgba(212, 160, 57, 0.6);
+    outline-width: 2px;
+    outline-offset: 2px;
+    outline-style: solid;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SIDEBAR
+   ═══════════════════════════════════════════════════════════ */
 
 /* ── Sidebar Brand ─────────────────────────────────────── */
 
 .sidebar-brand {
     padding: 24px 20px 16px 20px;
-    border-bottom: 1px solid rgba(240, 236, 228, 0.08);
+    border-bottom: 1px solid rgba(240, 236, 228, 0.06);
 }
 
 .sidebar-brand image {
@@ -27,6 +89,7 @@
     font-variant: all-small-caps;
     letter-spacing: 2px;
     color: #6b6860;
+    font-size: 0.65rem;
 }
 
 /* ── Section Labels ────────────────────────────────────── */
@@ -35,9 +98,21 @@
     font-variant: all-small-caps;
     letter-spacing: 1.5px;
     font-weight: 600;
+    color: #6b6860;
+    font-size: 0.7rem;
 }
 
-/* ── Navigation Sidebar – amber highlight on selection ── */
+/* ── Navigation Sidebar — amber highlight on selection ── */
+
+.navigation-sidebar {
+    background-color: transparent;
+}
+
+.navigation-sidebar row {
+    border-radius: 6px;
+    margin: 1px 4px;
+    transition: background-color 200ms ease;
+}
 
 .navigation-sidebar row:selected {
     background-color: rgba(212, 160, 57, 0.15);
@@ -55,15 +130,39 @@
     background-color: #25242d;
 }
 
-/* ── Badges ────────────────────────────────────────────── */
+.navigation-sidebar row image {
+    opacity: 0.7;
+}
+
+.navigation-sidebar row:selected image {
+    opacity: 1.0;
+}
+
+.navigation-sidebar row label {
+    font-weight: 500;
+    font-size: 0.9rem;
+    color: #a39e93;
+}
+
+.navigation-sidebar row:selected label {
+    color: #d4a039;
+    font-weight: 500;
+}
+
+.navigation-sidebar row:hover:not(:selected) label {
+    color: #f0ece4;
+}
+
+/* ── Badges (navigation) ──────────────────────────────── */
 
 .nav-badge-local {
     background-color: #7cb87a;
     color: #0c0b0f;
     border-radius: 9999px;
     padding: 1px 8px;
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     font-weight: 700;
+    letter-spacing: 0.3px;
 }
 
 .nav-badge-tidal {
@@ -71,8 +170,9 @@
     color: #0c0b0f;
     border-radius: 9999px;
     padding: 1px 8px;
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     font-weight: 700;
+    letter-spacing: 0.3px;
 }
 
 /* ── Playlist Dot ──────────────────────────────────────── */
@@ -87,7 +187,7 @@
 
 .sidebar-account {
     padding: 12px 16px;
-    border-top: 1px solid rgba(240, 236, 228, 0.08);
+    border-top: 1px solid rgba(240, 236, 228, 0.06);
 }
 
 .sidebar-avatar {
@@ -102,68 +202,90 @@
 
 .sidebar-tidal-plan {
     color: #00c4cc;
+    font-size: 0.75rem;
 }
 
-/* ── Home Page ────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════
+   HOME PAGE
+   ═══════════════════════════════════════════════════════════ */
 
-/* Greeting */
+/* ── Greeting ──────────────────────────────────────────── */
 
 .greeting-label {
     font-size: 2rem;
     font-weight: 800;
     color: #f0ece4;
+    letter-spacing: -0.5px;
 }
 
-/* Section Headers */
+/* ── Section Headers ───────────────────────────────────── */
 
 .section-header {
     font-size: 1.25rem;
     font-weight: 700;
     color: #f0ece4;
     margin-top: 8px;
+    margin-bottom: 4px;
+    letter-spacing: -0.3px;
 }
 
-/* Filter Toggle Buttons */
+/* ── Filter Toggle Buttons (pill-shaped) ───────────────── */
 
 .filter-btn {
     border-radius: 9999px;
     padding: 6px 18px;
     font-weight: 600;
     font-size: 0.85rem;
-    background-color: #1c1b22;
-    color: #6b6860;
-    border: 1px solid rgba(240, 236, 228, 0.08);
+    background-color: transparent;
+    color: #a39e93;
+    border: 1px solid rgba(240, 236, 228, 0.1);
     min-height: 0;
+    transition: all 200ms ease;
 }
 
 .filter-btn:checked {
     background-color: #d4a039;
     color: #0c0b0f;
     border-color: #d4a039;
+    font-weight: 700;
 }
 
 .filter-btn:hover:not(:checked) {
-    background-color: #25242d;
+    background-color: rgba(240, 236, 228, 0.06);
     color: #f0ece4;
+    border-color: rgba(240, 236, 228, 0.15);
 }
 
-/* Stat Cards */
+.filter-btn:checked:hover {
+    background-color: #e0b04a;
+    border-color: #e0b04a;
+}
+
+/* ── Stat Cards ────────────────────────────────────────── */
 
 .stat-card {
     background-color: #1c1b22;
-    border-radius: 12px;
+    border-radius: 16px;
     padding: 20px;
+    border: 1px solid rgba(240, 236, 228, 0.06);
+    transition: all 250ms ease;
+}
+
+.stat-card:hover {
+    border-color: rgba(240, 236, 228, 0.1);
 }
 
 .stat-card-value {
-    font-size: 2rem;
+    font-size: 1.75rem;
     font-weight: 800;
     color: #f0ece4;
+    letter-spacing: -0.5px;
 }
 
 .stat-card-label {
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     color: #6b6860;
+    letter-spacing: 0.2px;
 }
 
 .stat-accent-tidal {
@@ -174,26 +296,26 @@
     color: #7cb87a;
 }
 
-/* Album Cards */
+/* ── Album Cards ───────────────────────────────────────── */
 
 .album-card {
     min-width: 160px;
     border-radius: 8px;
     padding-bottom: 8px;
-    transition: background-color 200ms ease;
+    transition: all 200ms ease;
 }
 
 .album-card:hover {
-    background-color: rgba(240, 236, 228, 0.04);
+    background-color: rgba(212, 160, 57, 0.06);
 }
 
-/* Album Art Placeholder */
+/* ── Album Art Placeholder ─────────────────────────────── */
 
 .album-art-placeholder {
     min-width: 160px;
     min-height: 160px;
     background-color: #25242d;
-    border-radius: 8px 8px 0 0;
+    border-radius: 10px 10px 0 0;
 }
 
 .album-art-placeholder.album-art-mini {
@@ -202,7 +324,7 @@
     border-radius: 6px;
 }
 
-/* Source Badges */
+/* ── Source Badges (pill-shaped) ────────────────────────── */
 
 .source-badge-tidal {
     background-color: #00c4cc;
@@ -211,6 +333,7 @@
     padding: 2px 8px;
     font-size: 0.65rem;
     font-weight: 700;
+    letter-spacing: 0.3px;
 }
 
 .source-badge-local {
@@ -220,19 +343,62 @@
     padding: 2px 8px;
     font-size: 0.65rem;
     font-weight: 700;
+    letter-spacing: 0.3px;
 }
 
-/* Recently Played Rows */
+/* ── Recently Played Rows ──────────────────────────────── */
 
 .recently-played-row {
     padding: 8px 12px;
+    border-radius: 6px;
+    transition: background-color 150ms ease;
 }
 
-/* ── Now Playing Bar ─────────────────────────── */
+/* ═══════════════════════════════════════════════════════════
+   BOXED-LIST / LIBADWAITA LIST STYLING
+   ═══════════════════════════════════════════════════════════ */
+
+.boxed-list {
+    background-color: transparent;
+    border: none;
+}
+
+.boxed-list > row {
+    background-color: #1c1b22;
+    border: none;
+    border-bottom: 1px solid rgba(240, 236, 228, 0.04);
+    transition: background-color 150ms ease;
+}
+
+.boxed-list > row:first-child {
+    border-radius: 12px 12px 0 0;
+}
+
+.boxed-list > row:last-child {
+    border-radius: 0 0 12px 12px;
+    border-bottom: none;
+}
+
+.boxed-list > row:only-child {
+    border-radius: 12px;
+    border-bottom: none;
+}
+
+.boxed-list > row:hover {
+    background-color: #25242d;
+}
+
+.boxed-list > row:selected {
+    background-color: rgba(212, 160, 57, 0.12);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   NOW PLAYING BAR
+   ═══════════════════════════════════════════════════════════ */
 
 .now-playing-bar {
     background-color: #0c0b0f;
-    border-top: 1px solid rgba(240, 236, 228, 0.08);
+    border-top: 1px solid rgba(212, 160, 57, 0.15);
     padding: 8px 16px;
     min-height: 72px;
 }
@@ -244,7 +410,7 @@
 }
 
 .now-playing-track-artist {
-    color: #6b6860;
+    color: #a39e93;
     font-size: 0.8rem;
 }
 
@@ -255,6 +421,8 @@
     background-color: #1c1b22;
 }
 
+/* ── Play Button — circular, amber, slightly larger ────── */
+
 .now-playing-play-btn {
     min-width: 40px;
     min-height: 40px;
@@ -262,30 +430,51 @@
     background-color: #d4a039;
     color: #0c0b0f;
     padding: 0;
+    transition: all 150ms ease;
 }
 
 .now-playing-play-btn:hover {
     background-color: #e0b04a;
 }
 
+.now-playing-play-btn:active {
+    background-color: #c99530;
+}
+
+/* ── Transport Buttons — subtle hover brightening ──────── */
+
 .now-playing-control-btn {
     color: #6b6860;
     min-width: 32px;
     min-height: 32px;
+    border-radius: 9999px;
+    transition: all 200ms ease;
 }
 
 .now-playing-control-btn:hover {
     color: #f0ece4;
+    background-color: rgba(240, 236, 228, 0.06);
+}
+
+.now-playing-control-btn:active {
+    color: #f0ece4;
+    background-color: rgba(240, 236, 228, 0.1);
 }
 
 .now-playing-control-btn.active {
     color: #d4a039;
 }
 
+.now-playing-control-btn.active:hover {
+    color: #e0b04a;
+}
+
+/* ── Progress Bar — thin track, amber fill, round thumb ── */
+
 .now-playing-progress trough {
     min-height: 4px;
     border-radius: 2px;
-    background-color: rgba(240, 236, 228, 0.1);
+    background-color: rgba(240, 236, 228, 0.08);
 }
 
 .now-playing-progress trough highlight {
@@ -301,12 +490,24 @@
     margin: -4px;
 }
 
+.now-playing-progress:hover trough {
+    min-height: 6px;
+}
+
+.now-playing-progress:hover slider {
+    min-width: 14px;
+    min-height: 14px;
+    margin: -5px;
+}
+
 .now-playing-time {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     font-family: monospace;
     color: #6b6860;
     min-width: 36px;
 }
+
+/* ── Quality Badge ─────────────────────────────────────── */
 
 .now-playing-quality-badge {
     background-color: rgba(212, 160, 57, 0.2);
@@ -315,16 +516,19 @@
     padding: 2px 8px;
     font-size: 0.65rem;
     font-weight: 700;
+    letter-spacing: 0.3px;
 }
+
+/* ── Volume Slider ─────────────────────────────────────── */
 
 .now-playing-volume trough {
     min-height: 4px;
     border-radius: 2px;
-    background-color: rgba(240, 236, 228, 0.1);
+    background-color: rgba(240, 236, 228, 0.08);
 }
 
 .now-playing-volume trough highlight {
-    background-color: #d4a039;
+    background-color: #a39e93;
     border-radius: 2px;
 }
 
@@ -336,7 +540,13 @@
     margin: -3px;
 }
 
-/* ── Search View ──────────────────────────────────────── */
+.now-playing-volume:hover trough highlight {
+    background-color: #d4a039;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SEARCH VIEW
+   ═══════════════════════════════════════════════════════════ */
 
 .search-entry {
     font-size: 1.1rem;
@@ -346,11 +556,12 @@
     color: #f0ece4;
     border: 1px solid rgba(240, 236, 228, 0.08);
     min-height: 36px;
+    transition: all 200ms ease;
 }
 
 .search-entry:focus-within {
     border-color: #d4a039;
-    box-shadow: 0 0 0 2px rgba(212, 160, 57, 0.25);
+    background-color: #1e1d26;
 }
 
 .search-result-row {
@@ -370,6 +581,7 @@
 
 .search-empty-state image {
     color: #6b6860;
+    opacity: 0.3;
 }
 
 .search-album-label {
@@ -377,7 +589,9 @@
     font-style: italic;
 }
 
-/* ── Favorites View ──────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════
+   FAVORITES VIEW
+   ═══════════════════════════════════════════════════════════ */
 
 .favorites-header {
     padding: 4px 0;
@@ -401,6 +615,8 @@
     color: #d4a039;
     min-width: 32px;
     min-height: 32px;
+    border-radius: 9999px;
+    transition: all 200ms ease;
 }
 
 .favorites-heart-btn:checked {
@@ -413,6 +629,7 @@
 
 .favorites-heart-btn:hover {
     color: #e0b04a;
+    background-color: rgba(212, 160, 57, 0.08);
 }
 
 .favorites-quality-badge {
@@ -422,6 +639,7 @@
     padding: 2px 8px;
     font-size: 0.65rem;
     font-weight: 700;
+    letter-spacing: 0.3px;
 }
 
 .favorites-empty-state {
@@ -443,7 +661,13 @@
     padding: 4px 8px;
 }
 
-/* ── Settings Dialog ─────────────────────────────────── */
+.favorites-sort-dropdown:hover {
+    border-color: rgba(240, 236, 228, 0.15);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SETTINGS DIALOG
+   ═══════════════════════════════════════════════════════════ */
 
 .settings-login-btn {
     background-color: #d4a039;
@@ -451,16 +675,71 @@
     font-weight: 600;
     border-radius: 6px;
     padding: 4px 16px;
+    transition: all 200ms ease;
 }
 
 .settings-login-btn:hover {
     background-color: #e0b04a;
 }
 
+.settings-login-btn:active {
+    background-color: #c99530;
+}
+
 .settings-rescan-btn {
     color: #6b6860;
+    transition: color 200ms ease;
 }
 
 .settings-rescan-btn:hover {
     color: #f0ece4;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   GLOBAL TYPOGRAPHY & DIM LABELS
+   ═══════════════════════════════════════════════════════════ */
+
+.dim-label {
+    color: #a39e93;
+}
+
+.caption.dim-label {
+    color: #6b6860;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LIBADWAITA PREFERENCES (Settings) OVERRIDES
+   ═══════════════════════════════════════════════════════════ */
+
+preferencespage {
+    background-color: #0c0b0f;
+}
+
+preferencesgroup {
+    background-color: transparent;
+}
+
+preferencesgroup > box > box > label {
+    color: #a39e93;
+}
+
+/* Make preference rows match the dark theme */
+row.activatable {
+    transition: background-color 150ms ease;
+}
+
+row.activatable:hover {
+    background-color: rgba(240, 236, 228, 0.04);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   FLAT BUTTON GLOBAL REFINEMENT
+   ═══════════════════════════════════════════════════════════ */
+
+button.flat {
+    transition: all 200ms ease;
+}
+
+button.flat:hover {
+    background-color: rgba(240, 236, 228, 0.06);
 }
