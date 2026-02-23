@@ -519,6 +519,18 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     min-width: 36px;
 }
 
+/* ── Spectrum Visualizer ───────────────────────────────── */
+
+.spectrum-visualizer {
+    margin: 4px 0;
+    opacity: 0.85;
+    transition: opacity 300ms ease;
+}
+
+.spectrum-visualizer:hover {
+    opacity: 1.0;
+}
+
 /* ── Quality Badge ─────────────────────────────────────── */
 
 .now-playing-quality-badge {

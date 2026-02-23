@@ -40,6 +40,9 @@ class Player(GObject.Object):
         Emitted periodically with (position_seconds, duration_seconds).
     eos()
         Emitted when the end of stream is reached.
+    spectrum-data(object)
+        Emitted with a list of normalised float magnitudes (0.0--1.0)
+        from the GStreamer spectrum element.
     """
 
     __gsignals__ = {
@@ -63,6 +66,11 @@ class Player(GObject.Object):
             None,
             (),
         ),
+        "spectrum-data": (
+            GObject.SignalFlags.RUN_LAST,
+            None,
+            (object,),
+        ),
     }
 
     def __init__(self) -> None:
@@ -83,32 +91,63 @@ class Player(GObject.Object):
         self._crossfade: Optional["CrossfadeService"] = None
         self._target_volume: float = 0.7
 
-        # --- ReplayGain + Equalizer audio chain (optional) ---
+        # --- ReplayGain + Equalizer + Spectrum audio chain (optional) ---
         self._rgvolume_element: Optional[Gst.Element] = None
         self._rglimiter_element: Optional[Gst.Element] = None
         self._equalizer_element: Optional[Gst.Element] = None
+        self._spectrum_element: Optional[Gst.Element] = None
+        self._spectrum_bands: int = 16
+        self._spectrum_threshold: int = -60
         self._replaygain_enabled: bool = True
         self._replaygain_mode: str = "album"
         try:
             rgvolume = Gst.ElementFactory.make("rgvolume", "rgvolume")
             rglimiter = Gst.ElementFactory.make("rglimiter", "rglimiter")
             eq = Gst.ElementFactory.make("equalizer-10bands", "eq")
+            spectrum = Gst.ElementFactory.make("spectrum", "spectrum")
             audio_sink = Gst.ElementFactory.make(
                 "autoaudiosink", "audio-out"
             )
+
+            # Configure spectrum element if available
+            if spectrum is not None:
+                spectrum.set_property("bands", self._spectrum_bands)
+                spectrum.set_property("threshold", self._spectrum_threshold)
+                # ~66ms interval (in nanoseconds) for ~15 Hz updates
+                spectrum.set_property("interval", 66666666)
+                spectrum.set_property("post-messages", True)
+                spectrum.set_property("message-magnitude", True)
+                self._spectrum_element = spectrum
+                logger.info("GStreamer spectrum element loaded")
+            else:
+                logger.warning(
+                    "spectrum element not available; "
+                    "visualizer will show flat bars"
+                )
 
             if eq is not None and audio_sink is not None:
                 audio_bin = Gst.Bin.new("audio-bin")
 
                 if rgvolume is not None and rglimiter is not None:
-                    # Full chain: rgvolume -> rglimiter -> eq -> sink
+                    # Full chain: rgvolume -> rglimiter -> eq
+                    #             [-> spectrum] -> sink
                     audio_bin.add(rgvolume)
                     audio_bin.add(rglimiter)
                     audio_bin.add(eq)
+
+                    if spectrum is not None:
+                        audio_bin.add(spectrum)
+
                     audio_bin.add(audio_sink)
                     rgvolume.link(rglimiter)
                     rglimiter.link(eq)
-                    eq.link(audio_sink)
+
+                    if spectrum is not None:
+                        eq.link(spectrum)
+                        spectrum.link(audio_sink)
+                    else:
+                        eq.link(audio_sink)
+
                     # Ghost pad from rgvolume (head of chain)
                     pad = rgvolume.get_static_pad("sink")
                     ghost = Gst.GhostPad.new("sink", pad)
@@ -122,10 +161,20 @@ class Player(GObject.Object):
                         "GStreamer rgvolume + rglimiter elements loaded"
                     )
                 else:
-                    # Fallback: eq -> sink (no ReplayGain)
+                    # Fallback: eq [-> spectrum] -> sink (no ReplayGain)
                     audio_bin.add(eq)
+
+                    if spectrum is not None:
+                        audio_bin.add(spectrum)
+
                     audio_bin.add(audio_sink)
-                    eq.link(audio_sink)
+
+                    if spectrum is not None:
+                        eq.link(spectrum)
+                        spectrum.link(audio_sink)
+                    else:
+                        eq.link(audio_sink)
+
                     pad = eq.get_static_pad("sink")
                     ghost = Gst.GhostPad.new("sink", pad)
                     audio_bin.add_pad(ghost)
@@ -420,6 +469,42 @@ class Player(GObject.Object):
             if debug:
                 print(f"  Debug: {debug}")
             self.next_track()
+
+        elif msg_type == Gst.MessageType.ELEMENT:
+            self._handle_spectrum_message(message)
+
+    def _handle_spectrum_message(self, message: Gst.Message) -> None:
+        """Parse spectrum element messages and emit spectrum-data."""
+        if self._spectrum_element is None:
+            return
+
+        structure = message.get_structure()
+        if structure is None:
+            return
+
+        name = structure.get_name()
+        if name != "spectrum":
+            return
+
+        try:
+            magnitudes = structure.get_value("magnitude")
+            if magnitudes is None:
+                return
+
+            # Normalise: magnitude values are in dB (threshold..0)
+            # Map to 0.0..1.0 range
+            threshold = float(self._spectrum_threshold)
+            levels: list[float] = []
+            for i in range(min(len(magnitudes), self._spectrum_bands)):
+                mag = float(magnitudes[i])
+                # Clamp and normalise
+                normalised = (mag - threshold) / (-threshold)
+                levels.append(max(0.0, min(1.0, normalised)))
+
+            self.emit("spectrum-data", levels)
+        except Exception:
+            # Degrade gracefully if parsing fails
+            pass
 
     # ------------------------------------------------------------------
     # Gapless playback
