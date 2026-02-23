@@ -11,3 +11,95 @@
 @define-color card_fg_color #f0ece4;
 @define-color view_bg_color #0c0b0f;
 @define-color view_fg_color #f0ece4;
+
+/* ── Sidebar Brand ─────────────────────────────────────── */
+
+.sidebar-brand {
+    padding: 24px 20px 16px 20px;
+    border-bottom: 1px solid rgba(240, 236, 228, 0.08);
+}
+
+.sidebar-brand image {
+    color: #d4a039;
+}
+
+.sidebar-brand-subtitle {
+    font-variant: all-small-caps;
+    letter-spacing: 2px;
+    color: #6b6860;
+}
+
+/* ── Section Labels ────────────────────────────────────── */
+
+.sidebar-section-label {
+    font-variant: all-small-caps;
+    letter-spacing: 1.5px;
+    font-weight: 600;
+}
+
+/* ── Navigation Sidebar – amber highlight on selection ── */
+
+.navigation-sidebar row:selected {
+    background-color: rgba(212, 160, 57, 0.15);
+}
+
+.navigation-sidebar row:selected label {
+    color: #d4a039;
+}
+
+.navigation-sidebar row:selected image {
+    color: #d4a039;
+}
+
+.navigation-sidebar row:hover:not(:selected) {
+    background-color: #25242d;
+}
+
+/* ── Badges ────────────────────────────────────────────── */
+
+.nav-badge-local {
+    background-color: #7cb87a;
+    color: #0c0b0f;
+    border-radius: 9999px;
+    padding: 1px 8px;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.nav-badge-tidal {
+    background-color: #00c4cc;
+    color: #0c0b0f;
+    border-radius: 9999px;
+    padding: 1px 8px;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+/* ── Playlist Dot ──────────────────────────────────────── */
+
+.playlist-dot {
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 9999px;
+}
+
+/* ── Account Section ───────────────────────────────────── */
+
+.sidebar-account {
+    padding: 12px 16px;
+    border-top: 1px solid rgba(240, 236, 228, 0.08);
+}
+
+.sidebar-avatar {
+    min-width: 32px;
+    min-height: 32px;
+    border-radius: 9999px;
+    background-color: #d4a039;
+    color: #0c0b0f;
+    font-weight: 700;
+    font-size: 0.85rem;
+}
+
+.sidebar-tidal-plan {
+    color: #00c4cc;
+}
