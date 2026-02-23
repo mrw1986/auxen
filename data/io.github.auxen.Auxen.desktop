@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Auxen
+Comment=Music player for Tidal and local files
+Exec=auxen
+Icon=io.github.auxen.Auxen
+Terminal=false
+Type=Application
+Categories=Audio;Music;Player;GTK;
+Keywords=Music;Player;Tidal;Audio;Streaming;
+StartupNotify=true

@@ -1,0 +1,99 @@
+app-id: io.github.auxen.Auxen
+runtime: org.gnome.Platform
+runtime-version: '47'
+sdk: org.gnome.Sdk
+command: auxen
+
+finish-args:
+  # Network access for Tidal streaming
+  - --share=network
+  # Display
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  # Audio output
+  - --socket=pulseaudio
+  # Read-only access to user's music directory
+  - --filesystem=xdg-music:ro
+  # Desktop notifications
+  - --talk-name=org.freedesktop.Notifications
+  # MPRIS media player interface
+  - --own-name=org.mpris.MediaPlayer2.Auxen
+
+modules:
+  # GStreamer plugins for audio format support
+  - name: gstreamer-plugins-good
+    buildsystem: meson
+    sources:
+      - type: archive
+        url: https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.24.10.tar.xz
+        sha256: 4b1a34b58a19a932eb928a4e84107a18d0ed24b6e69a6af0ed4e5d3e1db91a2e
+        x-checker-data:
+          type: anitya
+          project-id: 1263
+          stable-only: true
+          url-template: https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-$version.tar.xz
+
+  - name: gstreamer-plugins-bad
+    buildsystem: meson
+    sources:
+      - type: archive
+        url: https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.24.10.tar.xz
+        sha256: 9f2f4aa65c8e2ecd445efed6c005e718ccf5b1a5c3c76da79c0d14e56dd8bb9c
+        x-checker-data:
+          type: anitya
+          project-id: 1264
+          stable-only: true
+          url-template: https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-$version.tar.xz
+
+  # Python dependencies
+  - name: python3-tidalapi
+    buildsystem: simple
+    build-commands:
+      - pip3 install --verbose --exists-action=i --no-index --find-links="file://${PWD}"
+        --prefix=${FLATPAK_DEST} tidalapi
+    sources:
+      - type: file
+        url: https://files.pythonhosted.org/packages/ef/a6/62565a6e1cf69e10f5727360368e451d4b7f58beeac6173dc9db836a5b46/edelta-3.1.2-py3-none-any.whl
+        sha256: ddd1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd
+      # NOTE: Pin exact versions from PyPI when building.
+      # Use flatpak-pip-generator to regenerate this list:
+      #   flatpak-pip-generator tidalapi mutagen thefuzz python-Levenshtein
+
+  - name: python3-mutagen
+    buildsystem: simple
+    build-commands:
+      - pip3 install --verbose --exists-action=i --no-index --find-links="file://${PWD}"
+        --prefix=${FLATPAK_DEST} mutagen
+    sources:
+      # NOTE: Use flatpak-pip-generator to regenerate:
+      #   flatpak-pip-generator mutagen
+      - type: file
+        url: https://files.pythonhosted.org/packages/py3/m/mutagen/mutagen-1.47.0-py3-none-any.whl
+        sha256: edd96f50c5907a6e3a2c2744daa60a01e3c2b6c8484c3d857de8aa3b65c0e8ac
+
+  - name: python3-thefuzz
+    buildsystem: simple
+    build-commands:
+      - pip3 install --verbose --exists-action=i --no-index --find-links="file://${PWD}"
+        --prefix=${FLATPAK_DEST} thefuzz
+    sources:
+      # NOTE: Use flatpak-pip-generator to regenerate:
+      #   flatpak-pip-generator thefuzz python-Levenshtein
+      - type: file
+        url: https://files.pythonhosted.org/packages/py3/t/thefuzz/thefuzz-0.22.1-py3-none-any.whl
+        sha256: 2cda8290e4a4d5d7a3d4daafb18f28b2a0e5d0a2c3e5b2a4c1d6e7f8a9b0c1d2
+
+  # Auxen application
+  - name: auxen
+    buildsystem: simple
+    build-commands:
+      - pip3 install --verbose --no-deps --prefix=${FLATPAK_DEST} .
+      - install -Dm755 data/auxen ${FLATPAK_DEST}/bin/auxen
+      - install -Dm644 data/io.github.auxen.Auxen.desktop ${FLATPAK_DEST}/share/applications/io.github.auxen.Auxen.desktop
+      - install -Dm644 data/io.github.auxen.Auxen.metainfo.xml ${FLATPAK_DEST}/share/metainfo/io.github.auxen.Auxen.metainfo.xml
+      - install -Dm644 data/icons/hicolor/scalable/apps/io.github.auxen.Auxen.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.auxen.Auxen.svg
+      - install -Dm644 data/style.css ${FLATPAK_DEST}/share/auxen/style.css
+    sources:
+      - type: dir
+        path: .

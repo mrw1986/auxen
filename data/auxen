@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Auxen entry point for Flatpak and system-wide installation."""
+
+import sys
+import signal
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+
+from auxen.app import AuxenApp
+
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+app = AuxenApp()
+sys.exit(app.run(sys.argv))

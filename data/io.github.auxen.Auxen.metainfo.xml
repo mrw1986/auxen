@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.auxen.Auxen</id>
+
+  <name>Auxen</name>
+  <summary>Music player for Tidal and local files</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <developer id="io.github.auxen">
+    <name>Auxen Developers</name>
+  </developer>
+
+  <description>
+    <p>
+      Auxen is a modern music player for Linux built with GTK4 and Libadwaita.
+      It supports both Tidal streaming and local music playback, with a warm
+      amber dark theme designed for focused listening.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Tidal integration with HiFi streaming support</li>
+      <li>Local music library scanning and playback</li>
+      <li>MPRIS media player integration</li>
+      <li>10-band equalizer with presets</li>
+      <li>Crossfade between tracks</li>
+      <li>Smart playlists based on listening history</li>
+      <li>Sleep timer with fade-out</li>
+      <li>Last.fm scrobbling</li>
+      <li>Desktop notifications for track changes</li>
+      <li>ReplayGain volume normalization</li>
+      <li>M3U playlist import and export</li>
+      <li>Lyrics display panel</li>
+      <li>Mini player compact mode</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.auxen.Auxen.desktop</launchable>
+
+  <url type="homepage">https://github.com/auxen/auxen</url>
+  <url type="bugtracker">https://github.com/auxen/auxen/issues</url>
+
+  <branding>
+    <color type="primary" scheme_preference="dark">#1c1b22</color>
+    <color type="primary" scheme_preference="light">#d4a039</color>
+  </branding>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+
+  <recommends>
+    <display_length compare="ge">1024</display_length>
+  </recommends>
+
+  <categories>
+    <category>Audio</category>
+    <category>Music</category>
+  </categories>
+
+  <content_rating type="oars-1.1" />
+
+  <screenshots>
+    <!-- Add screenshots here when available -->
+    <!-- Example:
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/auxen/auxen/main/data/screenshots/main-window.png</image>
+      <caption>Auxen main window with library view</caption>
+    </screenshot>
+    -->
+  </screenshots>
+
+  <releases>
+    <release version="0.1.0" date="2026-02-23">
+      <description>
+        <p>Initial release of Auxen.</p>
+        <ul>
+          <li>Tidal integration with HiFi streaming</li>
+          <li>Local music library scanning and playback</li>
+          <li>MPRIS media player integration</li>
+          <li>10-band equalizer with presets</li>
+          <li>Smart playlists and sleep timer</li>
+          <li>Last.fm scrobbling support</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+</component>
