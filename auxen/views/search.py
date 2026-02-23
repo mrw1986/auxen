@@ -174,6 +174,7 @@ class SearchView(Gtk.Box):
         )
 
         self._debounce_id: int | None = None
+        self._search_generation: int = 0
         self._db = None
         self._tidal_provider = None
 
@@ -576,9 +577,13 @@ class SearchView(Gtk.Box):
 
         # Run the search in a background thread to avoid blocking the UI
         # (especially Tidal network calls).
+        self._search_generation += 1
+        gen = self._search_generation
+
         def _search_thread() -> None:
             results = self._do_search(query)
-            GLib.idle_add(self._populate_results, results)
+            if gen == self._search_generation:
+                GLib.idle_add(self._populate_results, results)
 
         thread = threading.Thread(target=_search_thread, daemon=True)
         thread.start()

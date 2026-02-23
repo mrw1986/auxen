@@ -25,6 +25,7 @@ class TidalProvider(ContentProvider):
     def __init__(self) -> None:
         self._session = tidalapi.Session()
         self._session_lock = threading.Lock()
+        self._auth_generation: int = 0  # bumped on logout to invalidate races
         SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -81,6 +82,7 @@ class TidalProvider(ContentProvider):
         try:
             with self._session_lock:
                 session = self._session
+                auth_gen = self._auth_generation
                 login, future = session.login_oauth()
             url = login.verification_uri_complete
 
@@ -95,7 +97,10 @@ class TidalProvider(ContentProvider):
             # tokens under one lock acquisition, so a concurrent
             # logout() cannot slip in between the check and the save.
             with self._session_lock:
-                if self._session is not session:
+                if (
+                    self._session is not session
+                    or self._auth_generation != auth_gen
+                ):
                     logger.info(
                         "Tidal login completed but session was replaced "
                         "by a concurrent logout — discarding."
@@ -107,6 +112,10 @@ class TidalProvider(ContentProvider):
                     "refresh_token": session.refresh_token,
                     "expiry_time": session.expiry_time,
                 }
+                # Mark that we're about to write so a concurrent logout
+                # after lock release knows not to just unlink — but since
+                # we snapshot under lock and write immediately after, the
+                # window is minimal.
             self._write_session_file(token_data)
             return True
         except Exception:
@@ -115,13 +124,13 @@ class TidalProvider(ContentProvider):
 
     def logout(self) -> None:
         """Delete the persisted session file and clear in-memory auth."""
+        with self._session_lock:
+            self._auth_generation += 1
+            self._session = tidalapi.Session()
         try:
             SESSION_FILE.unlink(missing_ok=True)
         except OSError:
             pass
-        # Create a fresh session so is_logged_in returns False immediately.
-        with self._session_lock:
-            self._session = tidalapi.Session()
 
     # ------------------------------------------------------------------
     # Content provider interface

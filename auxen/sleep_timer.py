@@ -91,7 +91,6 @@ class SleepTimer:
 
     @end_of_track.setter
     def end_of_track(self, value: bool) -> None:
-        self._end_of_enabled = bool(value)
         self._end_of_track = bool(value)
 
     def get_remaining(self) -> int:

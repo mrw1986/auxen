@@ -28,6 +28,7 @@ class MixesView(Gtk.ScrolledWindow):
         self._tidal_provider: Any = None
         self._on_play_mix: Optional[Callable] = None
         self._on_login: Optional[Callable] = None
+        self._refresh_generation: int = 0
 
         # Root container
         self._root = Gtk.Box(
@@ -174,7 +175,11 @@ class MixesView(Gtk.ScrolledWindow):
         self._spinner_box.set_visible(True)
 
         # Fetch data in a background thread to avoid blocking the UI
-        thread = threading.Thread(target=self._fetch_content_thread, daemon=True)
+        self._refresh_generation += 1
+        gen = self._refresh_generation
+        thread = threading.Thread(
+            target=self._fetch_content_thread, args=(gen,), daemon=True
+        )
         thread.start()
 
     # ------------------------------------------------------------------
@@ -391,7 +396,7 @@ class MixesView(Gtk.ScrolledWindow):
         self._content_box.set_visible(True)
         self._spinner_box.set_visible(False)
 
-    def _fetch_content_thread(self) -> None:
+    def _fetch_content_thread(self, gen: int) -> None:
         """Fetch mixes and playlists from Tidal in a background thread."""
         if self._tidal_provider is None:
             GLib.idle_add(self._show_login_state)
@@ -401,7 +406,12 @@ class MixesView(Gtk.ScrolledWindow):
             mixes = self._tidal_provider.get_mixes(limit=12)
             playlists = self._tidal_provider.get_user_playlists(limit=20)
 
+            if gen != self._refresh_generation:
+                return
+
             def _apply_results() -> bool:
+                if gen != self._refresh_generation:
+                    return False
                 self._populate_mixes(mixes)
                 self._populate_playlists(playlists)
                 self._show_content_state()
@@ -424,7 +434,8 @@ class MixesView(Gtk.ScrolledWindow):
             logger.warning(
                 "Failed to fetch mixes content", exc_info=True
             )
-            GLib.idle_add(self._show_login_state)
+            if gen == self._refresh_generation:
+                GLib.idle_add(self._show_login_state)
 
     def _populate_mixes(self, mixes: list[dict]) -> None:
         """Fill the mixes grid with mix cards."""

@@ -225,11 +225,17 @@ class LastFmService:
         if not self._enabled or not self.is_authenticated():
             return
 
+        # Snapshot auth state before spawning the thread so a concurrent
+        # disconnect() cannot clear _session_key mid-flight.
+        api_key = self._api_key
+        api_secret = self._api_secret
+        session_key = self._session_key
+
         def _do() -> None:
             params: dict[str, str] = {
                 "method": "track.updateNowPlaying",
-                "api_key": self._api_key,
-                "sk": self._session_key,  # type: ignore[arg-type]
+                "api_key": api_key,
+                "sk": session_key,  # type: ignore[arg-type]
                 "artist": artist,
                 "track": title,
             }
@@ -238,7 +244,7 @@ class LastFmService:
             if duration > 0:
                 params["duration"] = str(int(duration))
 
-            params["api_sig"] = _make_api_sig(params, self._api_secret)
+            params["api_sig"] = _make_api_sig(params, api_secret)
             params["format"] = "json"
 
             try:
@@ -273,11 +279,16 @@ class LastFmService:
 
         ts = timestamp if timestamp is not None else int(time.time())
 
+        # Snapshot auth state before spawning the thread.
+        api_key = self._api_key
+        api_secret = self._api_secret
+        session_key = self._session_key
+
         def _do() -> None:
             params: dict[str, str] = {
                 "method": "track.scrobble",
-                "api_key": self._api_key,
-                "sk": self._session_key,  # type: ignore[arg-type]
+                "api_key": api_key,
+                "sk": session_key,  # type: ignore[arg-type]
                 "artist": artist,
                 "track": title,
                 "timestamp": str(ts),
@@ -287,7 +298,7 @@ class LastFmService:
             if duration > 0:
                 params["duration"] = str(int(duration))
 
-            params["api_sig"] = _make_api_sig(params, self._api_secret)
+            params["api_sig"] = _make_api_sig(params, api_secret)
             params["format"] = "json"
 
             try:

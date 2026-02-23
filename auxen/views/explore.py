@@ -39,6 +39,7 @@ class ExploreView(Gtk.ScrolledWindow):
         self._on_album_clicked: Optional[Callable] = None
         self._on_play_track: Optional[Callable] = None
         self._on_login: Optional[Callable] = None
+        self._refresh_generation: int = 0
 
         # Root container
         self._root = Gtk.Box(
@@ -193,7 +194,11 @@ class ExploreView(Gtk.ScrolledWindow):
         self._spinner_box.set_visible(True)
 
         # Fetch data in a background thread to avoid blocking the UI
-        thread = threading.Thread(target=self._fetch_content_thread, daemon=True)
+        self._refresh_generation += 1
+        gen = self._refresh_generation
+        thread = threading.Thread(
+            target=self._fetch_content_thread, args=(gen,), daemon=True
+        )
         thread.start()
 
     # ------------------------------------------------------------------
@@ -421,7 +426,7 @@ class ExploreView(Gtk.ScrolledWindow):
         self._content_box.set_visible(True)
         self._spinner_box.set_visible(False)
 
-    def _fetch_content_thread(self) -> None:
+    def _fetch_content_thread(self, gen: int) -> None:
         """Fetch explore content from Tidal in a background thread."""
         if self._tidal_provider is None:
             GLib.idle_add(self._show_login_state)
@@ -434,7 +439,12 @@ class ExploreView(Gtk.ScrolledWindow):
                 releases = self._tidal_provider.get_featured_albums(limit=12)
             tracks = self._tidal_provider.get_top_tracks(limit=20)
 
+            if gen != self._refresh_generation:
+                return
+
             def _apply_results() -> bool:
+                if gen != self._refresh_generation:
+                    return False
                 self._populate_genres(genres)
                 self._populate_releases(releases)
                 self._populate_tracks(tracks)
@@ -448,7 +458,8 @@ class ExploreView(Gtk.ScrolledWindow):
 
         except Exception:
             logger.warning("Failed to fetch explore content", exc_info=True)
-            GLib.idle_add(self._show_login_state)
+            if gen == self._refresh_generation:
+                GLib.idle_add(self._show_login_state)
 
     def _populate_genres(self, genres: list[str]) -> None:
         """Fill the genre flow box with pill buttons."""
