@@ -460,8 +460,11 @@ class TidalProvider(ContentProvider):
         }
         content = json.dumps(data)
         # Write with 0o600 to prevent other users from reading tokens.
+        # fchmod ensures permissions are corrected even if the file
+        # already existed with weaker permissions.
         fd = os.open(str(SESSION_FILE), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
+            os.fchmod(fd, 0o600)
             os.write(fd, content.encode())
         finally:
             os.close(fd)

@@ -313,21 +313,34 @@ class Player(GObject.Object):
     # ------------------------------------------------------------------
 
     def play_track(self, track: Track) -> None:
-        """Resolve *track* to a URI and start playing it."""
-        uri = self._resolve_uri(track)
-        if uri is None:
-            return
+        """Resolve *track* to a URI and start playing it.
 
-        self._pipeline.set_state(Gst.State.NULL)
-        self._pipeline.set_property("uri", uri)
-        self._pipeline.set_state(Gst.State.PLAYING)
-        self._set_state(PlayerState.PLAYING)
-        self.emit("track-changed", track)
-        self._start_position_polling()
+        URI resolution (which may involve a Tidal network call) is done
+        in a background thread so the GTK main thread is never blocked.
+        """
+        import threading
 
-        # Start fade-in if crossfade is enabled.
-        if self._crossfade is not None and self._crossfade.enabled:
-            self._crossfade.start_fade_in(self, self._target_volume)
+        def _resolve_and_play() -> None:
+            uri = self._resolve_uri(track)
+            if uri is None:
+                return
+
+            def _start_playback(_uri=uri, _track=track):
+                self._pipeline.set_state(Gst.State.NULL)
+                self._pipeline.set_property("uri", _uri)
+                self._pipeline.set_state(Gst.State.PLAYING)
+                self._set_state(PlayerState.PLAYING)
+                self.emit("track-changed", _track)
+                self._start_position_polling()
+
+                # Start fade-in if crossfade is enabled.
+                if self._crossfade is not None and self._crossfade.enabled:
+                    self._crossfade.start_fade_in(self, self._target_volume)
+                return False  # Don't repeat
+
+            GLib.idle_add(_start_playback)
+
+        threading.Thread(target=_resolve_and_play, daemon=True).start()
 
     def play(self) -> None:
         """Resume playback or play the current queue track."""

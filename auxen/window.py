@@ -611,19 +611,25 @@ class AuxenWindow(Adw.ApplicationWindow):
             and self._app_ref.tidal_provider is not None
             and self._app_ref.player is not None
         ):
-            try:
-                tracks = self._app_ref.tidal_provider.get_playlist_tracks(
-                    tidal_id
-                )
-                if tracks:
-                    self._app_ref.player.play_queue(
-                        tracks, start_index=0
+            import threading
+
+            def _load_and_play() -> None:
+                try:
+                    tracks = self._app_ref.tidal_provider.get_playlist_tracks(
+                        tidal_id
                     )
-            except Exception:
-                logger.warning(
-                    "Failed to load mix tracks for %s", name,
-                    exc_info=True,
-                )
+                    if tracks:
+                        GLib.idle_add(
+                            self._app_ref.player.play_queue,
+                            tracks, 0,
+                        )
+                except Exception:
+                    logger.warning(
+                        "Failed to load mix tracks for %s", name,
+                        exc_info=True,
+                    )
+
+            threading.Thread(target=_load_and_play, daemon=True).start()
 
     def _on_mixes_login(self) -> None:
         """Handle login request from the mixes page."""
@@ -1155,25 +1161,31 @@ class AuxenWindow(Adw.ApplicationWindow):
                     is_fav = self._app_ref.db.is_favorite(track.id)
                     self._app_ref.db.set_favorite(track.id, not is_fav)
 
-                    # Sync the toggle to Tidal if applicable
+                    # Sync the toggle to Tidal in a background thread
                     if (
                         getattr(track, "is_tidal", False)
                         and self._app_ref.tidal_provider is not None
                     ):
-                        try:
-                            if is_fav:
-                                self._app_ref.tidal_provider.remove_favorite(
-                                    track.source_id
+                        import threading
+
+                        tidal = self._app_ref.tidal_provider
+                        sid = track.source_id
+
+                        def _sync_tidal(remove=is_fav):
+                            try:
+                                if remove:
+                                    tidal.remove_favorite(sid)
+                                else:
+                                    tidal.add_favorite(sid)
+                            except Exception:
+                                logger.warning(
+                                    "Failed to sync favorite toggle to Tidal",
+                                    exc_info=True,
                                 )
-                            else:
-                                self._app_ref.tidal_provider.add_favorite(
-                                    track.source_id
-                                )
-                        except Exception:
-                            logger.warning(
-                                "Failed to sync favorite toggle to Tidal",
-                                exc_info=True,
-                            )
+
+                        threading.Thread(
+                            target=_sync_tidal, daemon=True
+                        ).start()
             except Exception:
                 logger.warning(
                     "Failed to toggle favorite from context menu",

@@ -109,6 +109,7 @@ class Database:
 
         self._db_path = str(path)
         self._lock = threading.RLock()
+        self._in_batch = False
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -136,17 +137,24 @@ class Database:
 
         def __enter__(self) -> "Database":
             self._db._lock.acquire()
+            self._db._in_batch = True
             self._db._conn.execute("BEGIN")
             return self._db
 
         def __exit__(self, exc_type, exc_val, exc_tb) -> None:
             try:
+                self._db._in_batch = False
                 if exc_type is None:
                     self._db._conn.commit()
                 else:
                     self._db._conn.rollback()
             finally:
                 self._db._lock.release()
+
+    def _commit(self) -> None:
+        """Commit unless inside a batch() block."""
+        if not self._in_batch:
+            self._conn.commit()
 
     def batch(self) -> _BatchContext:
         """Return a context manager for batched writes.
@@ -220,7 +228,7 @@ class Database:
                     track.match_group_id,
                 ),
             )
-            self._conn.commit()
+            self._commit()
             # On conflict, lastrowid is 0; retrieve the actual id.
             if cur.lastrowid == 0 or cur.lastrowid is None:
                 row = self._conn.execute(
@@ -232,46 +240,51 @@ class Database:
 
     def get_track(self, track_id: int) -> Optional[Track]:
         """Fetch a single track by its primary key."""
-        cur = self._conn.execute(
-            "SELECT * FROM tracks WHERE id = ?", (track_id,)
-        )
-        row = cur.fetchone()
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM tracks WHERE id = ?", (track_id,)
+            )
+            row = cur.fetchone()
         return self._row_to_track(row) if row else None
 
     def get_all_tracks(self) -> list[Track]:
         """Return every track, most recently added first."""
-        cur = self._conn.execute(
-            "SELECT * FROM tracks ORDER BY added_at DESC, id DESC"
-        )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM tracks ORDER BY added_at DESC, id DESC"
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     def get_tracks_by_source(self, source: Source) -> list[Track]:
         """Return all tracks from the given source."""
-        cur = self._conn.execute(
-            "SELECT * FROM tracks WHERE source = ? ORDER BY added_at DESC, id DESC",
-            (source.value,),
-        )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM tracks WHERE source = ? ORDER BY added_at DESC, id DESC",
+                (source.value,),
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     def get_recently_played(self, limit: int = 20) -> list[Track]:
         """Return the most recently played tracks."""
-        cur = self._conn.execute(
-            """
-            SELECT * FROM tracks
-            WHERE last_played_at IS NOT NULL
-            ORDER BY last_played_at DESC
-            LIMIT ?
-            """,
-            (limit,),
-        )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT * FROM tracks
+                WHERE last_played_at IS NOT NULL
+                ORDER BY last_played_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     def get_recently_added(self, limit: int = 20) -> list[Track]:
         """Return the most recently added tracks."""
-        cur = self._conn.execute(
-            "SELECT * FROM tracks ORDER BY added_at DESC, id DESC LIMIT ?", (limit,)
-        )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM tracks ORDER BY added_at DESC, id DESC LIMIT ?", (limit,)
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     def record_play(self, track_id: int) -> None:
         """Increment play_count and update last_played_at."""
@@ -285,20 +298,21 @@ class Database:
                 """,
                 (track_id,),
             )
-            self._conn.commit()
+            self._commit()
 
     def search(self, query: str) -> list[Track]:
         """Search tracks by title, artist, or album (case-insensitive LIKE)."""
         pattern = f"%{query}%"
-        cur = self._conn.execute(
-            """
-            SELECT * FROM tracks
-            WHERE title LIKE ? OR artist LIKE ? OR album LIKE ?
-            ORDER BY title
-            """,
-            (pattern, pattern, pattern),
-        )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT * FROM tracks
+                WHERE title LIKE ? OR artist LIKE ? OR album LIKE ?
+                ORDER BY title
+                """,
+                (pattern, pattern, pattern),
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     # ------------------------------------------------------------------
     # Favorites
@@ -325,25 +339,27 @@ class Database:
                 self._conn.execute(
                     "DELETE FROM favorites WHERE track_id = ?", (track_id,)
                 )
-            self._conn.commit()
+            self._commit()
 
     def is_favorite(self, track_id: int) -> bool:
         """Check whether a track is favorited."""
-        cur = self._conn.execute(
-            "SELECT 1 FROM favorites WHERE track_id = ?", (track_id,)
-        )
-        return cur.fetchone() is not None
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT 1 FROM favorites WHERE track_id = ?", (track_id,)
+            )
+            return cur.fetchone() is not None
 
     def get_favorites(self) -> list[Track]:
         """Return all favorited tracks."""
-        cur = self._conn.execute(
-            """
-            SELECT t.* FROM tracks t
-            JOIN favorites f ON f.track_id = t.id
-            ORDER BY f.added_at DESC
-            """
-        )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT t.* FROM tracks t
+                JOIN favorites f ON f.track_id = t.id
+                ORDER BY f.added_at DESC
+                """
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     def get_tracks_by_album(
         self, album: str, artist: str | None = None
@@ -357,25 +373,26 @@ class Database:
         artist:
             Optional artist name to narrow the search.
         """
-        if artist is not None:
-            cur = self._conn.execute(
-                """
-                SELECT * FROM tracks
-                WHERE album = ? AND (artist = ? OR album_artist = ?)
-                ORDER BY disc_number ASC, track_number ASC, title ASC
-                """,
-                (album, artist, artist),
-            )
-        else:
-            cur = self._conn.execute(
-                """
-                SELECT * FROM tracks
-                WHERE album = ?
-                ORDER BY disc_number ASC, track_number ASC, title ASC
-                """,
-                (album,),
-            )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            if artist is not None:
+                cur = self._conn.execute(
+                    """
+                    SELECT * FROM tracks
+                    WHERE album = ? AND (artist = ? OR album_artist = ?)
+                    ORDER BY disc_number ASC, track_number ASC, title ASC
+                    """,
+                    (album, artist, artist),
+                )
+            else:
+                cur = self._conn.execute(
+                    """
+                    SELECT * FROM tracks
+                    WHERE album = ?
+                    ORDER BY disc_number ASC, track_number ASC, title ASC
+                    """,
+                    (album,),
+                )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     # ------------------------------------------------------------------
     # Settings
@@ -383,10 +400,11 @@ class Database:
 
     def get_setting(self, key: str, default: Optional[str] = None) -> Optional[str]:
         """Read a setting value, returning *default* when absent."""
-        cur = self._conn.execute(
-            "SELECT value FROM settings WHERE key = ?", (key,)
-        )
-        row = cur.fetchone()
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (key,)
+            )
+            row = cur.fetchone()
         return row["value"] if row else default
 
     def set_setting(self, key: str, value: str) -> None:
@@ -396,7 +414,7 @@ class Database:
                 "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
                 (key, value),
             )
-            self._conn.commit()
+            self._commit()
 
     # ------------------------------------------------------------------
     # Local files
@@ -423,15 +441,16 @@ class Database:
                 """,
                 (track_id, file_path, file_size, file_modified_at),
             )
-            self._conn.commit()
+            self._commit()
 
     def get_local_file_path(self, track_id: int) -> Optional[str]:
         """Return the file path for a local track, or None."""
-        cur = self._conn.execute(
-            "SELECT file_path FROM local_files WHERE track_id = ?",
-            (track_id,),
-        )
-        row = cur.fetchone()
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT file_path FROM local_files WHERE track_id = ?",
+                (track_id,),
+            )
+            row = cur.fetchone()
         return row["file_path"] if row else None
 
     def get_track_by_file_path(self, file_path: str) -> Optional[Track]:
@@ -439,15 +458,16 @@ class Database:
 
         Returns the Track if found, or None.
         """
-        cur = self._conn.execute(
-            """
-            SELECT t.* FROM tracks t
-            JOIN local_files lf ON lf.track_id = t.id
-            WHERE lf.file_path = ?
-            """,
-            (file_path,),
-        )
-        row = cur.fetchone()
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT t.* FROM tracks t
+                JOIN local_files lf ON lf.track_id = t.id
+                WHERE lf.file_path = ?
+                """,
+                (file_path,),
+            )
+            row = cur.fetchone()
         return self._row_to_track(row) if row else None
 
     # ------------------------------------------------------------------
@@ -456,11 +476,12 @@ class Database:
 
     def get_tracks_in_match_group(self, match_group_id: str) -> list[Track]:
         """Return all tracks sharing the given match group."""
-        cur = self._conn.execute(
-            "SELECT * FROM tracks WHERE match_group_id = ?",
-            (match_group_id,),
-        )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM tracks WHERE match_group_id = ?",
+                (match_group_id,),
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     def set_match_group(self, track_ids: list[int], group_id: str) -> None:
         """Assign a match group id to multiple tracks."""
@@ -470,7 +491,7 @@ class Database:
                     "UPDATE tracks SET match_group_id = ? WHERE id = ?",
                     (group_id, tid),
                 )
-            self._conn.commit()
+            self._commit()
 
     # ------------------------------------------------------------------
     # Playlists
@@ -483,46 +504,48 @@ class Database:
                 "INSERT INTO playlists (name, color) VALUES (?, ?)",
                 (name, color),
             )
-            self._conn.commit()
+            self._commit()
             return cur.lastrowid  # type: ignore[return-value]
 
     def get_playlists(self) -> list[dict]:
         """Get all playlists as dicts with id, name, color, track_count."""
-        cur = self._conn.execute(
-            """
-            SELECT p.id, p.name, p.color,
-                   COUNT(pt.track_id) AS track_count
-            FROM playlists p
-            LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
-            WHERE p.source IS NULL AND p.tidal_playlist_id IS NULL
-            GROUP BY p.id
-            ORDER BY p.id
-            """
-        )
-        return [
-            {
-                "id": row["id"],
-                "name": row["name"],
-                "color": row["color"],
-                "track_count": row["track_count"],
-            }
-            for row in cur.fetchall()
-        ]
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT p.id, p.name, p.color,
+                       COUNT(pt.track_id) AS track_count
+                FROM playlists p
+                LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+                WHERE p.source IS NULL AND p.tidal_playlist_id IS NULL
+                GROUP BY p.id
+                ORDER BY p.id
+                """
+            )
+            return [
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "color": row["color"],
+                    "track_count": row["track_count"],
+                }
+                for row in cur.fetchall()
+            ]
 
     def get_playlist(self, playlist_id: int) -> dict | None:
         """Get a single playlist with its metadata."""
-        cur = self._conn.execute(
-            """
-            SELECT p.id, p.name, p.color,
-                   COUNT(pt.track_id) AS track_count
-            FROM playlists p
-            LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
-            WHERE p.id = ?
-            GROUP BY p.id
-            """,
-            (playlist_id,),
-        )
-        row = cur.fetchone()
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT p.id, p.name, p.color,
+                       COUNT(pt.track_id) AS track_count
+                FROM playlists p
+                LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+                WHERE p.id = ?
+                GROUP BY p.id
+                """,
+                (playlist_id,),
+            )
+            row = cur.fetchone()
         if row is None:
             return None
         return {
@@ -543,7 +566,7 @@ class Database:
                 "DELETE FROM playlists WHERE id = ?",
                 (playlist_id,),
             )
-            self._conn.commit()
+            self._commit()
 
     def rename_playlist(self, playlist_id: int, name: str) -> None:
         """Rename a playlist."""
@@ -552,7 +575,7 @@ class Database:
                 "UPDATE playlists SET name = ? WHERE id = ?",
                 (name, playlist_id),
             )
-            self._conn.commit()
+            self._commit()
 
     def update_playlist_color(self, playlist_id: int, color: str) -> None:
         """Update the color of a playlist."""
@@ -561,7 +584,7 @@ class Database:
                 "UPDATE playlists SET color = ? WHERE id = ?",
                 (color, playlist_id),
             )
-            self._conn.commit()
+            self._commit()
 
     def add_track_to_playlist(
         self, playlist_id: int, track_id: int
@@ -591,7 +614,7 @@ class Database:
                 "(playlist_id, track_id, position) VALUES (?, ?, ?)",
                 (playlist_id, track_id, next_pos),
             )
-            self._conn.commit()
+            self._commit()
 
     def remove_track_from_playlist(
         self, playlist_id: int, track_id: int
@@ -603,20 +626,21 @@ class Database:
                 "WHERE playlist_id = ? AND track_id = ?",
                 (playlist_id, track_id),
             )
-            self._conn.commit()
+            self._commit()
 
     def get_playlist_tracks(self, playlist_id: int) -> list[Track]:
         """Get all tracks in a playlist, ordered by position."""
-        cur = self._conn.execute(
-            """
-            SELECT t.* FROM tracks t
-            JOIN playlist_tracks pt ON pt.track_id = t.id
-            WHERE pt.playlist_id = ?
-            ORDER BY pt.position
-            """,
-            (playlist_id,),
-        )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT t.* FROM tracks t
+                JOIN playlist_tracks pt ON pt.track_id = t.id
+                WHERE pt.playlist_id = ?
+                ORDER BY pt.position
+                """,
+                (playlist_id,),
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     def reorder_playlist_track(
         self, playlist_id: int, track_id: int, new_position: int
@@ -649,7 +673,7 @@ class Database:
                     "WHERE playlist_id = ? AND track_id = ?",
                     (pos, playlist_id, tid),
                 )
-            self._conn.commit()
+            self._commit()
 
     # ------------------------------------------------------------------
     # Library browsing
@@ -664,47 +688,48 @@ class Database:
         -------
         list of dicts with keys: album, artist, track_count, source, year
         """
-        if source is not None:
-            cur = self._conn.execute(
-                """
-                SELECT album,
-                       COALESCE(album_artist, artist) AS artist,
-                       COUNT(*) AS track_count,
-                       source,
-                       MAX(year) AS year,
-                       MAX(added_at) AS latest_added
-                FROM tracks
-                WHERE album IS NOT NULL AND album != '' AND source = ?
-                GROUP BY album, COALESCE(album_artist, artist), source
-                ORDER BY latest_added DESC
-                """,
-                (source.value,),
-            )
-        else:
-            cur = self._conn.execute(
-                """
-                SELECT album,
-                       COALESCE(album_artist, artist) AS artist,
-                       COUNT(*) AS track_count,
-                       source,
-                       MAX(year) AS year,
-                       MAX(added_at) AS latest_added
-                FROM tracks
-                WHERE album IS NOT NULL AND album != ''
-                GROUP BY album, COALESCE(album_artist, artist), source
-                ORDER BY latest_added DESC
-                """
-            )
-        return [
-            {
-                "album": row["album"],
-                "artist": row["artist"],
-                "track_count": row["track_count"],
-                "source": row["source"],
-                "year": row["year"],
-            }
-            for row in cur.fetchall()
-        ]
+        with self._lock:
+            if source is not None:
+                cur = self._conn.execute(
+                    """
+                    SELECT album,
+                           COALESCE(album_artist, artist) AS artist,
+                           COUNT(*) AS track_count,
+                           source,
+                           MAX(year) AS year,
+                           MAX(added_at) AS latest_added
+                    FROM tracks
+                    WHERE album IS NOT NULL AND album != '' AND source = ?
+                    GROUP BY album, COALESCE(album_artist, artist), source
+                    ORDER BY latest_added DESC
+                    """,
+                    (source.value,),
+                )
+            else:
+                cur = self._conn.execute(
+                    """
+                    SELECT album,
+                           COALESCE(album_artist, artist) AS artist,
+                           COUNT(*) AS track_count,
+                           source,
+                           MAX(year) AS year,
+                           MAX(added_at) AS latest_added
+                    FROM tracks
+                    WHERE album IS NOT NULL AND album != ''
+                    GROUP BY album, COALESCE(album_artist, artist), source
+                    ORDER BY latest_added DESC
+                    """
+                )
+            return [
+                {
+                    "album": row["album"],
+                    "artist": row["artist"],
+                    "track_count": row["track_count"],
+                    "source": row["source"],
+                    "year": row["year"],
+                }
+                for row in cur.fetchall()
+            ]
 
     def get_artists(self, source: Source | None = None) -> list[dict]:
         """Get distinct artists with track count.
@@ -715,36 +740,37 @@ class Database:
         -------
         list of dicts with keys: artist, track_count, sources
         """
-        if source is not None:
-            cur = self._conn.execute(
-                """
-                SELECT artist, COUNT(*) AS track_count,
-                       GROUP_CONCAT(DISTINCT source) AS sources
-                FROM tracks
-                WHERE source = ?
-                GROUP BY artist
-                ORDER BY artist COLLATE NOCASE ASC
-                """,
-                (source.value,),
-            )
-        else:
-            cur = self._conn.execute(
-                """
-                SELECT artist, COUNT(*) AS track_count,
-                       GROUP_CONCAT(DISTINCT source) AS sources
-                FROM tracks
-                GROUP BY artist
-                ORDER BY artist COLLATE NOCASE ASC
-                """
-            )
-        return [
-            {
-                "artist": row["artist"],
-                "track_count": row["track_count"],
-                "sources": row["sources"].split(",") if row["sources"] else [],
-            }
-            for row in cur.fetchall()
-        ]
+        with self._lock:
+            if source is not None:
+                cur = self._conn.execute(
+                    """
+                    SELECT artist, COUNT(*) AS track_count,
+                           GROUP_CONCAT(DISTINCT source) AS sources
+                    FROM tracks
+                    WHERE source = ?
+                    GROUP BY artist
+                    ORDER BY artist COLLATE NOCASE ASC
+                    """,
+                    (source.value,),
+                )
+            else:
+                cur = self._conn.execute(
+                    """
+                    SELECT artist, COUNT(*) AS track_count,
+                           GROUP_CONCAT(DISTINCT source) AS sources
+                    FROM tracks
+                    GROUP BY artist
+                    ORDER BY artist COLLATE NOCASE ASC
+                    """
+                )
+            return [
+                {
+                    "artist": row["artist"],
+                    "track_count": row["track_count"],
+                    "sources": row["sources"].split(",") if row["sources"] else [],
+                }
+                for row in cur.fetchall()
+            ]
 
     def get_artist_albums(self, artist: str) -> list[dict]:
         """Get all albums by a specific artist.
@@ -752,58 +778,61 @@ class Database:
         Returns a list of dicts with keys: album, track_count, year, source.
         Ordered by year descending (newest first), then album name.
         """
-        cur = self._conn.execute(
-            """
-            SELECT album,
-                   COUNT(*) AS track_count,
-                   MAX(year) AS year,
-                   source
-            FROM tracks
-            WHERE (artist = ? OR album_artist = ?)
-              AND album IS NOT NULL AND album != ''
-            GROUP BY album, source
-            ORDER BY year DESC, album COLLATE NOCASE ASC
-            """,
-            (artist, artist),
-        )
-        return [
-            {
-                "album": row["album"],
-                "track_count": row["track_count"],
-                "year": row["year"],
-                "source": row["source"],
-            }
-            for row in cur.fetchall()
-        ]
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT album,
+                       COUNT(*) AS track_count,
+                       MAX(year) AS year,
+                       source
+                FROM tracks
+                WHERE (artist = ? OR album_artist = ?)
+                  AND album IS NOT NULL AND album != ''
+                GROUP BY album, source
+                ORDER BY year DESC, album COLLATE NOCASE ASC
+                """,
+                (artist, artist),
+            )
+            return [
+                {
+                    "album": row["album"],
+                    "track_count": row["track_count"],
+                    "year": row["year"],
+                    "source": row["source"],
+                }
+                for row in cur.fetchall()
+            ]
 
     def get_artist_tracks(self, artist: str) -> list[Track]:
         """Get all tracks by a specific artist.
 
         Returns Track objects ordered by album, disc number, track number.
         """
-        cur = self._conn.execute(
-            """
-            SELECT * FROM tracks
-            WHERE artist = ? OR album_artist = ?
-            ORDER BY album COLLATE NOCASE ASC,
-                     disc_number ASC,
-                     track_number ASC,
-                     title COLLATE NOCASE ASC
-            """,
-            (artist, artist),
-        )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT * FROM tracks
+                WHERE artist = ? OR album_artist = ?
+                ORDER BY album COLLATE NOCASE ASC,
+                         disc_number ASC,
+                         track_number ASC,
+                         title COLLATE NOCASE ASC
+                """,
+                (artist, artist),
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     def get_track_count(self, source: Source | None = None) -> int:
         """Get total track count, optionally filtered by source."""
-        if source is not None:
-            cur = self._conn.execute(
-                "SELECT COUNT(*) AS cnt FROM tracks WHERE source = ?",
-                (source.value,),
-            )
-        else:
-            cur = self._conn.execute("SELECT COUNT(*) AS cnt FROM tracks")
-        row = cur.fetchone()
+        with self._lock:
+            if source is not None:
+                cur = self._conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM tracks WHERE source = ?",
+                    (source.value,),
+                )
+            else:
+                cur = self._conn.execute("SELECT COUNT(*) AS cnt FROM tracks")
+            row = cur.fetchone()
         return row["cnt"] if row else 0
 
     # ------------------------------------------------------------------
@@ -823,7 +852,7 @@ class Database:
                 """,
                 (track_id, played_at, duration_listened),
             )
-            self._conn.commit()
+            self._commit()
             return cur.lastrowid  # type: ignore[return-value]
 
     def get_play_history(self, limit: int = 50) -> list[dict]:
@@ -832,29 +861,30 @@ class Database:
         Each dict contains: id, track_id, played_at, duration_listened,
         title, artist, album.
         """
-        cur = self._conn.execute(
-            """
-            SELECT ph.id, ph.track_id, ph.played_at, ph.duration_listened,
-                   t.title, t.artist, t.album
-            FROM play_history ph
-            JOIN tracks t ON t.id = ph.track_id
-            ORDER BY ph.played_at DESC
-            LIMIT ?
-            """,
-            (limit,),
-        )
-        return [
-            {
-                "id": row["id"],
-                "track_id": row["track_id"],
-                "played_at": row["played_at"],
-                "duration_listened": row["duration_listened"],
-                "title": row["title"],
-                "artist": row["artist"],
-                "album": row["album"],
-            }
-            for row in cur.fetchall()
-        ]
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT ph.id, ph.track_id, ph.played_at, ph.duration_listened,
+                       t.title, t.artist, t.album
+                FROM play_history ph
+                JOIN tracks t ON t.id = ph.track_id
+                ORDER BY ph.played_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            return [
+                {
+                    "id": row["id"],
+                    "track_id": row["track_id"],
+                    "played_at": row["played_at"],
+                    "duration_listened": row["duration_listened"],
+                    "title": row["title"],
+                    "artist": row["artist"],
+                    "album": row["album"],
+                }
+                for row in cur.fetchall()
+            ]
 
     def get_listening_stats(self) -> dict:
         """Return aggregate listening statistics.
@@ -866,78 +896,80 @@ class Database:
             most_active_hour (0-23 or None),
             avg_tracks_per_day (over last 30 days).
         """
-        # Total tracks played
-        cur = self._conn.execute(
-            "SELECT COUNT(*) AS cnt FROM play_history"
-        )
-        total_tracks_played = cur.fetchone()["cnt"]
+        with self._lock:
+            # Total tracks played
+            cur = self._conn.execute(
+                "SELECT COUNT(*) AS cnt FROM play_history"
+            )
+            total_tracks_played = cur.fetchone()["cnt"]
 
-        # Total listen time in hours
-        cur = self._conn.execute(
-            "SELECT COALESCE(SUM(duration_listened), 0) AS total "
-            "FROM play_history"
-        )
-        total_seconds = cur.fetchone()["total"]
-        total_listen_time_hours = round(total_seconds / 3600, 1)
+            # Total listen time in hours
+            cur = self._conn.execute(
+                "SELECT COALESCE(SUM(duration_listened), 0) AS total "
+                "FROM play_history"
+            )
+            total_seconds = cur.fetchone()["total"]
+            total_listen_time_hours = round(total_seconds / 3600, 1)
 
-        # Top artists (top 10 by play count)
-        cur = self._conn.execute(
-            """
-            SELECT t.artist, COUNT(*) AS play_count
-            FROM play_history ph
-            JOIN tracks t ON t.id = ph.track_id
-            GROUP BY t.artist
-            ORDER BY play_count DESC
-            LIMIT 10
-            """
-        )
-        top_artists = [
-            (row["artist"], row["play_count"]) for row in cur.fetchall()
-        ]
+            # Top artists (top 10 by play count)
+            cur = self._conn.execute(
+                """
+                SELECT t.artist, COUNT(*) AS play_count
+                FROM play_history ph
+                JOIN tracks t ON t.id = ph.track_id
+                GROUP BY t.artist
+                ORDER BY play_count DESC
+                LIMIT 10
+                """
+            )
+            top_artists = [
+                (row["artist"], row["play_count"]) for row in cur.fetchall()
+            ]
 
-        # Top tracks (top 10 by play count)
-        cur = self._conn.execute(
-            """
-            SELECT t.title, t.artist, COUNT(*) AS play_count
-            FROM play_history ph
-            JOIN tracks t ON t.id = ph.track_id
-            GROUP BY ph.track_id
-            ORDER BY play_count DESC
-            LIMIT 10
-            """
-        )
-        top_tracks = [
-            (row["title"], row["artist"], row["play_count"])
-            for row in cur.fetchall()
-        ]
+            # Top tracks (top 10 by play count)
+            cur = self._conn.execute(
+                """
+                SELECT t.title, t.artist, COUNT(*) AS play_count
+                FROM play_history ph
+                JOIN tracks t ON t.id = ph.track_id
+                GROUP BY ph.track_id
+                ORDER BY play_count DESC
+                LIMIT 10
+                """
+            )
+            top_tracks = [
+                (row["title"], row["artist"], row["play_count"])
+                for row in cur.fetchall()
+            ]
 
-        # Most active hour (0-23)
-        cur = self._conn.execute(
-            """
-            SELECT CAST(strftime('%H', played_at) AS INTEGER) AS hour,
-                   COUNT(*) AS cnt
-            FROM play_history
-            GROUP BY hour
-            ORDER BY cnt DESC
-            LIMIT 1
-            """
-        )
-        row = cur.fetchone()
-        most_active_hour = row["hour"] if row else None
+            # Most active hour (0-23)
+            cur = self._conn.execute(
+                """
+                SELECT CAST(strftime('%H', played_at) AS INTEGER) AS hour,
+                       COUNT(*) AS cnt
+                FROM play_history
+                GROUP BY hour
+                ORDER BY cnt DESC
+                LIMIT 1
+                """
+            )
+            row = cur.fetchone()
+            most_active_hour = row["hour"] if row else None
 
-        # Average tracks per day over last 30 days
-        thirty_days_ago = (
-            datetime.now(UTC) - timedelta(days=30)
-        ).isoformat()
-        cur = self._conn.execute(
-            """
-            SELECT COUNT(*) AS cnt
-            FROM play_history
-            WHERE played_at >= ?
-            """,
-            (thirty_days_ago,),
-        )
-        recent_count = cur.fetchone()["cnt"]
+            # Average tracks per day over last 30 days
+            thirty_days_ago = (
+                datetime.now(UTC) - timedelta(days=30)
+            ).isoformat()
+            cur = self._conn.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM play_history
+                WHERE played_at >= ?
+                """,
+                (thirty_days_ago,),
+            )
+            recent_count = cur.fetchone()["cnt"]
+
         avg_tracks_per_day = round(recent_count / 30, 1)
 
         return {
@@ -959,44 +991,47 @@ class Database:
         Uses the play_history table to count actual plays (more reliable
         than the cached play_count on the tracks table).
         """
-        cur = self._conn.execute(
-            """
-            SELECT t.*, COUNT(ph.id) AS play_cnt
-            FROM play_history ph
-            JOIN tracks t ON t.id = ph.track_id
-            GROUP BY ph.track_id
-            ORDER BY play_cnt DESC
-            LIMIT ?
-            """,
-            (limit,),
-        )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT t.*, COUNT(ph.id) AS play_cnt
+                FROM play_history ph
+                JOIN tracks t ON t.id = ph.track_id
+                GROUP BY ph.track_id
+                ORDER BY play_cnt DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     def get_recently_added_tracks(self, limit: int = 50) -> list[Track]:
         """Return the most recently added tracks (by id desc)."""
-        cur = self._conn.execute(
-            "SELECT * FROM tracks ORDER BY id DESC LIMIT ?", (limit,)
-        )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM tracks ORDER BY id DESC LIMIT ?", (limit,)
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     def get_heavy_rotation_tracks(
         self, days: int = 7, limit: int = 30
     ) -> list[Track]:
         """Return the most-played tracks in the last *days* days."""
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
-        cur = self._conn.execute(
-            """
-            SELECT t.*, COUNT(ph.id) AS play_cnt
-            FROM play_history ph
-            JOIN tracks t ON t.id = ph.track_id
-            WHERE ph.played_at >= ?
-            GROUP BY ph.track_id
-            ORDER BY play_cnt DESC
-            LIMIT ?
-            """,
-            (cutoff, limit),
-        )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT t.*, COUNT(ph.id) AS play_cnt
+                FROM play_history ph
+                JOIN tracks t ON t.id = ph.track_id
+                WHERE ph.played_at >= ?
+                GROUP BY ph.track_id
+                ORDER BY play_cnt DESC
+                LIMIT ?
+                """,
+                (cutoff, limit),
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     def get_forgotten_gems(
         self,
@@ -1010,20 +1045,21 @@ class Database:
         cutoff = (
             datetime.now(UTC) - timedelta(days=inactive_days)
         ).isoformat()
-        cur = self._conn.execute(
-            """
-            SELECT t.*, COUNT(ph.id) AS play_cnt,
-                   MAX(ph.played_at) AS last_play
-            FROM play_history ph
-            JOIN tracks t ON t.id = ph.track_id
-            GROUP BY ph.track_id
-            HAVING play_cnt >= ? AND last_play < ?
-            ORDER BY play_cnt DESC
-            LIMIT ?
-            """,
-            (min_plays, cutoff, limit),
-        )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT t.*, COUNT(ph.id) AS play_cnt,
+                       MAX(ph.played_at) AS last_play
+                FROM play_history ph
+                JOIN tracks t ON t.id = ph.track_id
+                GROUP BY ph.track_id
+                HAVING play_cnt >= ? AND last_play < ?
+                ORDER BY play_cnt DESC
+                LIMIT ?
+                """,
+                (min_plays, cutoff, limit),
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     def get_tracks_by_duration(
         self,
@@ -1048,12 +1084,13 @@ class Database:
         where = " AND ".join(conditions)
         params.append(limit)
 
-        cur = self._conn.execute(
-            f"SELECT * FROM tracks WHERE {where} "
-            f"ORDER BY duration DESC LIMIT ?",
-            params,
-        )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                f"SELECT * FROM tracks WHERE {where} "
+                f"ORDER BY duration DESC LIMIT ?",
+                params,
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     def get_recently_played_history(self, limit: int = 20) -> list[Track]:
         """Return most recently played tracks, deduplicated.
@@ -1061,18 +1098,19 @@ class Database:
         Returns at most *limit* unique Track objects, ordered by the most
         recent play of each unique track.
         """
-        cur = self._conn.execute(
-            """
-            SELECT t.*, MAX(ph.played_at) AS latest_play
-            FROM play_history ph
-            JOIN tracks t ON t.id = ph.track_id
-            GROUP BY ph.track_id
-            ORDER BY latest_play DESC
-            LIMIT ?
-            """,
-            (limit,),
-        )
-        return [self._row_to_track(r) for r in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT t.*, MAX(ph.played_at) AS latest_play
+                FROM play_history ph
+                JOIN tracks t ON t.id = ph.track_id
+                GROUP BY ph.track_id
+                ORDER BY latest_play DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
 
     # ------------------------------------------------------------------
     # Search history
@@ -1094,7 +1132,7 @@ class Database:
                 """,
                 (query, now, now),
             )
-            self._conn.commit()
+            self._commit()
 
     def get_search_history(self, limit: int = 10) -> list[str]:
         """Return recent search queries, newest first.
@@ -1104,17 +1142,18 @@ class Database:
         limit:
             Maximum number of queries to return (default 10).
         """
-        cur = self._conn.execute(
-            "SELECT query FROM search_history ORDER BY searched_at DESC, id DESC LIMIT ?",
-            (limit,),
-        )
-        return [row["query"] for row in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT query FROM search_history ORDER BY searched_at DESC, id DESC LIMIT ?",
+                (limit,),
+            )
+            return [row["query"] for row in cur.fetchall()]
 
     def clear_search_history(self) -> None:
         """Delete all search history entries."""
         with self._lock:
             self._conn.execute("DELETE FROM search_history")
-            self._conn.commit()
+            self._commit()
 
     def delete_search_history_item(self, query: str) -> None:
         """Delete a single search history entry."""
@@ -1122,7 +1161,7 @@ class Database:
             self._conn.execute(
                 "DELETE FROM search_history WHERE query = ?", (query,)
             )
-            self._conn.commit()
+            self._commit()
 
     # ------------------------------------------------------------------
     # Internal

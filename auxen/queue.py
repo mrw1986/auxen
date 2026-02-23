@@ -24,6 +24,8 @@ class PlayQueue:
         self._tracks: list[Track] = []
         self._position: int = 0
         self.repeat_mode: RepeatMode = RepeatMode.OFF
+        self._shuffled: bool = False
+        self._original_tracks: list[Track] | None = None
 
     # ------------------------------------------------------------------
     # Properties
@@ -61,6 +63,8 @@ class PlayQueue:
         """Replace the entire queue with *tracks* and reset position to 0."""
         self._tracks = list(tracks)
         self._position = 0
+        self._shuffled = False
+        self._original_tracks = None
 
     def remove(self, index: int) -> bool:
         """Remove the track at *index*.
@@ -151,10 +155,19 @@ class PlayQueue:
     # Shuffle
     # ------------------------------------------------------------------
 
+    @property
+    def shuffled(self) -> bool:
+        """Return True if the queue is currently shuffled."""
+        return self._shuffled
+
     def shuffle(self) -> None:
         """Fisher-Yates shuffle the queue, keeping current track at index 0."""
         if len(self._tracks) <= 1:
             return
+
+        # Store original order for unshuffle
+        if not self._shuffled:
+            self._original_tracks = list(self._tracks)
 
         current_track = self._tracks[self._position]
 
@@ -166,3 +179,21 @@ class PlayQueue:
 
         self._tracks = [current_track] + remaining
         self._position = 0
+        self._shuffled = True
+
+    def unshuffle(self) -> None:
+        """Restore the original queue order from before shuffle."""
+        if not self._shuffled or self._original_tracks is None:
+            return
+
+        current_track = self.current
+        self._tracks = list(self._original_tracks)
+        self._original_tracks = None
+        self._shuffled = False
+
+        # Restore position to the current track in the original order
+        if current_track is not None:
+            try:
+                self._position = self._tracks.index(current_track)
+            except ValueError:
+                self._position = 0

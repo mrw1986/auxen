@@ -571,8 +571,11 @@ class AuxenApp(Adw.Application):
         self.mpris.on_loop_changed = _mpris_loop
 
         def _mpris_shuffle(enabled: bool) -> None:
-            if self.player is not None and enabled:
-                self.player.queue.shuffle()
+            if self.player is not None:
+                if enabled:
+                    self.player.queue.shuffle()
+                else:
+                    self.player.queue.unshuffle()
 
         self.mpris.on_shuffle_changed = _mpris_shuffle
 

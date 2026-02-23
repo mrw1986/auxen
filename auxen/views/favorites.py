@@ -511,7 +511,8 @@ class FavoritesView(Gtk.ScrolledWindow):
         """Remove a track from favorites via the database.
 
         If the track is a Tidal track and the Tidal provider is
-        available, also remove it from Tidal favourites.
+        available, also remove it from Tidal favourites in a background
+        thread.
         """
         if self._db is not None:
             try:
@@ -519,20 +520,29 @@ class FavoritesView(Gtk.ScrolledWindow):
                 track_obj = self._track_objects.get(track_id)
                 self._db.set_favorite(track_id, False)
 
-                # Also remove from Tidal if applicable
+                # Also remove from Tidal in a background thread
                 if (
                     track_obj is not None
                     and self._tidal_provider is not None
                     and getattr(track_obj, "is_tidal", False)
                 ):
-                    try:
-                        self._tidal_provider.remove_favorite(
-                            track_obj.source_id
-                        )
-                    except Exception:
-                        logger.warning(
-                            "Failed to remove Tidal favorite", exc_info=True
-                        )
+                    import threading
+
+                    tidal = self._tidal_provider
+                    sid = track_obj.source_id
+
+                    def _remove_tidal_fav():
+                        try:
+                            tidal.remove_favorite(sid)
+                        except Exception:
+                            logger.warning(
+                                "Failed to remove Tidal favorite",
+                                exc_info=True,
+                            )
+
+                    threading.Thread(
+                        target=_remove_tidal_fav, daemon=True
+                    ).start()
 
                 self._load_from_db()
                 self._refresh_list()
