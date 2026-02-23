@@ -351,23 +351,20 @@ class AuxenSettings(Adw.PreferencesWindow):
     def _build_about_group(self) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup(title="About")
 
-        version_row = Adw.ActionRow(
-            title="Version",
-            subtitle="0.1.0",
+        about_row = Adw.ActionRow(
+            title="About Auxen",
+            subtitle="Version, credits, and license information",
         )
-        group.add(version_row)
-
-        credits_row = Adw.ActionRow(
-            title="Created by",
-            subtitle="mrw1986",
+        about_row.set_icon_name("help-about-symbolic")
+        about_btn = Gtk.Button(
+            icon_name="go-next-symbolic",
+            valign=Gtk.Align.CENTER,
         )
-        group.add(credits_row)
-
-        license_row = Adw.ActionRow(
-            title="License",
-            subtitle="GPL-3.0",
-        )
-        group.add(license_row)
+        about_btn.add_css_class("flat")
+        about_btn.connect("clicked", self._on_open_about)
+        about_row.add_suffix(about_btn)
+        about_row.set_activatable_widget(about_btn)
+        group.add(about_row)
 
         return group
 
@@ -668,6 +665,13 @@ class AuxenSettings(Adw.PreferencesWindow):
         parent = self.get_transient_for()
         if parent is not None and hasattr(parent, "open_equalizer"):
             parent.open_equalizer()
+
+    def _on_open_about(self, _button: Gtk.Button) -> None:
+        """Open the About dialog."""
+        from auxen.views.about_dialog import show_about_dialog
+
+        parent = self.get_transient_for()
+        show_about_dialog(parent or self)
 
     def _on_tidal_login(self, _button: Gtk.Button) -> None:
         """Start or manage the Tidal login flow."""

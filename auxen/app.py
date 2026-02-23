@@ -164,6 +164,11 @@ class AuxenApp(Adw.Application):
         self.add_action(sleep_timer_action)
         self.set_accels_for_action("app.sleep-timer", ["<Control>t"])
 
+        about_action = Gio.SimpleAction.new("about", None)
+        about_action.connect("activate", self._on_about_action)
+        self.add_action(about_action)
+        self.set_accels_for_action("app.about", ["<Control>question"])
+
         sync_favorites_action = Gio.SimpleAction.new(
             "sync-tidal-favorites", None
         )
@@ -832,6 +837,15 @@ class AuxenApp(Adw.Application):
         win = self.props.active_window
         if win is not None:
             win.open_sleep_timer()
+
+    def _on_about_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        from auxen.views.about_dialog import show_about_dialog
+
+        win = self.props.active_window
+        if win is not None:
+            show_about_dialog(win)
 
     # ------------------------------------------------------------------
     # Sleep timer callbacks
