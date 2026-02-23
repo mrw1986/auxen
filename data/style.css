@@ -1428,6 +1428,40 @@ button.flat:hover {
     opacity: 0.3;
 }
 
+/* -- Drag handle (grip icon) for reorderable rows -- */
+
+.drag-handle {
+    color: rgba(163, 158, 147, 0.3);
+    min-width: 16px;
+    min-height: 16px;
+    transition: all 200ms ease;
+    cursor: grab;
+}
+
+.drag-handle:hover {
+    color: rgba(163, 158, 147, 0.7);
+}
+
+/* -- Row being actively dragged -- */
+
+.drag-row-active {
+    background-color: rgba(212, 160, 57, 0.15);
+    opacity: 0.7;
+    border-radius: 6px;
+}
+
+/* -- Drop indicator line between rows -- */
+
+.drop-indicator-top {
+    border-top: 2px solid #d4a039;
+    border-radius: 0;
+}
+
+.drop-indicator-bottom {
+    border-bottom: 2px solid #d4a039;
+    border-radius: 0;
+}
+
 /* -- Queue toggle button in now-playing bar — amber when active -- */
 
 .queue-toggle-btn.active {

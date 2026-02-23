@@ -7,10 +7,11 @@ from typing import Callable, Optional
 
 import gi
 
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import GLib, Gtk, Pango
+from gi.repository import Gdk, GLib, GObject, Gtk, Pango
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +57,15 @@ def _make_track_row(
     on_move_down: Callable[[int], None] | None = None,
     is_first: bool = False,
     is_last: bool = False,
+    drag_handlers: dict | None = None,
 ) -> Gtk.ListBoxRow:
-    """Build a single row for the playlist track list."""
+    """Build a single row for the playlist track list.
+
+    Args:
+        drag_handlers: Optional dict with keys 'on_drag_prepare',
+            'on_drag_begin', 'on_drag_end', 'on_drop_enter',
+            'on_drop_leave', 'on_drop' for drag-and-drop support.
+    """
     row_box = Gtk.Box(
         orientation=Gtk.Orientation.HORIZONTAL,
         spacing=12,
@@ -67,6 +75,29 @@ def _make_track_row(
     row_box.set_margin_bottom(4)
     row_box.set_margin_start(8)
     row_box.set_margin_end(8)
+
+    # -- Drag handle --
+    drag_handle = Gtk.Image.new_from_icon_name("drag-symbolic")
+    drag_handle.set_pixel_size(16)
+    drag_handle.add_css_class("drag-handle")
+    drag_handle.set_valign(Gtk.Align.CENTER)
+    drag_handle.set_tooltip_text("Drag to reorder")
+    row_box.append(drag_handle)
+
+    # Set up DragSource on the drag handle
+    if drag_handlers is not None:
+        drag_source = Gtk.DragSource()
+        drag_source.set_actions(Gdk.DragAction.MOVE)
+        drag_source.connect(
+            "prepare", drag_handlers["on_drag_prepare"], index
+        )
+        drag_source.connect(
+            "drag-begin", drag_handlers["on_drag_begin"], row_box
+        )
+        drag_source.connect(
+            "drag-end", drag_handlers["on_drag_end"], row_box
+        )
+        drag_handle.add_controller(drag_source)
 
     # -- Track number --
     num_label = Gtk.Label(label=str(index + 1))
@@ -203,6 +234,23 @@ def _make_track_row(
 
     row = Gtk.ListBoxRow()
     row.set_child(row_box)
+
+    # Set up DropTarget on the ListBoxRow for drag-and-drop
+    if drag_handlers is not None:
+        drop_target = Gtk.DropTarget.new(
+            GObject.TYPE_INT, Gdk.DragAction.MOVE
+        )
+        drop_target.connect(
+            "enter", drag_handlers["on_drop_enter"], row_box
+        )
+        drop_target.connect(
+            "leave", drag_handlers["on_drop_leave"], row_box
+        )
+        drop_target.connect(
+            "drop", drag_handlers["on_drop"], index
+        )
+        row.add_controller(drop_target)
+
     return row
 
 
@@ -477,6 +525,15 @@ class PlaylistView(Gtk.ScrolledWindow):
             self._content_stack.set_visible_child_name("empty")
             return
 
+        drag_handlers = {
+            "on_drag_prepare": self._on_drag_prepare,
+            "on_drag_begin": self._on_drag_begin,
+            "on_drag_end": self._on_drag_end,
+            "on_drop_enter": self._on_drop_enter,
+            "on_drop_leave": self._on_drop_leave,
+            "on_drop": self._on_drop,
+        }
+
         for idx, track in enumerate(self._tracks):
             row = _make_track_row(
                 index=idx,
@@ -486,10 +543,90 @@ class PlaylistView(Gtk.ScrolledWindow):
                 on_move_down=self._on_move_down,
                 is_first=(idx == 0),
                 is_last=(idx == len(self._tracks) - 1),
+                drag_handlers=drag_handlers,
             )
             self._track_list.append(row)
 
         self._content_stack.set_visible_child_name("list")
+
+    # ---- Drag-and-drop handlers ----
+
+    def _on_drag_prepare(
+        self,
+        _source: Gtk.DragSource,
+        _x: float,
+        _y: float,
+        index: int,
+    ) -> Gdk.ContentProvider:
+        """Prepare the drag data: the track index as an integer."""
+        value = GObject.Value(GObject.TYPE_INT, index)
+        return Gdk.ContentProvider.new_for_value(value)
+
+    def _on_drag_begin(
+        self,
+        _source: Gtk.DragSource,
+        _drag: Gdk.Drag,
+        row_box: Gtk.Box,
+    ) -> None:
+        """Add visual feedback when dragging starts."""
+        row_box.add_css_class("drag-row-active")
+
+    def _on_drag_end(
+        self,
+        _source: Gtk.DragSource,
+        _drag: Gdk.Drag,
+        _delete: bool,
+        row_box: Gtk.Box,
+    ) -> None:
+        """Remove visual feedback when dragging ends."""
+        row_box.remove_css_class("drag-row-active")
+
+    def _on_drop_enter(
+        self,
+        _target: Gtk.DropTarget,
+        _x: float,
+        _y: float,
+        row_box: Gtk.Box,
+    ) -> Gdk.DragAction:
+        """Show drop indicator when dragging over a row."""
+        row_box.add_css_class("drop-indicator-bottom")
+        return Gdk.DragAction.MOVE
+
+    def _on_drop_leave(
+        self,
+        _target: Gtk.DropTarget,
+        row_box: Gtk.Box,
+    ) -> None:
+        """Remove drop indicator when leaving a row."""
+        row_box.remove_css_class("drop-indicator-top")
+        row_box.remove_css_class("drop-indicator-bottom")
+
+    def _on_drop(
+        self,
+        _target: Gtk.DropTarget,
+        value: int,
+        _x: float,
+        _y: float,
+        to_index: int,
+    ) -> bool:
+        """Handle the drop: move the track to the new position."""
+        from_index = value
+        if from_index == to_index:
+            return False
+        if (
+            self._db is None
+            or self._playlist_id is None
+            or not self._tracks
+        ):
+            return False
+        if from_index < 0 or from_index >= len(self._tracks):
+            return False
+        track = self._tracks[from_index]
+        self._db.reorder_playlist_track(
+            self._playlist_id, track.id, to_index
+        )
+        self._refresh()
+        return True
 
     # ---- Track actions ----
 

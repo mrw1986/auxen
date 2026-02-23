@@ -6,10 +6,11 @@ from typing import Callable, Optional
 
 import gi
 
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Gtk, Pango
+from gi.repository import Gdk, GObject, Gtk, Pango
 
 
 def _format_duration(seconds: Optional[float]) -> str:
@@ -242,7 +243,7 @@ class QueuePanel(Gtk.Box):
     # ------------------------------------------------------------------
 
     def _build_track_row(self, index: int, track) -> Gtk.Box:
-        """Build a single queue track row."""
+        """Build a single queue track row with drag-and-drop support."""
         row = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=8,
@@ -254,6 +255,37 @@ class QueuePanel(Gtk.Box):
         is_current = index == self._current_index
         if is_current:
             row.add_css_class("queue-track-active")
+
+        # Drag handle (grip icon)
+        drag_handle = Gtk.Image.new_from_icon_name("drag-symbolic")
+        drag_handle.set_pixel_size(16)
+        drag_handle.add_css_class("drag-handle")
+        drag_handle.set_valign(Gtk.Align.CENTER)
+        drag_handle.set_tooltip_text("Drag to reorder")
+        row.append(drag_handle)
+
+        # Set up DragSource on the drag handle
+        drag_source = Gtk.DragSource()
+        drag_source.set_actions(Gdk.DragAction.MOVE)
+        drag_source.connect(
+            "prepare", self._on_drag_prepare, index
+        )
+        drag_source.connect(
+            "drag-begin", self._on_drag_begin, row
+        )
+        drag_source.connect(
+            "drag-end", self._on_drag_end, row
+        )
+        drag_handle.add_controller(drag_source)
+
+        # Set up DropTarget on the entire row
+        drop_target = Gtk.DropTarget.new(
+            GObject.TYPE_INT, Gdk.DragAction.MOVE
+        )
+        drop_target.connect("enter", self._on_drop_enter, row)
+        drop_target.connect("leave", self._on_drop_leave, row)
+        drop_target.connect("drop", self._on_drop, index)
+        row.add_controller(drop_target)
 
         # Queue position number
         position_label = Gtk.Label(label=str(index + 1))
@@ -409,6 +441,76 @@ class QueuePanel(Gtk.Box):
         self._on_remove = on_remove
         self._on_clear = on_clear
         self._on_move = on_move
+
+    # ------------------------------------------------------------------
+    # Drag-and-drop handlers
+    # ------------------------------------------------------------------
+
+    def _on_drag_prepare(
+        self,
+        _source: Gtk.DragSource,
+        _x: float,
+        _y: float,
+        index: int,
+    ) -> Gdk.ContentProvider:
+        """Prepare the drag data: the track index as an integer."""
+        value = GObject.Value(GObject.TYPE_INT, index)
+        return Gdk.ContentProvider.new_for_value(value)
+
+    def _on_drag_begin(
+        self,
+        _source: Gtk.DragSource,
+        _drag: Gdk.Drag,
+        row: Gtk.Box,
+    ) -> None:
+        """Add visual feedback when dragging starts."""
+        row.add_css_class("drag-row-active")
+
+    def _on_drag_end(
+        self,
+        _source: Gtk.DragSource,
+        _drag: Gdk.Drag,
+        _delete: bool,
+        row: Gtk.Box,
+    ) -> None:
+        """Remove visual feedback when dragging ends."""
+        row.remove_css_class("drag-row-active")
+
+    def _on_drop_enter(
+        self,
+        _target: Gtk.DropTarget,
+        _x: float,
+        _y: float,
+        row: Gtk.Box,
+    ) -> Gdk.DragAction:
+        """Show drop indicator when dragging over a row."""
+        row.add_css_class("drop-indicator-bottom")
+        return Gdk.DragAction.MOVE
+
+    def _on_drop_leave(
+        self,
+        _target: Gtk.DropTarget,
+        row: Gtk.Box,
+    ) -> None:
+        """Remove drop indicator when leaving a row."""
+        row.remove_css_class("drop-indicator-top")
+        row.remove_css_class("drop-indicator-bottom")
+
+    def _on_drop(
+        self,
+        _target: Gtk.DropTarget,
+        value: int,
+        _x: float,
+        _y: float,
+        to_index: int,
+    ) -> bool:
+        """Handle the drop: move the track from value to to_index."""
+        from_index = value
+        if from_index == to_index:
+            return False
+        if self._on_move is not None:
+            self._on_move(from_index, to_index)
+        return True
 
     # ------------------------------------------------------------------
     # Internal handlers
