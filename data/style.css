@@ -1771,3 +1771,126 @@ button.flat:hover {
     color: #d4a039;
     opacity: 0.7;
 }
+
+/* =============================================================
+   MINI PLAYER (Compact Mode)
+   ============================================================= */
+
+/* -- Main container — dark, borderless with amber border accent -- */
+
+.mini-player {
+    background-color: rgba(12, 11, 15, 0.95);
+    border: 1px solid rgba(212, 160, 57, 0.3);
+    border-radius: 12px;
+    padding: 0;
+}
+
+/* -- Track title — bold, bright -- */
+
+.mini-player-title {
+    font-weight: 700;
+    font-size: 14px;
+    color: #f0ece4;
+}
+
+/* -- Artist name — dim, smaller -- */
+
+.mini-player-artist {
+    font-size: 12px;
+    color: #a39e93;
+}
+
+/* -- Album art container -- */
+
+.mini-player-art {
+    min-width: 48px;
+    min-height: 48px;
+    border-radius: 6px;
+    background-color: #1c1b22;
+}
+
+/* -- Album art image -- */
+
+.mini-player-art-image {
+    border-radius: 6px;
+}
+
+/* -- Control buttons (next, close, maximize) -- */
+
+.mini-player-controls {
+    color: #6b6860;
+    min-width: 24px;
+    min-height: 24px;
+    border-radius: 9999px;
+    transition: all 200ms ease;
+}
+
+.mini-player-controls:hover {
+    color: #f0ece4;
+    background-color: rgba(240, 236, 228, 0.06);
+}
+
+.mini-player-controls:active {
+    color: #f0ece4;
+    background-color: rgba(240, 236, 228, 0.1);
+}
+
+/* -- Play/Pause button — circular, amber -- */
+
+.mini-player-play-btn {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 9999px;
+    background-color: #d4a039;
+    color: #0c0b0f;
+    padding: 0;
+    transition: all 150ms ease;
+}
+
+.mini-player-play-btn:hover {
+    background-color: #e0b04a;
+}
+
+.mini-player-play-btn:active {
+    background-color: #c99530;
+}
+
+/* -- Progress bar — thin, amber fill -- */
+
+.mini-player-progress trough {
+    min-height: 3px;
+    border-radius: 2px;
+    background-color: rgba(240, 236, 228, 0.08);
+}
+
+.mini-player-progress trough highlight {
+    background-color: #d4a039;
+    border-radius: 2px;
+}
+
+.mini-player-progress slider {
+    min-width: 10px;
+    min-height: 10px;
+    border-radius: 9999px;
+    background-color: #f0ece4;
+    margin: -4px;
+}
+
+.mini-player-progress:hover trough {
+    min-height: 5px;
+}
+
+.mini-player-progress:hover slider {
+    min-width: 12px;
+    min-height: 12px;
+    margin: -4px;
+}
+
+/* -- Time labels -- */
+
+.mini-player-time {
+    font-size: 0.65rem;
+    font-family: monospace;
+    color: #6b6860;
+    min-width: 30px;
+}

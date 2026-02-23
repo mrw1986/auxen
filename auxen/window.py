@@ -30,6 +30,7 @@ from auxen.views.search import SearchView
 from auxen.views.settings import AuxenSettings
 from auxen.views.sidebar import AuxenSidebar
 from auxen.views.sleep_timer_dialog import SleepTimerDialog
+from auxen.views.mini_player import MiniPlayerWindow
 from auxen.views.smart_playlist_view import SmartPlaylistView
 from auxen.views.stats import StatsView
 
@@ -62,6 +63,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._album_art_service = AlbumArtService()
         self._current_track = None
         self._equalizer: Equalizer | None = None
+        self._mini_player: MiniPlayerWindow | None = None
 
         split_view = Adw.NavigationSplitView()
 
@@ -393,6 +395,22 @@ class AuxenWindow(Adw.ApplicationWindow):
             # Update queue panel if it is visible
             if self._queue_panel.get_visible():
                 self._refresh_queue_panel()
+            # Update mini player if it is visible
+            if (
+                self._mini_player is not None
+                and self._mini_player.get_visible()
+            ):
+                self._mini_player.update_track(
+                    title=track.title,
+                    artist=track.artist,
+                )
+                self._mini_player.set_album_art(None)
+                self._album_art_service.get_art_async(
+                    track,
+                    self._mini_player.set_album_art,
+                    width=48,
+                    height=48,
+                )
 
     def _on_position_updated(self, _player, position, duration) -> None:
         """Update the now-playing bar progress."""
@@ -405,10 +423,22 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._now_playing._progress_scale.handler_unblock_by_func(
             self._on_progress_seek
         )
+        # Update mini player progress if visible
+        if (
+            self._mini_player is not None
+            and self._mini_player.get_visible()
+        ):
+            self._mini_player.update_position(position, duration)
 
     def _on_state_changed(self, _player, state) -> None:
         """Update the now-playing bar play/pause icon."""
         self._now_playing.set_playing(state == "playing")
+        # Update mini player play state if visible
+        if (
+            self._mini_player is not None
+            and self._mini_player.get_visible()
+        ):
+            self._mini_player.set_playing(state == "playing")
 
     def _on_volume_changed(self, scale) -> None:
         """Set the player volume from the volume slider."""
@@ -918,6 +948,71 @@ class AuxenWindow(Adw.ApplicationWindow):
         currently_visible = self._queue_panel.get_visible()
         self._on_queue_toggle(not currently_visible)
         self._now_playing.set_queue_active(not currently_visible)
+
+    # ------------------------------------------------------------------
+    # Mini player
+    # ------------------------------------------------------------------
+
+    def toggle_mini_player(self) -> None:
+        """Toggle between the main window and the mini player."""
+        if self._mini_player is not None and self._mini_player.get_visible():
+            # Return to main window
+            self._exit_mini_player()
+        else:
+            self._enter_mini_player()
+
+    def _enter_mini_player(self) -> None:
+        """Hide the main window and show the mini player."""
+        if self._mini_player is None:
+            self._mini_player = MiniPlayerWindow(
+                on_play_pause=self._mini_play_pause,
+                on_next=self._mini_next,
+                on_close_request=self._exit_mini_player,
+                on_maximize_request=self._exit_mini_player,
+            )
+            app = self.get_application()
+            if app is not None:
+                self._mini_player.set_application(app)
+
+        # Sync current state to mini player
+        if self._current_track is not None:
+            self._mini_player.update_track(
+                title=self._current_track.title,
+                artist=self._current_track.artist,
+            )
+            # Load album art for the mini player
+            self._album_art_service.get_art_async(
+                self._current_track,
+                self._mini_player.set_album_art,
+                width=48,
+                height=48,
+            )
+
+        # Sync play state
+        if self._app_ref and self._app_ref.player is not None:
+            state = self._app_ref.player.get_state()
+            self._mini_player.set_playing(state == "playing")
+
+        self.set_visible(False)
+        self._mini_player.set_visible(True)
+        self._mini_player.present()
+
+    def _exit_mini_player(self) -> None:
+        """Hide the mini player and show the main window."""
+        if self._mini_player is not None:
+            self._mini_player.set_visible(False)
+        self.set_visible(True)
+        self.present()
+
+    def _mini_play_pause(self) -> None:
+        """Handle play/pause from the mini player."""
+        if self._app_ref and self._app_ref.player is not None:
+            self._app_ref.player.play_pause()
+
+    def _mini_next(self) -> None:
+        """Handle next track from the mini player."""
+        if self._app_ref and self._app_ref.player is not None:
+            self._app_ref.player.next_track()
 
     # ------------------------------------------------------------------
     # Sleep timer
