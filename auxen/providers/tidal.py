@@ -101,7 +101,10 @@ class TidalProvider(ContentProvider):
                         "by a concurrent logout — discarding."
                     )
                     return False
-            self._save_session()
+            # Pass the local session reference so _save_session persists
+            # exactly the tokens we validated, not whatever self._session
+            # happens to point to by the time the write occurs.
+            self._save_session(session)
             return True
         except Exception:
             logger.error("Tidal login failed.", exc_info=True)
@@ -487,14 +490,20 @@ class TidalProvider(ContentProvider):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _save_session(self) -> None:
-        """Persist the current OAuth tokens to disk with restricted permissions."""
+    def _save_session(self, session: Any = None) -> None:
+        """Persist OAuth tokens to disk with restricted permissions.
+
+        If *session* is provided, its tokens are saved directly (without
+        reading ``self._session``).  This avoids a TOCTOU race when
+        ``login()`` verifies identity and then persists tokens.
+        """
         with self._session_lock:
+            src = session if session is not None else self._session
             data = {
-                "token_type": self._session.token_type,
-                "access_token": self._session.access_token,
-                "refresh_token": self._session.refresh_token,
-                "expiry_time": self._session.expiry_time,
+                "token_type": src.token_type,
+                "access_token": src.access_token,
+                "refresh_token": src.refresh_token,
+                "expiry_time": src.expiry_time,
             }
         content = json.dumps(data)
         # Write with 0o600 to prevent other users from reading tokens.

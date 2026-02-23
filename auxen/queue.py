@@ -34,7 +34,7 @@ class PlayQueue:
     def __init__(self) -> None:
         self._tracks: list[Track] = []
         self._position: int = 0
-        self.repeat_mode: RepeatMode = RepeatMode.OFF
+        self._repeat_mode: RepeatMode = RepeatMode.OFF
         self._shuffled: bool = False
         self._original_tracks: list[Track] | None = None
         self._lock = threading.Lock()
@@ -46,22 +46,38 @@ class PlayQueue:
     @property
     def current(self) -> Optional[Track]:
         """Return the track at the current position, or None if empty."""
-        if not self._tracks:
-            return None
-        return self._tracks[self._position]
+        with self._lock:
+            if not self._tracks:
+                return None
+            return self._tracks[self._position]
 
     @property
     def tracks(self) -> list[Track]:
         """Return a shallow copy of the internal track list."""
-        return list(self._tracks)
+        with self._lock:
+            return list(self._tracks)
 
     @property
     def position(self) -> int:
         """Return the current position index."""
-        return self._position
+        with self._lock:
+            return self._position
+
+    @property
+    def repeat_mode(self) -> RepeatMode:
+        """Return the current repeat mode."""
+        with self._lock:
+            return self._repeat_mode
+
+    @repeat_mode.setter
+    def repeat_mode(self, value: RepeatMode) -> None:
+        """Set the repeat mode."""
+        with self._lock:
+            self._repeat_mode = value
 
     def __len__(self) -> int:
-        return len(self._tracks)
+        with self._lock:
+            return len(self._tracks)
 
     def snapshot(self) -> QueueSnapshot:
         """Return an atomic snapshot of queue state for cross-thread use."""
@@ -69,7 +85,7 @@ class PlayQueue:
             return QueueSnapshot(
                 tracks=tuple(self._tracks),
                 position=self._position,
-                repeat_mode=self.repeat_mode,
+                repeat_mode=self._repeat_mode,
             )
 
     # ------------------------------------------------------------------
@@ -134,6 +150,8 @@ class PlayQueue:
         with self._lock:
             self._tracks.clear()
             self._position = 0
+            self._shuffled = False
+            self._original_tracks = None
 
     # ------------------------------------------------------------------
     # Navigation
@@ -151,14 +169,14 @@ class PlayQueue:
             if not self._tracks:
                 return None
 
-            if self.repeat_mode == RepeatMode.TRACK:
+            if self._repeat_mode == RepeatMode.TRACK:
                 return self._tracks[self._position]
 
             if self._position + 1 < len(self._tracks):
                 self._position += 1
                 return self._tracks[self._position]
 
-            if self.repeat_mode == RepeatMode.QUEUE:
+            if self._repeat_mode == RepeatMode.QUEUE:
                 self._position = 0
                 return self._tracks[self._position]
 
@@ -187,7 +205,8 @@ class PlayQueue:
     @property
     def shuffled(self) -> bool:
         """Return True if the queue is currently shuffled."""
-        return self._shuffled
+        with self._lock:
+            return self._shuffled
 
     def shuffle(self) -> None:
         """Fisher-Yates shuffle the queue, keeping current track at index 0."""

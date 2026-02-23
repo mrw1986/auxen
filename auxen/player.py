@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Callable, Optional
 
 import gi
@@ -92,6 +93,7 @@ class Player(GObject.Object):
         self._target_volume: float = 0.7
         self._play_generation: int = 0  # guards against stale resolvers
         self._uri_cache: dict[str, str] = {}  # source_id -> stream URI
+        self._cache_lock = threading.Lock()  # protects _uri_cache
 
         # --- ReplayGain + Equalizer + Spectrum audio chain (optional) ---
         self._rgvolume_element: Optional[Gst.Element] = None
@@ -323,8 +325,6 @@ class Player(GObject.Object):
         a newer play request.  After starting playback, the next track's
         URI is prefetched into ``_uri_cache`` for gapless transitions.
         """
-        import threading
-
         self._play_generation += 1
         gen = self._play_generation
 
@@ -332,9 +332,10 @@ class Player(GObject.Object):
             uri = self._resolve_uri(track)
             if uri is None:
                 return
-            # Cache this track's URI
-            if track.source_id:
-                self._uri_cache[track.source_id] = uri
+
+            # Check generation before any cache/playback side-effects
+            if gen != self._play_generation:
+                return
 
             def _start_playback(_uri=uri, _track=track, _gen=gen):
                 # Discard if a newer play_track() was called while resolving
@@ -355,7 +356,7 @@ class Player(GObject.Object):
             GLib.idle_add(_start_playback)
 
             # Prefetch the next track's URI for gapless playback
-            self._prefetch_next_uri()
+            self._prefetch_next_uri(gen)
 
         threading.Thread(target=_resolve_and_play, daemon=True).start()
 
@@ -387,7 +388,8 @@ class Player(GObject.Object):
     def stop(self) -> None:
         """Stop playback entirely."""
         self._play_generation += 1
-        self._uri_cache.clear()
+        with self._cache_lock:
+            self._uri_cache.clear()
         if self._crossfade is not None:
             self._crossfade.cancel()
         self._pipeline.set_state(Gst.State.NULL)
@@ -439,7 +441,8 @@ class Player(GObject.Object):
         self, tracks: list[Track], start_index: int = 0
     ) -> None:
         """Replace the queue and start playing from *start_index*."""
-        self._uri_cache.clear()
+        with self._cache_lock:
+            self._uri_cache.clear()
         self.queue.replace(tracks)
         if tracks and 0 <= start_index < len(tracks):
             self.queue.jump_to(start_index)
@@ -454,7 +457,8 @@ class Player(GObject.Object):
     def dispose(self) -> None:
         """Release GStreamer resources."""
         self._play_generation += 1
-        self._uri_cache.clear()
+        with self._cache_lock:
+            self._uri_cache.clear()
         if self._crossfade is not None:
             self._crossfade.cancel()
         self._stop_position_polling()
@@ -470,16 +474,22 @@ class Player(GObject.Object):
             return None
         return self._uri_resolver(track)
 
-    def _prefetch_next_uri(self) -> None:
+    def _prefetch_next_uri(self, gen: int) -> None:
         """Resolve the next track's URI and store it in ``_uri_cache``.
 
         Called from a background thread after ``play_track`` starts
         playback.  The cached URI is consumed by ``_on_about_to_finish``
         so the GStreamer streaming thread never blocks on a network call.
 
+        *gen* is the play-generation at the time the caller was spawned;
+        the prefetch is skipped if the generation has since changed.
+
         Uses an atomic queue snapshot to avoid race conditions with the
         main thread.
         """
+        if gen != self._play_generation:
+            return
+
         snap = self.queue.snapshot()
         next_index = snap.position + 1
 
@@ -493,12 +503,20 @@ class Player(GObject.Object):
         if not next_track.source_id:
             return
 
-        # Already cached — nothing to do
-        if next_track.source_id in self._uri_cache:
-            return
+        with self._cache_lock:
+            # Already cached — nothing to do
+            if next_track.source_id in self._uri_cache:
+                return
 
         uri = self._resolve_uri(next_track)
-        if uri is not None:
+        if uri is None:
+            return
+
+        # Re-check generation after the (potentially slow) resolve
+        if gen != self._play_generation:
+            return
+
+        with self._cache_lock:
             self._uri_cache[next_track.source_id] = uri
 
     def _set_state(self, new_state: str) -> None:
@@ -611,7 +629,8 @@ class Player(GObject.Object):
         # Look up the prefetched URI — never resolve synchronously here
         uri: Optional[str] = None
         if next_track.source_id:
-            uri = self._uri_cache.pop(next_track.source_id, None)
+            with self._cache_lock:
+                uri = self._uri_cache.pop(next_track.source_id, None)
 
         # For local tracks the resolver just builds a file:// URI (no
         # network I/O), so it is safe to call synchronously as a fallback.
