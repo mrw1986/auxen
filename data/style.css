@@ -601,6 +601,66 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     font-style: italic;
 }
 
+/* -- Search History Section -- */
+
+.search-history-section {
+    padding: 8px 0;
+}
+
+.search-history-row {
+    padding: 10px 12px;
+    border-radius: 8px;
+    transition: background-color 150ms ease;
+}
+
+.search-history-row:hover {
+    background-color: rgba(240, 236, 228, 0.04);
+}
+
+.search-history-row image {
+    color: #6b6860;
+}
+
+.search-history-row label {
+    color: #a39e93;
+}
+
+.search-history-row:hover label {
+    color: #f0ece4;
+}
+
+.search-history-row button {
+    color: #6b6860;
+    min-width: 24px;
+    min-height: 24px;
+    border-radius: 9999px;
+    opacity: 0;
+    transition: all 200ms ease;
+}
+
+.search-history-row:hover button {
+    opacity: 1;
+}
+
+.search-history-row button:hover {
+    color: #e74c3c;
+    background-color: rgba(231, 76, 60, 0.12);
+}
+
+.search-history-clear {
+    color: #6b6860;
+    font-size: 0.85rem;
+    font-weight: 500;
+    border-radius: 9999px;
+    padding: 6px 16px;
+    transition: all 200ms ease;
+}
+
+.search-history-clear:hover {
+    color: #e74c3c;
+    background-color: rgba(231, 76, 60, 0.08);
+}
+
 /* ═══════════════════════════════════════════════════════════
    FAVORITES VIEW
    ═══════════════════════════════════════════════════════════ */

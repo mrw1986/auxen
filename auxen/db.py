@@ -87,6 +87,15 @@ CREATE INDEX IF NOT EXISTS idx_play_history_track_id
     ON play_history(track_id);
 CREATE INDEX IF NOT EXISTS idx_play_history_played_at
     ON play_history(played_at);
+
+CREATE TABLE IF NOT EXISTS search_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    query       TEXT    NOT NULL UNIQUE,
+    searched_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_search_history_searched_at
+    ON search_history(searched_at);
 """
 
 
@@ -972,6 +981,46 @@ class Database:
             (limit,),
         )
         return [self._row_to_track(r) for r in cur.fetchall()]
+
+    # ------------------------------------------------------------------
+    # Search history
+    # ------------------------------------------------------------------
+
+    def add_search_history(self, query: str) -> None:
+        """Insert a search query with timestamp.
+
+        If the query already exists, update its timestamp instead of
+        creating a duplicate entry.
+        """
+        now = datetime.now(UTC).isoformat()
+        self._conn.execute(
+            """
+            INSERT INTO search_history (query, searched_at)
+            VALUES (?, ?)
+            ON CONFLICT(query) DO UPDATE SET searched_at = ?
+            """,
+            (query, now, now),
+        )
+        self._conn.commit()
+
+    def get_search_history(self, limit: int = 10) -> list[str]:
+        """Return recent search queries, newest first.
+
+        Parameters
+        ----------
+        limit:
+            Maximum number of queries to return (default 10).
+        """
+        cur = self._conn.execute(
+            "SELECT query FROM search_history ORDER BY searched_at DESC, id DESC LIMIT ?",
+            (limit,),
+        )
+        return [row["query"] for row in cur.fetchall()]
+
+    def clear_search_history(self) -> None:
+        """Delete all search history entries."""
+        self._conn.execute("DELETE FROM search_history")
+        self._conn.commit()
 
     # ------------------------------------------------------------------
     # Internal

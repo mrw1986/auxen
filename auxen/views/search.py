@@ -196,6 +196,12 @@ class SearchView(Gtk.Box):
         self._search_entry.add_css_class("search-entry")
         self._search_entry.set_hexpand(True)
         self._search_entry.connect("search-changed", self._on_search_changed)
+
+        # Track focus to show/hide history
+        focus_controller = Gtk.EventControllerFocus()
+        focus_controller.connect("enter", self._on_entry_focus_enter)
+        self._search_entry.add_controller(focus_controller)
+
         entry_box.append(self._search_entry)
 
         self.append(entry_box)
@@ -228,6 +234,10 @@ class SearchView(Gtk.Box):
         results_box.append(self._results_list)
 
         self._results_stack.add_named(results_box, "results")
+
+        # -- Search history section --
+        self._history_box = self._build_history_section()
+        self._results_stack.add_named(self._history_box, "history")
 
         # -- Empty state: initial (before search) --
         self._empty_initial = self._build_empty_state(
@@ -360,6 +370,178 @@ class SearchView(Gtk.Box):
 
         return box
 
+    # ---- Search history ----
+
+    def _build_history_section(self) -> Gtk.Box:
+        """Build the recent searches section container."""
+        section = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=8,
+        )
+        section.add_css_class("search-history-section")
+        section.set_margin_start(32)
+        section.set_margin_end(32)
+        section.set_margin_top(8)
+        section.set_margin_bottom(24)
+
+        # Header
+        header_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+        )
+        header_box.set_margin_bottom(4)
+
+        header_icon = Gtk.Image.new_from_icon_name(
+            "document-open-recent-symbolic"
+        )
+        header_icon.set_pixel_size(16)
+        header_icon.add_css_class("dim-label")
+        header_box.append(header_icon)
+
+        header_label = Gtk.Label(label="Recent Searches")
+        header_label.set_xalign(0)
+        header_label.add_css_class("caption")
+        header_label.add_css_class("dim-label")
+        header_label.set_hexpand(True)
+        header_box.append(header_label)
+
+        section.append(header_box)
+
+        # History list
+        self._history_list = Gtk.ListBox()
+        self._history_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._history_list.add_css_class("boxed-list")
+        section.append(self._history_list)
+
+        # Clear history button
+        self._clear_history_btn = Gtk.Button(label="Clear History")
+        self._clear_history_btn.add_css_class("search-history-clear")
+        self._clear_history_btn.add_css_class("flat")
+        self._clear_history_btn.set_halign(Gtk.Align.CENTER)
+        self._clear_history_btn.set_margin_top(8)
+        self._clear_history_btn.connect(
+            "clicked", self._on_clear_history_clicked
+        )
+        section.append(self._clear_history_btn)
+
+        return section
+
+    def _make_history_row(self, query: str) -> Gtk.ListBoxRow:
+        """Build a single search history row."""
+        row_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=12,
+        )
+        row_box.add_css_class("search-history-row")
+        row_box.set_margin_top(2)
+        row_box.set_margin_bottom(2)
+        row_box.set_margin_start(8)
+        row_box.set_margin_end(8)
+
+        # Clock icon
+        clock_icon = Gtk.Image.new_from_icon_name(
+            "document-open-recent-symbolic"
+        )
+        clock_icon.set_pixel_size(16)
+        clock_icon.add_css_class("dim-label")
+        clock_icon.set_valign(Gtk.Align.CENTER)
+        row_box.append(clock_icon)
+
+        # Query text (clickable area)
+        label = Gtk.Label(label=query)
+        label.set_xalign(0)
+        label.set_hexpand(True)
+        label.set_ellipsize(Pango.EllipsizeMode.END)
+        label.set_max_width_chars(50)
+        label.add_css_class("body")
+        label.set_valign(Gtk.Align.CENTER)
+        row_box.append(label)
+
+        # Remove button (x)
+        remove_btn = Gtk.Button.new_from_icon_name(
+            "window-close-symbolic"
+        )
+        remove_btn.add_css_class("flat")
+        remove_btn.add_css_class("circular")
+        remove_btn.set_valign(Gtk.Align.CENTER)
+        remove_btn.set_tooltip_text("Remove from history")
+        remove_btn.connect(
+            "clicked",
+            self._on_remove_history_item,
+            query,
+        )
+        row_box.append(remove_btn)
+
+        row = Gtk.ListBoxRow()
+        row.set_child(row_box)
+
+        # Click gesture for the row to trigger search
+        gesture = Gtk.GestureClick(button=1)
+        gesture.connect("pressed", self._on_history_row_clicked, query)
+        row.add_controller(gesture)
+
+        return row
+
+    def _refresh_history(self) -> None:
+        """Reload history items from the database and display them."""
+        # Clear existing rows
+        while True:
+            row = self._history_list.get_row_at_index(0)
+            if row is None:
+                break
+            self._history_list.remove(row)
+
+        if self._db is None:
+            return
+
+        queries = self._db.get_search_history(limit=10)
+        if not queries:
+            # No history — show the initial empty state instead
+            self._results_stack.set_visible_child_name("empty-initial")
+            return
+
+        for query in queries:
+            row = self._make_history_row(query)
+            self._history_list.append(row)
+
+        self._results_stack.set_visible_child_name("history")
+
+    def _on_entry_focus_enter(
+        self, controller: Gtk.EventControllerFocus
+    ) -> None:
+        """When the search entry gains focus, show history if empty."""
+        query = self._search_entry.get_text().strip()
+        if not query:
+            self._refresh_history()
+
+    def _on_history_row_clicked(
+        self,
+        gesture: Gtk.GestureClick,
+        n_press: int,
+        x: float,
+        y: float,
+        query: str,
+    ) -> None:
+        """Handle clicking a history row — populate and search."""
+        self._search_entry.set_text(query)
+
+    def _on_remove_history_item(
+        self, button: Gtk.Button, query: str
+    ) -> None:
+        """Remove a single item from search history."""
+        if self._db is not None:
+            self._db._conn.execute(
+                "DELETE FROM search_history WHERE query = ?", (query,)
+            )
+            self._db._conn.commit()
+        self._refresh_history()
+
+    def _on_clear_history_clicked(self, button: Gtk.Button) -> None:
+        """Handle the Clear History button click."""
+        if self._db is not None:
+            self._db.clear_search_history()
+        self._refresh_history()
+
     # ---- Debounced search ----
 
     def _on_search_changed(self, entry: Gtk.SearchEntry) -> None:
@@ -373,7 +555,7 @@ class SearchView(Gtk.Box):
 
         if not query:
             self._clear_results()
-            self._results_stack.set_visible_child_name("empty-initial")
+            self._refresh_history()
             return
 
         # Schedule the actual search after the debounce delay.
@@ -386,6 +568,14 @@ class SearchView(Gtk.Box):
     def _on_debounce_expired(self, query: str) -> bool:
         """Execute the search after debounce period expires."""
         self._debounce_id = None
+
+        # Save queries with 2+ characters to history
+        if len(query) >= 2 and self._db is not None:
+            try:
+                self._db.add_search_history(query)
+            except Exception:
+                logger.warning("Failed to save search history", exc_info=True)
+
         results = self._do_search(query)
         self._populate_results(results)
         # Return False to prevent GLib from repeating the timeout.
