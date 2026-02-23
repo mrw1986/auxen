@@ -7,6 +7,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk
 
+from auxen.views.favorites import FavoritesView
 from auxen.views.home import HomePage
 from auxen.views.now_playing import NowPlayingBar
 from auxen.views.search import SearchView
@@ -60,6 +61,11 @@ class AuxenWindow(Adw.ApplicationWindow):
             if name == "search":
                 self._search_view = SearchView()
                 self._stack.add_named(self._search_view, name)
+                continue
+
+            if name == "favorites":
+                self._favorites_view = FavoritesView()
+                self._stack.add_named(self._favorites_view, name)
                 continue
 
             placeholder = Gtk.Box(
