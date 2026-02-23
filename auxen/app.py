@@ -22,6 +22,11 @@ class AuxenApp(Adw.Application):
         self.add_action(quit_action)
         self.set_accels_for_action("app.quit", ["<Control>q"])
 
+        settings_action = Gio.SimpleAction.new("settings", None)
+        settings_action.connect("activate", self._on_settings_action)
+        self.add_action(settings_action)
+        self.set_accels_for_action("app.settings", ["<primary>comma"])
+
         css_provider = Gtk.CssProvider()
         css_path = Path(__file__).resolve().parent.parent / "data" / "style.css"
         css_provider.load_from_path(str(css_path))
@@ -30,6 +35,11 @@ class AuxenApp(Adw.Application):
             css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
+
+    def _on_settings_action(self, _action: Gio.SimpleAction, _param) -> None:
+        win = self.props.active_window
+        if win:
+            win._open_settings()
 
     def do_activate(self) -> None:
         win = self.get_active_window()

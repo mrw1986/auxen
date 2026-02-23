@@ -127,6 +127,7 @@ class AuxenSidebar(Gtk.Box):
     def __init__(
         self,
         on_navigate: Callable[[str], None] | None = None,
+        on_settings: Callable[[], None] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(
@@ -135,6 +136,7 @@ class AuxenSidebar(Gtk.Box):
         )
 
         self._on_navigate = on_navigate
+        self._on_settings = on_settings
         self._page_names: list[str] = []
 
         # ---- Brand section ----
@@ -260,6 +262,8 @@ class AuxenSidebar(Gtk.Box):
         )
         settings_btn.add_css_class("flat")
         settings_btn.set_valign(Gtk.Align.CENTER)
+        if self._on_settings:
+            settings_btn.connect("clicked", lambda *_: self._on_settings())
         account_box.append(settings_btn)
 
         self.append(account_box)

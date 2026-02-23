@@ -442,3 +442,25 @@
     min-height: 0;
     padding: 4px 8px;
 }
+
+/* ── Settings Dialog ─────────────────────────────────── */
+
+.settings-login-btn {
+    background-color: #d4a039;
+    color: #0c0b0f;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 4px 16px;
+}
+
+.settings-login-btn:hover {
+    background-color: #e0b04a;
+}
+
+.settings-rescan-btn {
+    color: #6b6860;
+}
+
+.settings-rescan-btn:hover {
+    color: #f0ece4;
+}

@@ -11,6 +11,7 @@ from auxen.views.favorites import FavoritesView
 from auxen.views.home import HomePage
 from auxen.views.now_playing import NowPlayingBar
 from auxen.views.search import SearchView
+from auxen.views.settings import AuxenSettings
 from auxen.views.sidebar import AuxenSidebar
 
 
@@ -37,7 +38,10 @@ class AuxenWindow(Adw.ApplicationWindow):
         split_view = Adw.NavigationSplitView()
 
         # ---- Sidebar ----
-        self._sidebar = AuxenSidebar(on_navigate=self._switch_page)
+        self._sidebar = AuxenSidebar(
+            on_navigate=self._switch_page,
+            on_settings=self._open_settings,
+        )
         sidebar_page = Adw.NavigationPage.new(self._sidebar, "Sidebar")
         split_view.set_sidebar(sidebar_page)
 
@@ -97,6 +101,11 @@ class AuxenWindow(Adw.ApplicationWindow):
 
         # Show home by default
         self._stack.set_visible_child_name("home")
+
+    def _open_settings(self) -> None:
+        """Create and present the settings dialog."""
+        settings = AuxenSettings(transient_for=self)
+        settings.present()
 
     def _switch_page(self, page_name: str) -> None:
         """Switch the content stack to the requested page."""
