@@ -832,6 +832,112 @@ class Database:
             "avg_tracks_per_day": avg_tracks_per_day,
         }
 
+    # ------------------------------------------------------------------
+    # Smart playlist queries
+    # ------------------------------------------------------------------
+
+    def get_most_played_tracks(self, limit: int = 50) -> list[Track]:
+        """Return the most-played tracks ordered by play count descending.
+
+        Uses the play_history table to count actual plays (more reliable
+        than the cached play_count on the tracks table).
+        """
+        cur = self._conn.execute(
+            """
+            SELECT t.*, COUNT(ph.id) AS play_cnt
+            FROM play_history ph
+            JOIN tracks t ON t.id = ph.track_id
+            GROUP BY ph.track_id
+            ORDER BY play_cnt DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return [self._row_to_track(r) for r in cur.fetchall()]
+
+    def get_recently_added_tracks(self, limit: int = 50) -> list[Track]:
+        """Return the most recently added tracks (by id desc)."""
+        cur = self._conn.execute(
+            "SELECT * FROM tracks ORDER BY id DESC LIMIT ?", (limit,)
+        )
+        return [self._row_to_track(r) for r in cur.fetchall()]
+
+    def get_heavy_rotation_tracks(
+        self, days: int = 7, limit: int = 30
+    ) -> list[Track]:
+        """Return the most-played tracks in the last *days* days."""
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        cur = self._conn.execute(
+            """
+            SELECT t.*, COUNT(ph.id) AS play_cnt
+            FROM play_history ph
+            JOIN tracks t ON t.id = ph.track_id
+            WHERE ph.played_at >= ?
+            GROUP BY ph.track_id
+            ORDER BY play_cnt DESC
+            LIMIT ?
+            """,
+            (cutoff, limit),
+        )
+        return [self._row_to_track(r) for r in cur.fetchall()]
+
+    def get_forgotten_gems(
+        self,
+        min_plays: int = 5,
+        inactive_days: int = 30,
+        limit: int = 30,
+    ) -> list[Track]:
+        """Return tracks with >= *min_plays* total plays but none in the
+        last *inactive_days* days.
+        """
+        cutoff = (
+            datetime.now(UTC) - timedelta(days=inactive_days)
+        ).isoformat()
+        cur = self._conn.execute(
+            """
+            SELECT t.*, COUNT(ph.id) AS play_cnt,
+                   MAX(ph.played_at) AS last_play
+            FROM play_history ph
+            JOIN tracks t ON t.id = ph.track_id
+            GROUP BY ph.track_id
+            HAVING play_cnt >= ? AND last_play < ?
+            ORDER BY play_cnt DESC
+            LIMIT ?
+            """,
+            (min_plays, cutoff, limit),
+        )
+        return [self._row_to_track(r) for r in cur.fetchall()]
+
+    def get_tracks_by_duration(
+        self,
+        min_seconds: float | None = None,
+        max_seconds: float | None = None,
+        limit: int = 50,
+    ) -> list[Track]:
+        """Return tracks filtered by duration range.
+
+        Tracks with NULL duration are excluded.
+        """
+        conditions = ["duration IS NOT NULL"]
+        params: list = []
+
+        if min_seconds is not None:
+            conditions.append("duration >= ?")
+            params.append(min_seconds)
+        if max_seconds is not None:
+            conditions.append("duration < ?")
+            params.append(max_seconds)
+
+        where = " AND ".join(conditions)
+        params.append(limit)
+
+        cur = self._conn.execute(
+            f"SELECT * FROM tracks WHERE {where} "
+            f"ORDER BY duration DESC LIMIT ?",
+            params,
+        )
+        return [self._row_to_track(r) for r in cur.fetchall()]
+
     def get_recently_played_history(self, limit: int = 20) -> list[Track]:
         """Return most recently played tracks, deduplicated.
 

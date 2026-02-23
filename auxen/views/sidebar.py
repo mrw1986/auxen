@@ -155,8 +155,37 @@ def _make_add_playlist_row() -> Gtk.ListBoxRow:
     return row
 
 
+def _make_smart_playlist_row(
+    icon_name: str, label_text: str
+) -> Gtk.ListBoxRow:
+    """Build a smart playlist row with an icon and name."""
+    row_box = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL,
+        spacing=12,
+    )
+    row_box.set_margin_top(4)
+    row_box.set_margin_bottom(4)
+    row_box.set_margin_start(8)
+    row_box.set_margin_end(8)
+
+    icon = Gtk.Image.new_from_icon_name(icon_name)
+    icon.set_pixel_size(16)
+    icon.add_css_class("smart-playlist-sidebar-icon")
+    row_box.append(icon)
+
+    label = Gtk.Label(label=label_text)
+    label.set_xalign(0)
+    label.set_hexpand(True)
+    label.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
+    row_box.append(label)
+
+    row = Gtk.ListBoxRow()
+    row.set_child(row_box)
+    return row
+
+
 class AuxenSidebar(Gtk.Box):
-    """Left sidebar with brand, browse, tidal, playlists, and account sections."""
+    """Left sidebar with brand, browse, tidal, playlists, smart playlists, and account sections."""
 
     __gtype_name__ = "AuxenSidebar"
 
@@ -165,6 +194,7 @@ class AuxenSidebar(Gtk.Box):
         on_navigate: Callable[[str], None] | None = None,
         on_settings: Callable[[], None] | None = None,
         on_playlist_selected: Callable[[int], None] | None = None,
+        on_smart_playlist_selected: Callable[[str], None] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(
@@ -175,9 +205,12 @@ class AuxenSidebar(Gtk.Box):
         self._on_navigate = on_navigate
         self._on_settings = on_settings
         self._on_playlist_selected = on_playlist_selected
+        self._on_smart_playlist_selected = on_smart_playlist_selected
         self._page_names: list[str] = []
         self._db = None
         self._playlist_ids: list[int] = []
+        self._smart_playlist_ids: list[str] = []
+        self._smart_playlist_service = None
 
         # ---- Brand section ----
         brand_box = Gtk.Box(
@@ -268,6 +301,20 @@ class AuxenSidebar(Gtk.Box):
 
         middle_box.append(self._playlist_list)
 
+        # ---- Smart Playlists section ----
+        middle_box.append(_make_section_label("SMART PLAYLISTS"))
+
+        self._smart_playlist_list = Gtk.ListBox()
+        self._smart_playlist_list.add_css_class("navigation-sidebar")
+        self._smart_playlist_list.set_selection_mode(
+            Gtk.SelectionMode.NONE
+        )
+        self._smart_playlist_list.connect(
+            "row-activated", self._on_smart_playlist_row_activated
+        )
+
+        middle_box.append(self._smart_playlist_list)
+
         scroll.set_child(middle_box)
         self.append(scroll)
 
@@ -319,6 +366,11 @@ class AuxenSidebar(Gtk.Box):
 
     # ---- Public API ----
 
+    def set_smart_playlist_service(self, service) -> None:
+        """Wire the sidebar to a SmartPlaylistService for smart playlists."""
+        self._smart_playlist_service = service
+        self.refresh_smart_playlists()
+
     def set_database(self, db) -> None:
         """Wire the sidebar to a real database for dynamic playlists."""
         self._db = db
@@ -355,6 +407,33 @@ class AuxenSidebar(Gtk.Box):
         # Always add the "New Playlist" row at the bottom
         add_row = _make_add_playlist_row()
         self._playlist_list.append(add_row)
+
+    def refresh_smart_playlists(self) -> None:
+        """Reload smart playlists from the service and rebuild the list."""
+        while True:
+            row = self._smart_playlist_list.get_row_at_index(0)
+            if row is None:
+                break
+            self._smart_playlist_list.remove(row)
+
+        self._smart_playlist_ids = []
+
+        if self._smart_playlist_service is not None:
+            try:
+                definitions = (
+                    self._smart_playlist_service.get_definitions()
+                )
+                for defn in definitions:
+                    row = _make_smart_playlist_row(
+                        defn["icon"], defn["name"]
+                    )
+                    self._smart_playlist_list.append(row)
+                    self._smart_playlist_ids.append(defn["id"])
+            except Exception:
+                logger.warning(
+                    "Failed to load smart playlists",
+                    exc_info=True,
+                )
 
     # ---- Internal handlers ----
 
@@ -399,6 +478,19 @@ class AuxenSidebar(Gtk.Box):
             self._tidal_list.unselect_all()
             if self._on_playlist_selected:
                 self._on_playlist_selected(playlist_id)
+
+    def _on_smart_playlist_row_activated(
+        self, _listbox: Gtk.ListBox, row: Gtk.ListBoxRow
+    ) -> None:
+        """Handle click on a smart playlist row."""
+        idx = row.get_index()
+        if 0 <= idx < len(self._smart_playlist_ids):
+            smart_id = self._smart_playlist_ids[idx]
+            # Deselect other nav lists
+            self._browse_list.unselect_all()
+            self._tidal_list.unselect_all()
+            if self._on_smart_playlist_selected:
+                self._on_smart_playlist_selected(smart_id)
 
     def _create_new_playlist(self) -> None:
         """Create a new playlist via the database."""

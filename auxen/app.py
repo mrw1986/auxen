@@ -34,6 +34,7 @@ class AuxenApp(Adw.Application):
         self.sleep_timer = None
         self.notification_service = None
         self.favorites_sync = None
+        self.smart_playlist_service = None
 
         # Play history tracking
         self._current_track_start: float | None = None
@@ -171,6 +172,20 @@ class AuxenApp(Adw.Application):
             self.db = Database()
         except Exception:
             logger.warning("Failed to initialize database", exc_info=True)
+
+        # --- Smart Playlist Service ---
+        if self.db is not None:
+            try:
+                from auxen.smart_playlists import SmartPlaylistService
+
+                self.smart_playlist_service = SmartPlaylistService(
+                    db=self.db
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to initialize smart playlist service",
+                    exc_info=True,
+                )
 
         # --- Player ---
         try:
