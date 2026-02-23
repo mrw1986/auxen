@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 import gi
@@ -11,6 +12,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gtk, Pango
 
+logger = logging.getLogger(__name__)
 
 # Placeholder album data: (title, artist, source)
 _SAMPLE_ALBUMS: list[tuple[str, str, str]] = [
@@ -53,6 +55,16 @@ def _make_source_badge(source: str) -> Gtk.Label:
     badge.set_margin_top(8)
     badge.set_margin_start(8)
     return badge
+
+
+def _format_duration(seconds: float | None) -> str:
+    """Format seconds as M:SS."""
+    if seconds is None or seconds <= 0:
+        return "0:00"
+    total = int(seconds)
+    minutes = total // 60
+    secs = total % 60
+    return f"{minutes}:{secs:02d}"
 
 
 def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
@@ -244,30 +256,34 @@ class HomePage(Gtk.ScrolledWindow):
             homogeneous=True,
         )
 
-        stats_box.append(
-            self._make_stat_card(
-                icon_name="media-optical-symbolic",
-                value="0",
-                label="Total Tracks",
-                accent_class=None,
-            )
+        self._total_value_label: Gtk.Label | None = None
+        self._tidal_value_label: Gtk.Label | None = None
+        self._local_value_label: Gtk.Label | None = None
+
+        total_card, self._total_value_label = self._make_stat_card(
+            icon_name="media-optical-symbolic",
+            value="0",
+            label="Total Tracks",
+            accent_class=None,
         )
-        stats_box.append(
-            self._make_stat_card(
-                icon_name="network-wireless-symbolic",
-                value="0",
-                label="Tidal Tracks",
-                accent_class="stat-accent-tidal",
-            )
+        stats_box.append(total_card)
+
+        tidal_card, self._tidal_value_label = self._make_stat_card(
+            icon_name="network-wireless-symbolic",
+            value="0",
+            label="Tidal Tracks",
+            accent_class="stat-accent-tidal",
         )
-        stats_box.append(
-            self._make_stat_card(
-                icon_name="folder-music-symbolic",
-                value="0",
-                label="Local Files",
-                accent_class="stat-accent-local",
-            )
+        stats_box.append(tidal_card)
+
+        local_card, self._local_value_label = self._make_stat_card(
+            icon_name="folder-music-symbolic",
+            value="0",
+            label="Local Files",
+            accent_class="stat-accent-local",
         )
+        stats_box.append(local_card)
+
         root.append(stats_box)
 
         # ---- 4. Recently Added section ----
@@ -308,6 +324,65 @@ class HomePage(Gtk.ScrolledWindow):
 
         self.set_child(root)
 
+    # ---- Public API ----
+
+    def refresh(self, db) -> None:
+        """Refresh the home page using real data from the database.
+
+        Falls back to keeping placeholder data if the database returns
+        empty results.
+        """
+        try:
+            from auxen.models import Source
+
+            all_tracks = db.get_all_tracks()
+            local_tracks = db.get_tracks_by_source(Source.LOCAL)
+            tidal_tracks = db.get_tracks_by_source(Source.TIDAL)
+
+            total = len(all_tracks)
+            local_count = len(local_tracks)
+            tidal_count = len(tidal_tracks)
+
+            self.update_stats(total, tidal_count, local_count)
+
+            # Recently added — update the grid if we have data
+            recently_added = db.get_recently_added(limit=12)
+            if recently_added:
+                self._clear_flow_box(self._album_grid)
+                for track in recently_added:
+                    self._album_grid.append(
+                        _make_album_card(
+                            title=track.album or track.title,
+                            artist=track.artist,
+                            source=track.source.value,
+                        )
+                    )
+
+            # Recently played — update the list if we have data
+            recently_played = db.get_recently_played(limit=8)
+            if recently_played:
+                self._clear_list_box(self._recent_list)
+                for track in recently_played:
+                    self._recent_list.append(
+                        _make_recently_played_row(
+                            title=track.title,
+                            artist=track.artist,
+                            duration=_format_duration(track.duration),
+                            source=track.source.value,
+                        )
+                    )
+        except Exception:
+            logger.warning("Failed to refresh home page", exc_info=True)
+
+    def update_stats(self, total: int, tidal: int, local: int) -> None:
+        """Update the stat card values."""
+        if self._total_value_label is not None:
+            self._total_value_label.set_label(str(total))
+        if self._tidal_value_label is not None:
+            self._tidal_value_label.set_label(str(tidal))
+        if self._local_value_label is not None:
+            self._local_value_label.set_label(str(local))
+
     # ---- Internal helpers ----
 
     @staticmethod
@@ -316,8 +391,8 @@ class HomePage(Gtk.ScrolledWindow):
         value: str,
         label: str,
         accent_class: str | None,
-    ) -> Gtk.Box:
-        """Build a stat card widget."""
+    ) -> tuple[Gtk.Box, Gtk.Label]:
+        """Build a stat card widget and return (card, value_label)."""
         card = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=8,
@@ -340,7 +415,25 @@ class HomePage(Gtk.ScrolledWindow):
         text_label.add_css_class("stat-card-label")
         card.append(text_label)
 
-        return card
+        return card, value_label
+
+    @staticmethod
+    def _clear_flow_box(flow_box: Gtk.FlowBox) -> None:
+        """Remove all children from a FlowBox."""
+        while True:
+            child = flow_box.get_child_at_index(0)
+            if child is None:
+                break
+            flow_box.remove(child)
+
+    @staticmethod
+    def _clear_list_box(list_box: Gtk.ListBox) -> None:
+        """Remove all rows from a ListBox."""
+        while True:
+            row = list_box.get_row_at_index(0)
+            if row is None:
+                break
+            list_box.remove(row)
 
     def _on_filter_toggled(self, toggled_btn: Gtk.ToggleButton) -> None:
         """Enforce radio-button behavior: only one filter active at a time."""

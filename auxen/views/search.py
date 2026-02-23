@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import random
 
 import gi
@@ -11,6 +12,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import GLib, Gtk, Pango
 
+logger = logging.getLogger(__name__)
 
 # Placeholder data pools for generating fake search results.
 _SAMPLE_ARTISTS = [
@@ -45,6 +47,16 @@ _SAMPLE_DURATIONS = [
     "5:29",
     "2:55",
 ]
+
+
+def _format_duration(seconds: float | None) -> str:
+    """Format seconds as M:SS."""
+    if seconds is None or seconds <= 0:
+        return "0:00"
+    total = int(seconds)
+    minutes = total // 60
+    secs = total % 60
+    return f"{minutes}:{secs:02d}"
 
 
 def _make_result_row(
@@ -156,6 +168,8 @@ class SearchView(Gtk.Box):
         )
 
         self._debounce_id: int | None = None
+        self._db = None
+        self._tidal_provider = None
 
         # ---- Search entry ----
         entry_box = Gtk.Box(
@@ -227,6 +241,21 @@ class SearchView(Gtk.Box):
 
         self._scroll.set_child(self._results_stack)
         self.append(self._scroll)
+
+    # ---- Public API ----
+
+    def set_providers(self, db=None, tidal_provider=None) -> None:
+        """Wire the search view to real data providers.
+
+        Parameters
+        ----------
+        db:
+            Database instance for searching local tracks.
+        tidal_provider:
+            TidalProvider instance for searching Tidal.
+        """
+        self._db = db
+        self._tidal_provider = tidal_provider
 
     # ---- Empty state builder ----
 
@@ -319,10 +348,64 @@ class SearchView(Gtk.Box):
 
         self._results_stack.set_visible_child_name("results")
 
-    # ---- Placeholder search logic ----
+    # ---- Search logic ----
+
+    def _do_search(self, query: str) -> list[dict[str, str]]:
+        """Search the database and optionally Tidal for matching tracks.
+
+        Falls back to placeholder results if no providers are wired.
+        """
+        if not query:
+            return []
+
+        # If we have real providers, use them
+        if self._db is not None:
+            return self._do_real_search(query)
+
+        # Fallback: placeholder search
+        return self._do_placeholder_search(query)
+
+    def _do_real_search(self, query: str) -> list[dict[str, str]]:
+        """Perform a real search using the database and Tidal."""
+        results: list[dict[str, str]] = []
+
+        # Search local database
+        try:
+            db_tracks = self._db.search(query)
+            for track in db_tracks:
+                results.append({
+                    "title": track.title,
+                    "artist": track.artist,
+                    "album": track.album or "",
+                    "source": track.source.value,
+                    "duration": _format_duration(track.duration),
+                })
+        except Exception:
+            logger.warning("Database search failed", exc_info=True)
+
+        # Search Tidal if available and logged in
+        if self._tidal_provider is not None:
+            try:
+                if self._tidal_provider.is_logged_in:
+                    tidal_tracks = self._tidal_provider.search(query, limit=10)
+                    # Track source_ids already seen to avoid duplicates
+                    seen_ids = {r.get("_source_id") for r in results if r.get("_source_id")}
+                    for track in tidal_tracks:
+                        if track.source_id not in seen_ids:
+                            results.append({
+                                "title": track.title,
+                                "artist": track.artist,
+                                "album": track.album or "",
+                                "source": track.source.value,
+                                "duration": _format_duration(track.duration),
+                            })
+            except Exception:
+                logger.warning("Tidal search failed", exc_info=True)
+
+        return results
 
     @staticmethod
-    def _do_search(query: str) -> list[dict[str, str]]:
+    def _do_placeholder_search(query: str) -> list[dict[str, str]]:
         """Generate placeholder search results based on the query.
 
         This method returns fake results that incorporate the query text

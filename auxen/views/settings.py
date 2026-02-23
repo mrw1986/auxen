@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import threading
 from pathlib import Path
 
 import gi
@@ -9,7 +12,9 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gtk
+from gi.repository import Adw, GLib, Gtk
+
+logger = logging.getLogger(__name__)
 
 
 class AuxenSettings(Adw.PreferencesWindow):
@@ -24,6 +29,10 @@ class AuxenSettings(Adw.PreferencesWindow):
             **kwargs,
         )
 
+        self._db = None
+        self._tidal_provider = None
+        self._local_provider = None
+
         self.set_default_size(600, 700)
 
         page = Adw.PreferencesPage()
@@ -36,6 +45,27 @@ class AuxenSettings(Adw.PreferencesWindow):
         page.add(self._build_about_group())
 
         self.add(page)
+
+    # ---- Public API ----
+
+    def set_services(self, db=None, tidal_provider=None, local_provider=None) -> None:
+        """Wire backend services to the settings dialog.
+
+        Parameters
+        ----------
+        db:
+            Database instance for reading/writing settings.
+        tidal_provider:
+            TidalProvider instance for Tidal auth.
+        local_provider:
+            LocalProvider instance for rescanning.
+        """
+        self._db = db
+        self._tidal_provider = tidal_provider
+        self._local_provider = local_provider
+
+        # Load current settings from database
+        self._load_settings()
 
     # ── Library ──────────────────────────────────────────
 
@@ -65,15 +95,15 @@ class AuxenSettings(Adw.PreferencesWindow):
 
         # Rescan Library button
         rescan_row = Adw.ActionRow(title="Rescan Library")
-        rescan_btn = Gtk.Button(
+        self._rescan_btn = Gtk.Button(
             icon_name="view-refresh-symbolic",
             valign=Gtk.Align.CENTER,
         )
-        rescan_btn.add_css_class("flat")
-        rescan_btn.add_css_class("settings-rescan-btn")
-        rescan_btn.connect("clicked", self._on_rescan)
-        rescan_row.add_suffix(rescan_btn)
-        rescan_row.set_activatable_widget(rescan_btn)
+        self._rescan_btn.add_css_class("flat")
+        self._rescan_btn.add_css_class("settings-rescan-btn")
+        self._rescan_btn.connect("clicked", self._on_rescan)
+        rescan_row.add_suffix(self._rescan_btn)
+        rescan_row.set_activatable_widget(self._rescan_btn)
         group.add(rescan_row)
 
         return group
@@ -176,13 +206,194 @@ class AuxenSettings(Adw.PreferencesWindow):
 
         return group
 
-    # ── Signal handlers (stubs) ──────────────────────────
+    # ── Settings loading ──────────────────────────────────
+
+    def _load_settings(self) -> None:
+        """Load current settings from the database."""
+        if self._db is None:
+            return
+
+        try:
+            # Load music directories
+            raw = self._db.get_setting("music_dirs")
+            if raw:
+                dirs = json.loads(raw)
+                if isinstance(dirs, list) and dirs:
+                    self._music_dir_row.set_subtitle(", ".join(dirs))
+        except Exception:
+            logger.warning("Failed to load music_dirs setting", exc_info=True)
+
+        try:
+            # Load source priority
+            priority = self._db.get_setting("source_priority")
+            if priority is not None:
+                priority_map = {
+                    "prefer_local": 0,
+                    "prefer_tidal": 1,
+                    "prefer_quality": 2,
+                    "always_ask": 3,
+                }
+                idx = priority_map.get(priority, 0)
+                self._source_priority.set_selected(idx)
+        except Exception:
+            logger.warning("Failed to load source_priority", exc_info=True)
+
+        try:
+            # Load audio quality
+            quality = self._db.get_setting("tidal_quality")
+            if quality is not None:
+                quality_map = {"low": 0, "high": 1, "lossless": 2, "hires": 3}
+                idx = quality_map.get(quality, 2)
+                self._audio_quality.set_selected(idx)
+        except Exception:
+            logger.warning("Failed to load tidal_quality", exc_info=True)
+
+        # Check Tidal login status
+        if self._tidal_provider is not None:
+            try:
+                if self._tidal_provider.is_logged_in:
+                    self._account_row.set_subtitle("Connected")
+                    self._login_btn.set_label("Log Out")
+            except Exception:
+                logger.warning(
+                    "Failed to check Tidal login status", exc_info=True
+                )
+
+    # ── Signal handlers ──────────────────────────────────
 
     def _on_add_folder(self, _button: Gtk.Button) -> None:
-        """Placeholder: open a file chooser to add a music folder."""
+        """Open a file chooser to add a music folder."""
+        try:
+            dialog = Gtk.FileDialog()
+            dialog.set_title("Select Music Folder")
+            dialog.select_folder(
+                self,
+                None,
+                self._on_folder_selected,
+            )
+        except Exception:
+            logger.warning("Failed to open folder dialog", exc_info=True)
+
+    def _on_folder_selected(self, dialog, result) -> None:
+        """Handle the folder selection result."""
+        try:
+            folder = dialog.select_folder_finish(result)
+            if folder is not None:
+                folder_path = folder.get_path()
+                if folder_path and self._db is not None:
+                    # Read current dirs and add the new one
+                    raw = self._db.get_setting("music_dirs")
+                    current_dirs = []
+                    if raw:
+                        try:
+                            current_dirs = json.loads(raw)
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    if not isinstance(current_dirs, list):
+                        current_dirs = []
+
+                    if folder_path not in current_dirs:
+                        current_dirs.append(folder_path)
+                        self._db.set_setting(
+                            "music_dirs", json.dumps(current_dirs)
+                        )
+                        self._music_dir_row.set_subtitle(
+                            ", ".join(current_dirs)
+                        )
+                        logger.info("Added music folder: %s", folder_path)
+        except GLib.Error:
+            # User cancelled the dialog — this is normal
+            pass
+        except Exception:
+            logger.warning("Failed to add folder", exc_info=True)
 
     def _on_rescan(self, _button: Gtk.Button) -> None:
-        """Placeholder: trigger a library rescan."""
+        """Trigger a library rescan in a background thread."""
+        if self._local_provider is None or self._db is None:
+            return
+
+        self._rescan_btn.set_sensitive(False)
+
+        def _rescan_thread() -> None:
+            try:
+                # Re-read music dirs in case they changed
+                raw = self._db.get_setting("music_dirs")
+                if raw:
+                    try:
+                        dirs = json.loads(raw)
+                        if isinstance(dirs, list) and dirs:
+                            self._local_provider._music_dirs = [
+                                str(d) for d in dirs
+                            ]
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                tracks = self._local_provider.scan()
+                for track in tracks:
+                    self._db.insert_track(track)
+                logger.info("Rescanned: found %d tracks", len(tracks))
+            except Exception:
+                logger.warning("Rescan failed", exc_info=True)
+            finally:
+                GLib.idle_add(self._on_rescan_complete)
+
+        thread = threading.Thread(target=_rescan_thread, daemon=True)
+        thread.start()
+
+    def _on_rescan_complete(self) -> bool:
+        """Re-enable the rescan button on the main thread."""
+        self._rescan_btn.set_sensitive(True)
+        return False
 
     def _on_tidal_login(self, _button: Gtk.Button) -> None:
-        """Placeholder: start the Tidal OAuth login flow."""
+        """Start or manage the Tidal login flow."""
+        if self._tidal_provider is None:
+            return
+
+        try:
+            if self._tidal_provider.is_logged_in:
+                # Log out
+                self._tidal_provider.logout()
+                self._account_row.set_subtitle("Not connected")
+                self._login_btn.set_label("Log In")
+                return
+        except Exception:
+            pass
+
+        # Start login in a background thread
+        self._login_btn.set_sensitive(False)
+        self._account_row.set_subtitle("Authenticating...")
+
+        def _login_thread() -> None:
+            try:
+
+                def _url_callback(url: str) -> None:
+                    GLib.idle_add(
+                        self._show_login_url, url
+                    )
+
+                success = self._tidal_provider.login(
+                    url_callback=_url_callback
+                )
+                GLib.idle_add(self._on_login_complete, success)
+            except Exception:
+                logger.warning("Tidal login failed", exc_info=True)
+                GLib.idle_add(self._on_login_complete, False)
+
+        thread = threading.Thread(target=_login_thread, daemon=True)
+        thread.start()
+
+    def _show_login_url(self, url: str) -> bool:
+        """Display the Tidal login URL to the user."""
+        self._account_row.set_subtitle(f"Visit: {url}")
+        return False
+
+    def _on_login_complete(self, success: bool) -> bool:
+        """Update the UI after Tidal login completes."""
+        self._login_btn.set_sensitive(True)
+        if success:
+            self._account_row.set_subtitle("Connected")
+            self._login_btn.set_label("Log Out")
+        else:
+            self._account_row.set_subtitle("Login failed")
+        return False

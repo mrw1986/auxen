@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -9,6 +11,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import GLib, Gtk, Pango
 
+logger = logging.getLogger(__name__)
 
 # Placeholder favorite tracks: (title, artist, album, source, quality, duration, date_added_sort_key)
 _SAMPLE_FAVORITES: list[dict[str, str | int]] = [
@@ -97,7 +100,20 @@ _SORT_KEYS: dict[str, str] = {
 _SORT_OPTIONS = list(_SORT_KEYS.keys())
 
 
-def _make_favorite_row(track: dict[str, str | int]) -> Gtk.ListBoxRow:
+def _format_duration(seconds: float | None) -> str:
+    """Format seconds as M:SS."""
+    if seconds is None or seconds <= 0:
+        return "0:00"
+    total = int(seconds)
+    minutes = total // 60
+    secs = total % 60
+    return f"{minutes}:{secs:02d}"
+
+
+def _make_favorite_row(
+    track: dict[str, str | int],
+    on_unfavorite=None,
+) -> Gtk.ListBoxRow:
     """Build a single row for the favorites list."""
     row_box = Gtk.Box(
         orientation=Gtk.Orientation.HORIZONTAL,
@@ -195,6 +211,18 @@ def _make_favorite_row(track: dict[str, str | int]) -> Gtk.ListBoxRow:
     heart_btn.add_css_class("favorites-heart-btn")
     heart_btn.set_valign(Gtk.Align.CENTER)
     heart_btn.set_tooltip_text("Remove from favorites")
+
+    # Wire the unfavorite callback if provided
+    if on_unfavorite is not None:
+        track_id = track.get("track_id")
+        if track_id is not None:
+
+            def _on_heart_toggled(btn, tid=track_id, cb=on_unfavorite):
+                if not btn.get_active():
+                    cb(tid)
+
+            heart_btn.connect("toggled", _on_heart_toggled)
+
     row_box.append(heart_btn)
 
     row = Gtk.ListBoxRow()
@@ -212,6 +240,7 @@ class FavoritesView(Gtk.ScrolledWindow):
 
         self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
+        self._db = None
         self._all_favorites: list[dict[str, str | int]] = list(
             _SAMPLE_FAVORITES
         )
@@ -353,7 +382,58 @@ class FavoritesView(Gtk.ScrolledWindow):
         # Populate initial view
         self._refresh_list()
 
+    # ---- Public API ----
+
+    def set_database(self, db) -> None:
+        """Wire the favorites view to a real database.
+
+        Loads favorites from the database and replaces the placeholder data.
+        """
+        self._db = db
+        self._load_from_db()
+        self._refresh_list()
+
+    def refresh(self) -> None:
+        """Reload favorites from the database and refresh the display."""
+        if self._db is not None:
+            self._load_from_db()
+        self._refresh_list()
+
     # ---- Internal helpers ----
+
+    def _load_from_db(self) -> None:
+        """Load favorites from the database into the internal list."""
+        if self._db is None:
+            return
+
+        try:
+            tracks = self._db.get_favorites()
+            if tracks:
+                self._all_favorites = []
+                for track in tracks:
+                    self._all_favorites.append({
+                        "title": track.title,
+                        "artist": track.artist,
+                        "album": track.album or "",
+                        "source": track.source.value,
+                        "quality": track.quality_label,
+                        "duration": _format_duration(track.duration),
+                        "date_added": track.added_at or "",
+                        "track_id": track.id,
+                    })
+            # If tracks is empty, keep existing placeholder data
+        except Exception:
+            logger.warning("Failed to load favorites from database", exc_info=True)
+
+    def _on_unfavorite(self, track_id: int) -> None:
+        """Remove a track from favorites via the database."""
+        if self._db is not None:
+            try:
+                self._db.set_favorite(track_id, False)
+                self._load_from_db()
+                self._refresh_list()
+            except Exception:
+                logger.warning("Failed to unfavorite track", exc_info=True)
 
     def _get_filtered_tracks(self) -> list[dict[str, str | int]]:
         """Return favorites filtered by the active source filter."""
@@ -399,8 +479,13 @@ class FavoritesView(Gtk.ScrolledWindow):
             self._content_stack.set_visible_child_name("empty")
             return
 
+        # Pass the unfavorite callback only when database is wired
+        unfavorite_cb = self._on_unfavorite if self._db is not None else None
+
         for track in sorted_tracks:
-            self._favorites_list.append(_make_favorite_row(track))
+            self._favorites_list.append(
+                _make_favorite_row(track, on_unfavorite=unfavorite_cb)
+            )
 
         self._content_stack.set_visible_child_name("list")
 
