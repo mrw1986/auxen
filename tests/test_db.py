@@ -334,6 +334,100 @@ class TestLocalFiles:
         assert db.get_local_file_path(9999) is None
 
 
+class TestGetTracksByAlbum:
+    def test_returns_tracks_by_album_ordered_by_disc_and_track(
+        self, db: Database
+    ) -> None:
+        db.insert_track(
+            _make_track(
+                title="Track 3",
+                album="The Wall",
+                track_number=3,
+                disc_number=1,
+                source_id="w3",
+            )
+        )
+        db.insert_track(
+            _make_track(
+                title="Track 1",
+                album="The Wall",
+                track_number=1,
+                disc_number=1,
+                source_id="w1",
+            )
+        )
+        db.insert_track(
+            _make_track(
+                title="Disc 2 Track 1",
+                album="The Wall",
+                track_number=1,
+                disc_number=2,
+                source_id="w4",
+            )
+        )
+        db.insert_track(
+            _make_track(
+                title="Other Album",
+                album="Animals",
+                track_number=1,
+                disc_number=1,
+                source_id="a1",
+            )
+        )
+
+        tracks = db.get_tracks_by_album("The Wall")
+        assert len(tracks) == 3
+        assert tracks[0].title == "Track 1"
+        assert tracks[1].title == "Track 3"
+        assert tracks[2].title == "Disc 2 Track 1"
+
+    def test_filters_by_artist(self, db: Database) -> None:
+        db.insert_track(
+            _make_track(
+                title="By Artist A",
+                artist="Artist A",
+                album="Shared Name",
+                track_number=1,
+                source_id="sa1",
+            )
+        )
+        db.insert_track(
+            _make_track(
+                title="By Artist B",
+                artist="Artist B",
+                album="Shared Name",
+                track_number=1,
+                source_id="sb1",
+            )
+        )
+
+        tracks = db.get_tracks_by_album("Shared Name", artist="Artist A")
+        assert len(tracks) == 1
+        assert tracks[0].title == "By Artist A"
+
+    def test_matches_album_artist(self, db: Database) -> None:
+        db.insert_track(
+            _make_track(
+                title="Collab Track",
+                artist="Featured Guest",
+                album_artist="Main Artist",
+                album="Collab Album",
+                track_number=1,
+                source_id="c1",
+            )
+        )
+
+        tracks = db.get_tracks_by_album(
+            "Collab Album", artist="Main Artist"
+        )
+        assert len(tracks) == 1
+        assert tracks[0].title == "Collab Track"
+
+    def test_empty_result(self, db: Database) -> None:
+        tracks = db.get_tracks_by_album("Nonexistent Album")
+        assert tracks == []
+
+
 class TestMatchGroups:
     def test_set_match_group(self, db: Database) -> None:
         id1 = db.insert_track(

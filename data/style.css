@@ -743,3 +743,112 @@ button.flat {
 button.flat:hover {
     background-color: rgba(240, 236, 228, 0.06);
 }
+
+/* =============================================================
+   ALBUM DETAIL PAGE
+   ============================================================= */
+
+/* -- Header section with subtle gradient -- */
+
+.album-detail-header {
+    padding: 24px;
+    border-radius: 16px;
+    background: linear-gradient(
+        135deg,
+        rgba(212, 160, 57, 0.08) 0%,
+        rgba(28, 27, 34, 0.6) 100%
+    );
+    border: 1px solid rgba(240, 236, 228, 0.06);
+}
+
+/* -- Album art placeholder -- */
+
+.album-detail-art {
+    min-width: 200px;
+    min-height: 200px;
+    background-color: #25242d;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* -- Album title -- */
+
+.album-detail-title {
+    font-size: 1.75rem;
+    font-weight: 800;
+    color: #f0ece4;
+    letter-spacing: -0.5px;
+}
+
+/* -- Artist subtitle -- */
+
+.album-detail-artist {
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: #d4a039;
+}
+
+/* -- Metadata line (year, track count, duration) -- */
+
+.album-detail-meta {
+    font-size: 0.8rem;
+    color: #6b6860;
+    letter-spacing: 0.2px;
+}
+
+/* -- Play All button -- */
+
+.album-detail-play-all-btn {
+    background-color: #d4a039;
+    color: #0c0b0f;
+    font-weight: 700;
+    border-radius: 9999px;
+    padding: 8px 24px;
+    font-size: 0.9rem;
+    transition: all 200ms ease;
+}
+
+.album-detail-play-all-btn:hover {
+    background-color: #e0b04a;
+}
+
+.album-detail-play-all-btn:active {
+    background-color: #c99530;
+}
+
+/* -- Track list row -- */
+
+.album-detail-track-row {
+    padding: 10px 12px;
+    border-radius: 6px;
+    transition: background-color 150ms ease;
+}
+
+.album-detail-track-row:hover {
+    background-color: rgba(240, 236, 228, 0.04);
+}
+
+/* -- Track number (dim, fixed width) -- */
+
+.album-detail-track-number {
+    font-size: 0.85rem;
+    color: #6b6860;
+    font-weight: 500;
+    min-width: 32px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* -- Currently playing track highlight -- */
+
+.album-detail-track-playing {
+    background-color: rgba(212, 160, 57, 0.1);
+    border-radius: 6px;
+}
+
+.album-detail-track-playing label {
+    color: #d4a039;
+}
+
+.album-detail-track-playing .album-detail-track-number {
+    color: #d4a039;
+}

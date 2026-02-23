@@ -247,6 +247,38 @@ class Database:
         )
         return [self._row_to_track(r) for r in cur.fetchall()]
 
+    def get_tracks_by_album(
+        self, album: str, artist: str | None = None
+    ) -> list[Track]:
+        """Get all tracks belonging to an album, ordered by disc/track number.
+
+        Parameters
+        ----------
+        album:
+            The album name to search for (exact match).
+        artist:
+            Optional artist name to narrow the search.
+        """
+        if artist is not None:
+            cur = self._conn.execute(
+                """
+                SELECT * FROM tracks
+                WHERE album = ? AND (artist = ? OR album_artist = ?)
+                ORDER BY disc_number ASC, track_number ASC, title ASC
+                """,
+                (album, artist, artist),
+            )
+        else:
+            cur = self._conn.execute(
+                """
+                SELECT * FROM tracks
+                WHERE album = ?
+                ORDER BY disc_number ASC, track_number ASC, title ASC
+                """,
+                (album,),
+            )
+        return [self._row_to_track(r) for r in cur.fetchall()]
+
     # ------------------------------------------------------------------
     # Settings
     # ------------------------------------------------------------------
@@ -316,6 +348,178 @@ class Database:
             self._conn.execute(
                 "UPDATE tracks SET match_group_id = ? WHERE id = ?",
                 (group_id, tid),
+            )
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Playlists
+    # ------------------------------------------------------------------
+
+    def create_playlist(self, name: str, color: str = "#d4a039") -> int:
+        """Create a new playlist. Returns playlist ID."""
+        cur = self._conn.execute(
+            "INSERT INTO playlists (name, color) VALUES (?, ?)",
+            (name, color),
+        )
+        self._conn.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+    def get_playlists(self) -> list[dict]:
+        """Get all playlists as dicts with id, name, color, track_count."""
+        cur = self._conn.execute(
+            """
+            SELECT p.id, p.name, p.color,
+                   COUNT(pt.track_id) AS track_count
+            FROM playlists p
+            LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+            WHERE p.source IS NULL AND p.tidal_playlist_id IS NULL
+            GROUP BY p.id
+            ORDER BY p.id
+            """
+        )
+        return [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "color": row["color"],
+                "track_count": row["track_count"],
+            }
+            for row in cur.fetchall()
+        ]
+
+    def get_playlist(self, playlist_id: int) -> dict | None:
+        """Get a single playlist with its metadata."""
+        cur = self._conn.execute(
+            """
+            SELECT p.id, p.name, p.color,
+                   COUNT(pt.track_id) AS track_count
+            FROM playlists p
+            LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+            WHERE p.id = ?
+            GROUP BY p.id
+            """,
+            (playlist_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "color": row["color"],
+            "track_count": row["track_count"],
+        }
+
+    def delete_playlist(self, playlist_id: int) -> None:
+        """Delete a playlist and its track associations."""
+        self._conn.execute(
+            "DELETE FROM playlist_tracks WHERE playlist_id = ?",
+            (playlist_id,),
+        )
+        self._conn.execute(
+            "DELETE FROM playlists WHERE id = ?",
+            (playlist_id,),
+        )
+        self._conn.commit()
+
+    def rename_playlist(self, playlist_id: int, name: str) -> None:
+        """Rename a playlist."""
+        self._conn.execute(
+            "UPDATE playlists SET name = ? WHERE id = ?",
+            (name, playlist_id),
+        )
+        self._conn.commit()
+
+    def update_playlist_color(self, playlist_id: int, color: str) -> None:
+        """Update the color of a playlist."""
+        self._conn.execute(
+            "UPDATE playlists SET color = ? WHERE id = ?",
+            (color, playlist_id),
+        )
+        self._conn.commit()
+
+    def add_track_to_playlist(
+        self, playlist_id: int, track_id: int
+    ) -> None:
+        """Add a track to a playlist at the end.
+
+        If the track is already in the playlist, this is a no-op.
+        """
+        cur = self._conn.execute(
+            "SELECT 1 FROM playlist_tracks "
+            "WHERE playlist_id = ? AND track_id = ?",
+            (playlist_id, track_id),
+        )
+        if cur.fetchone() is not None:
+            return
+
+        cur = self._conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 "
+            "FROM playlist_tracks WHERE playlist_id = ?",
+            (playlist_id,),
+        )
+        next_pos = cur.fetchone()[0]
+
+        self._conn.execute(
+            "INSERT INTO playlist_tracks "
+            "(playlist_id, track_id, position) VALUES (?, ?, ?)",
+            (playlist_id, track_id, next_pos),
+        )
+        self._conn.commit()
+
+    def remove_track_from_playlist(
+        self, playlist_id: int, track_id: int
+    ) -> None:
+        """Remove a track from a playlist."""
+        self._conn.execute(
+            "DELETE FROM playlist_tracks "
+            "WHERE playlist_id = ? AND track_id = ?",
+            (playlist_id, track_id),
+        )
+        self._conn.commit()
+
+    def get_playlist_tracks(self, playlist_id: int) -> list[Track]:
+        """Get all tracks in a playlist, ordered by position."""
+        cur = self._conn.execute(
+            """
+            SELECT t.* FROM tracks t
+            JOIN playlist_tracks pt ON pt.track_id = t.id
+            WHERE pt.playlist_id = ?
+            ORDER BY pt.position
+            """,
+            (playlist_id,),
+        )
+        return [self._row_to_track(r) for r in cur.fetchall()]
+
+    def reorder_playlist_track(
+        self, playlist_id: int, track_id: int, new_position: int
+    ) -> None:
+        """Move a track to a new position in the playlist.
+
+        Shifts other tracks to accommodate the move.
+        """
+        cur = self._conn.execute(
+            """
+            SELECT track_id FROM playlist_tracks
+            WHERE playlist_id = ?
+            ORDER BY position
+            """,
+            (playlist_id,),
+        )
+        track_ids = [row["track_id"] for row in cur.fetchall()]
+
+        if track_id not in track_ids:
+            return
+
+        track_ids.remove(track_id)
+        new_position = max(0, min(new_position, len(track_ids)))
+        track_ids.insert(new_position, track_id)
+
+        for pos, tid in enumerate(track_ids):
+            self._conn.execute(
+                "UPDATE playlist_tracks SET position = ? "
+                "WHERE playlist_id = ? AND track_id = ?",
+                (pos, playlist_id, tid),
             )
         self._conn.commit()
 

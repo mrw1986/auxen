@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from typing import Callable, Optional
 
 import gi
 
@@ -124,6 +125,9 @@ def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
 
     child = Gtk.FlowBoxChild()
     child.set_child(card)
+    # Store album/artist data for click handling
+    child._album_title = title  # type: ignore[attr-defined]
+    child._album_artist = artist  # type: ignore[attr-defined]
     return child
 
 
@@ -214,6 +218,11 @@ class HomePage(Gtk.ScrolledWindow):
 
         self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
+        # Album click callback
+        self._on_album_clicked: Optional[
+            Callable[[str, str], None]
+        ] = None
+
         # Root container
         root = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -298,7 +307,10 @@ class HomePage(Gtk.ScrolledWindow):
         self._album_grid.set_max_children_per_line(6)
         self._album_grid.set_column_spacing(16)
         self._album_grid.set_row_spacing(16)
-        self._album_grid.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._album_grid.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self._album_grid.connect(
+            "child-activated", self._on_album_card_activated
+        )
 
         for title, artist, source in _SAMPLE_ALBUMS:
             self._album_grid.append(_make_album_card(title, artist, source))
@@ -434,6 +446,34 @@ class HomePage(Gtk.ScrolledWindow):
             if row is None:
                 break
             list_box.remove(row)
+
+    def set_callbacks(
+        self,
+        on_album_clicked: Callable[[str, str], None] | None = None,
+    ) -> None:
+        """Set callback functions for user actions.
+
+        Parameters
+        ----------
+        on_album_clicked:
+            Called with (album_name, artist) when an album card is clicked.
+        """
+        self._on_album_clicked = on_album_clicked
+
+    def _on_album_card_activated(
+        self,
+        _flow_box: Gtk.FlowBox,
+        child: Gtk.FlowBoxChild,
+    ) -> None:
+        """Handle an album card being clicked in the grid."""
+        album_title = getattr(child, "_album_title", None)
+        album_artist = getattr(child, "_album_artist", None)
+        if (
+            album_title is not None
+            and album_artist is not None
+            and self._on_album_clicked is not None
+        ):
+            self._on_album_clicked(album_title, album_artist)
 
     def _on_filter_toggled(self, toggled_btn: Gtk.ToggleButton) -> None:
         """Enforce radio-button behavior: only one filter active at a time."""

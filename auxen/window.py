@@ -11,6 +11,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk
 
+from auxen.views.album_detail import AlbumDetailView
 from auxen.views.favorites import FavoritesView
 from auxen.views.home import HomePage
 from auxen.views.now_playing import NowPlayingBar
@@ -41,6 +42,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         self.set_default_size(1100, 700)
 
         self._app_ref = None
+        self._previous_page: str = "home"
 
         split_view = Adw.NavigationSplitView()
 
@@ -94,6 +96,20 @@ class AuxenWindow(Adw.ApplicationWindow):
             placeholder.append(subtitle)
 
             self._stack.add_named(placeholder, name)
+
+        # ---- Album Detail Page (programmatic navigation only) ----
+        self._album_detail = AlbumDetailView()
+        self._album_detail.set_callbacks(
+            on_play_track=self._on_album_play_track,
+            on_play_all=self._on_album_play_all,
+            on_back=self._on_album_back,
+        )
+        self._stack.add_named(self._album_detail, "album-detail")
+
+        # Wire home page album click callback
+        self._home_page.set_callbacks(
+            on_album_clicked=self._on_album_clicked,
+        )
 
         content_box.append(self._stack)
 
@@ -183,6 +199,8 @@ class AuxenWindow(Adw.ApplicationWindow):
                 quality_label=track.quality_label,
                 source=track.source.value,
             )
+            # Highlight the current track in album detail if visible
+            self._album_detail.set_current_track(track.id)
 
     def _on_position_updated(self, _player, position, duration) -> None:
         """Update the now-playing bar progress."""
@@ -212,6 +230,61 @@ class AuxenWindow(Adw.ApplicationWindow):
             if duration is not None and duration > 0:
                 fraction = scale.get_value() / 100.0
                 self._app_ref.player.seek(fraction * duration)
+
+    # ------------------------------------------------------------------
+    # Album detail navigation
+    # ------------------------------------------------------------------
+
+    def _on_album_clicked(self, album_name: str, artist: str) -> None:
+        """Handle an album card click from the home page."""
+        # Store current page for back navigation
+        visible = self._stack.get_visible_child_name()
+        if visible and visible != "album-detail":
+            self._previous_page = visible
+
+        tracks: list = []
+        source = "local"
+
+        if self._app_ref and self._app_ref.db is not None:
+            try:
+                tracks = self._app_ref.db.get_tracks_by_album(
+                    album_name, artist=artist
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to fetch album tracks", exc_info=True
+                )
+
+        if tracks:
+            source = tracks[0].source.value
+
+        self._album_detail.show_album(
+            album_name=album_name,
+            artist=artist,
+            tracks=tracks,
+            source=source,
+        )
+        self._stack.set_visible_child_name("album-detail")
+
+    def _on_album_play_track(self, track) -> None:
+        """Play a single track from the album detail view."""
+        if self._app_ref and self._app_ref.player is not None:
+            # Load the album tracks into the queue starting from this track
+            tracks = self._album_detail._tracks
+            try:
+                index = tracks.index(track)
+            except ValueError:
+                index = 0
+            self._app_ref.player.play_queue(tracks, start_index=index)
+
+    def _on_album_play_all(self, tracks) -> None:
+        """Play all tracks from the album detail view."""
+        if self._app_ref and self._app_ref.player is not None and tracks:
+            self._app_ref.player.play_queue(tracks, start_index=0)
+
+    def _on_album_back(self) -> None:
+        """Navigate back from the album detail view."""
+        self._stack.set_visible_child_name(self._previous_page)
 
     # ------------------------------------------------------------------
     # Settings
