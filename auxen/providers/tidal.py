@@ -125,6 +125,176 @@ class TidalProvider(ContentProvider):
         self._session.user.favorites.remove_track(int(track_id))
 
     # ------------------------------------------------------------------
+    # Discovery / Explore
+    # ------------------------------------------------------------------
+
+    def get_featured_albums(self, limit: int = 12) -> list[dict]:
+        """Get Tidal's featured/new albums.
+
+        Returns a list of dicts with keys: title, artist, cover_url, tidal_id.
+        Returns an empty list if not logged in or on API failure.
+        """
+        try:
+            if not self.is_logged_in:
+                return []
+            explore_page = self._session.explore()
+            albums: list[dict] = []
+            for category in explore_page:
+                items = getattr(category, "items", None)
+                if items is None:
+                    continue
+                for item in items:
+                    if isinstance(item, tidalapi.Album) and len(albums) < limit:
+                        cover = getattr(item, "cover", None) or ""
+                        cover_url = None
+                        if cover:
+                            cover_url = (
+                                f"https://resources.tidal.com/images/"
+                                f"{cover.replace('-', '/')}/640x640.jpg"
+                            )
+                        artist_name = ""
+                        if hasattr(item, "artist") and item.artist:
+                            artist_name = getattr(item.artist, "name", "")
+                        albums.append({
+                            "title": item.name,
+                            "artist": artist_name,
+                            "cover_url": cover_url,
+                            "tidal_id": str(item.id),
+                        })
+            return albums[:limit]
+        except Exception:
+            logger.debug("get_featured_albums failed", exc_info=True)
+            return []
+
+    def get_new_releases(self, limit: int = 12) -> list[dict]:
+        """Get new releases from Tidal.
+
+        Returns a list of dicts with keys: title, artist, cover_url, tidal_id.
+        Falls back to searching 'new releases' if the explore page fails.
+        """
+        try:
+            if not self.is_logged_in:
+                return []
+            # Try the explore page first for new-release categories
+            explore_page = self._session.explore()
+            albums: list[dict] = []
+            for category in explore_page:
+                cat_title = getattr(category, "title", "") or ""
+                if "new" not in cat_title.lower():
+                    continue
+                items = getattr(category, "items", None)
+                if items is None:
+                    continue
+                for item in items:
+                    if isinstance(item, tidalapi.Album) and len(albums) < limit:
+                        cover = getattr(item, "cover", None) or ""
+                        cover_url = None
+                        if cover:
+                            cover_url = (
+                                f"https://resources.tidal.com/images/"
+                                f"{cover.replace('-', '/')}/640x640.jpg"
+                            )
+                        artist_name = ""
+                        if hasattr(item, "artist") and item.artist:
+                            artist_name = getattr(item.artist, "name", "")
+                        albums.append({
+                            "title": item.name,
+                            "artist": artist_name,
+                            "cover_url": cover_url,
+                            "tidal_id": str(item.id),
+                        })
+            if albums:
+                return albums[:limit]
+
+            # Fallback: search for new releases
+            results = self._session.search(
+                "new releases", models=[tidalapi.Album], limit=limit
+            )
+            for item in results.get("albums", []):
+                cover = getattr(item, "cover", None) or ""
+                cover_url = None
+                if cover:
+                    cover_url = (
+                        f"https://resources.tidal.com/images/"
+                        f"{cover.replace('-', '/')}/640x640.jpg"
+                    )
+                artist_name = ""
+                if hasattr(item, "artist") and item.artist:
+                    artist_name = getattr(item.artist, "name", "")
+                albums.append({
+                    "title": item.name,
+                    "artist": artist_name,
+                    "cover_url": cover_url,
+                    "tidal_id": str(item.id),
+                })
+            return albums[:limit]
+        except Exception:
+            logger.debug("get_new_releases failed", exc_info=True)
+            return []
+
+    def get_top_tracks(self, limit: int = 20) -> list[Track]:
+        """Get Tidal's top/popular tracks.
+
+        Returns a list of Track models.  Falls back to searching
+        'top hits' if the explore page yields nothing.
+        """
+        try:
+            if not self.is_logged_in:
+                return []
+            # Try explore page for track-based categories
+            explore_page = self._session.explore()
+            tracks: list[Track] = []
+            for category in explore_page:
+                items = getattr(category, "items", None)
+                if items is None:
+                    continue
+                for item in items:
+                    if isinstance(item, tidalapi.Track) and len(tracks) < limit:
+                        tracks.append(self._tidal_track_to_model(item))
+            if tracks:
+                return tracks[:limit]
+
+            # Fallback: search for popular tracks
+            results = self._session.search(
+                "top hits", models=[tidalapi.Track], limit=limit
+            )
+            for t in results.get("tracks", []):
+                tracks.append(self._tidal_track_to_model(t))
+            return tracks[:limit]
+        except Exception:
+            logger.debug("get_top_tracks failed", exc_info=True)
+            return []
+
+    def get_genres(self) -> list[str]:
+        """Get available genre names from Tidal.
+
+        Returns a list of genre title strings, or an empty list on failure.
+        """
+        try:
+            if not self.is_logged_in:
+                return []
+            genres_page = self._session.genres()
+            genre_names: list[str] = []
+            for category in genres_page:
+                cat_title = getattr(category, "title", None)
+                if cat_title:
+                    genre_names.append(cat_title)
+                # Also check for PageLink items with titles
+                items = getattr(category, "items", None)
+                if items is None:
+                    continue
+                for item in items:
+                    name = getattr(item, "header", None) or getattr(
+                        item, "short_header", None
+                    )
+                    if name and name not in genre_names:
+                        genre_names.append(name)
+            return genre_names if genre_names else []
+        except Exception:
+            logger.debug("get_genres failed", exc_info=True)
+            return []
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 

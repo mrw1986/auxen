@@ -13,6 +13,7 @@ from gi.repository import Adw, Gtk
 
 from auxen.lyrics import LyricsService
 from auxen.views.album_detail import AlbumDetailView
+from auxen.views.explore import ExploreView
 from auxen.views.favorites import FavoritesView
 from auxen.views.home import HomePage
 from auxen.views.library import LibraryView
@@ -86,6 +87,11 @@ class AuxenWindow(Adw.ApplicationWindow):
             if name == "library":
                 self._library_view = LibraryView()
                 self._stack.add_named(self._library_view, name)
+                continue
+
+            if name == "explore":
+                self._explore_view = ExploreView()
+                self._stack.add_named(self._explore_view, name)
                 continue
 
             if name == "favorites":
@@ -210,6 +216,15 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._library_view.set_callbacks(
                 on_album_clicked=self._on_album_clicked,
                 on_play_track=self._on_library_play_track,
+            )
+
+        # --- Explore View -> Tidal Provider ---
+        if app.tidal_provider is not None:
+            self._explore_view.set_tidal_provider(app.tidal_provider)
+            self._explore_view.set_callbacks(
+                on_album_clicked=self._on_album_clicked,
+                on_play_track=self._on_explore_play_track,
+                on_login=self._on_explore_login,
             )
 
         # --- Sidebar -> Database (playlists) ---
@@ -342,6 +357,19 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._stack.set_visible_child_name(self._previous_page)
 
     # ------------------------------------------------------------------
+    # Explore page callbacks
+    # ------------------------------------------------------------------
+
+    def _on_explore_play_track(self, track) -> None:
+        """Play a single track from the explore view."""
+        if self._app_ref and self._app_ref.player is not None:
+            self._app_ref.player.play_queue([track], start_index=0)
+
+    def _on_explore_login(self) -> None:
+        """Handle login request from the explore page."""
+        self._open_settings()
+
+    # ------------------------------------------------------------------
     # Playlist detail navigation
     # ------------------------------------------------------------------
 
@@ -451,4 +479,13 @@ class AuxenWindow(Adw.ApplicationWindow):
             except Exception:
                 logger.warning(
                     "Failed to refresh favorites", exc_info=True
+                )
+
+        # Refresh explore page when switching to it
+        if page_name == "explore":
+            try:
+                self._explore_view.refresh()
+            except Exception:
+                logger.warning(
+                    "Failed to refresh explore page", exc_info=True
                 )

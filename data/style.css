@@ -1057,3 +1057,71 @@ button.flat:hover {
 .lyrics-toggle-btn.active:hover {
     color: #e0b04a;
 }
+
+/* =============================================================
+   EXPLORE PAGE
+   ============================================================= */
+
+/* -- Header section -- */
+
+.explore-header {
+    padding: 4px 0;
+}
+
+/* -- Login prompt card — centred with subtle card styling -- */
+
+.explore-login-prompt {
+    background-color: #1c1b22;
+    border-radius: 16px;
+    padding: 48px 32px;
+    border: 1px solid rgba(240, 236, 228, 0.06);
+    max-width: 480px;
+}
+
+.explore-login-prompt image {
+    color: #00c4cc;
+}
+
+/* -- Section spacing -- */
+
+.explore-section {
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+
+/* -- Genre pill buttons -- */
+
+.explore-genre-pill {
+    border-radius: 9999px;
+    padding: 6px 18px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    background-color: transparent;
+    color: #a39e93;
+    border: 1px solid rgba(240, 236, 228, 0.1);
+    min-height: 0;
+    transition: all 200ms ease;
+}
+
+.explore-genre-pill:hover {
+    background-color: rgba(0, 196, 204, 0.1);
+    color: #00c4cc;
+    border-color: rgba(0, 196, 204, 0.3);
+}
+
+.explore-genre-pill:active {
+    background-color: rgba(0, 196, 204, 0.15);
+    color: #00c4cc;
+}
+
+/* -- Track row in top tracks list -- */
+
+.explore-track-row {
+    padding: 10px 12px;
+    border-radius: 6px;
+    transition: background-color 150ms ease;
+}
+
+.explore-track-row:hover {
+    background-color: rgba(240, 236, 228, 0.04);
+}
