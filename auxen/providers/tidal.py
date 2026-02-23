@@ -124,6 +124,15 @@ class TidalProvider(ContentProvider):
         """Remove a track from the user's Tidal favourites."""
         self._session.user.favorites.remove_track(int(track_id))
 
+    def is_favorite(self, track_id: str) -> bool:
+        """Check whether a track is in the user's Tidal favourites."""
+        try:
+            fav_tracks = self._session.user.favorites.tracks()
+            return any(str(t.id) == track_id for t in fav_tracks)
+        except Exception:
+            logger.warning("Failed to check Tidal favorite status", exc_info=True)
+            return False
+
     # ------------------------------------------------------------------
     # Discovery / Explore
     # ------------------------------------------------------------------
