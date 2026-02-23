@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Callable
 
 import gi
@@ -9,7 +10,11 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, GObject, Gtk
+from gi.repository import Adw, Gdk, GObject, Gtk
+
+from auxen.views.playlist_view import PLAYLIST_COLORS
+
+logger = logging.getLogger(__name__)
 
 
 # Navigation items: (page_name, icon_name, display_label, badge_text, badge_class)
@@ -25,8 +30,8 @@ _TIDAL_ITEMS: list[tuple[str, str, str, str | None, str | None]] = [
     ("favorites", "starred-symbolic", "Favorites", None, None),
 ]
 
-# Playlists: (name, dot_color_css)
-_PLAYLISTS: list[tuple[str, str]] = [
+# Fallback playlists shown when no database is connected
+_FALLBACK_PLAYLISTS: list[tuple[str, str]] = [
     ("Late Night Vibes", "#d4a039"),
     ("Tidal Discovery Mix", "#00c4cc"),
     ("FLAC Collection", "#7cb87a"),
@@ -83,7 +88,9 @@ def _make_section_label(text: str) -> Gtk.Label:
     return label
 
 
-def _make_playlist_row(name: str, dot_color: str) -> Gtk.ListBoxRow:
+def _make_playlist_row(
+    name: str, dot_color: str, playlist_id: int | None = None
+) -> Gtk.ListBoxRow:
     """Build a playlist row with a colored dot and name."""
     row_box = Gtk.Box(
         orientation=Gtk.Orientation.HORIZONTAL,
@@ -119,6 +126,34 @@ def _make_playlist_row(name: str, dot_color: str) -> Gtk.ListBoxRow:
     return row
 
 
+def _make_add_playlist_row() -> Gtk.ListBoxRow:
+    """Build the 'New Playlist' row with a + icon."""
+    row_box = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL,
+        spacing=12,
+    )
+    row_box.add_css_class("playlist-add-row")
+    row_box.set_margin_top(4)
+    row_box.set_margin_bottom(4)
+    row_box.set_margin_start(8)
+    row_box.set_margin_end(8)
+
+    icon = Gtk.Image.new_from_icon_name("list-add-symbolic")
+    icon.set_pixel_size(16)
+    icon.set_opacity(0.5)
+    row_box.append(icon)
+
+    label = Gtk.Label(label="New Playlist")
+    label.set_xalign(0)
+    label.set_hexpand(True)
+    label.add_css_class("dim-label")
+    row_box.append(label)
+
+    row = Gtk.ListBoxRow()
+    row.set_child(row_box)
+    return row
+
+
 class AuxenSidebar(Gtk.Box):
     """Left sidebar with brand, browse, tidal, playlists, and account sections."""
 
@@ -128,6 +163,7 @@ class AuxenSidebar(Gtk.Box):
         self,
         on_navigate: Callable[[str], None] | None = None,
         on_settings: Callable[[], None] | None = None,
+        on_playlist_selected: Callable[[int], None] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(
@@ -137,7 +173,10 @@ class AuxenSidebar(Gtk.Box):
 
         self._on_navigate = on_navigate
         self._on_settings = on_settings
+        self._on_playlist_selected = on_playlist_selected
         self._page_names: list[str] = []
+        self._db = None
+        self._playlist_ids: list[int] = []
 
         # ---- Brand section ----
         brand_box = Gtk.Box(
@@ -217,8 +256,12 @@ class AuxenSidebar(Gtk.Box):
         self._playlist_list = Gtk.ListBox()
         self._playlist_list.add_css_class("navigation-sidebar")
         self._playlist_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._playlist_list.connect(
+            "row-activated", self._on_playlist_row_activated
+        )
 
-        for name, color in _PLAYLISTS:
+        # Show fallback playlists initially (before database is connected)
+        for name, color in _FALLBACK_PLAYLISTS:
             row = _make_playlist_row(name, color)
             self._playlist_list.append(row)
 
@@ -273,6 +316,45 @@ class AuxenSidebar(Gtk.Box):
         if first_row:
             self._browse_list.select_row(first_row)
 
+    # ---- Public API ----
+
+    def set_database(self, db) -> None:
+        """Wire the sidebar to a real database for dynamic playlists."""
+        self._db = db
+        self.refresh_playlists()
+
+    def refresh_playlists(self) -> None:
+        """Reload playlists from the database and rebuild the sidebar list."""
+        # Clear existing playlist rows
+        while True:
+            row = self._playlist_list.get_row_at_index(0)
+            if row is None:
+                break
+            self._playlist_list.remove(row)
+
+        self._playlist_ids = []
+
+        if self._db is not None:
+            try:
+                playlists = self._db.get_playlists()
+                for pl in playlists:
+                    row = _make_playlist_row(
+                        pl["name"],
+                        pl["color"] or "#d4a039",
+                        playlist_id=pl["id"],
+                    )
+                    self._playlist_list.append(row)
+                    self._playlist_ids.append(pl["id"])
+            except Exception:
+                logger.warning(
+                    "Failed to load playlists from database",
+                    exc_info=True,
+                )
+
+        # Always add the "New Playlist" row at the bottom
+        add_row = _make_add_playlist_row()
+        self._playlist_list.append(add_row)
+
     # ---- Internal handlers ----
 
     def _on_row_selected(
@@ -296,3 +378,87 @@ class AuxenSidebar(Gtk.Box):
             page = self._page_names[index]
             if self._on_navigate:
                 self._on_navigate(page)
+
+    def _on_playlist_row_activated(
+        self, _listbox: Gtk.ListBox, row: Gtk.ListBoxRow
+    ) -> None:
+        """Handle click on a playlist row."""
+        idx = row.get_index()
+
+        # Check if it's the "New Playlist" row (last row, after all playlists)
+        if idx == len(self._playlist_ids):
+            self._create_new_playlist()
+            return
+
+        # Otherwise it's a playlist row — navigate to it
+        if 0 <= idx < len(self._playlist_ids):
+            playlist_id = self._playlist_ids[idx]
+            # Deselect other nav lists
+            self._browse_list.unselect_all()
+            self._tidal_list.unselect_all()
+            if self._on_playlist_selected:
+                self._on_playlist_selected(playlist_id)
+
+    def _create_new_playlist(self) -> None:
+        """Create a new playlist via the database."""
+        if self._db is None:
+            return
+        try:
+            playlist_id = self._db.create_playlist("New Playlist")
+            self.refresh_playlists()
+            # Optionally navigate to the new playlist
+            if self._on_playlist_selected:
+                self._on_playlist_selected(playlist_id)
+        except Exception:
+            logger.warning(
+                "Failed to create new playlist", exc_info=True
+            )
+
+    def _show_playlist_context_menu(
+        self, playlist_id: int, x: float, y: float
+    ) -> None:
+        """Show a context menu for a playlist row."""
+        if self._db is None:
+            return
+
+        menu = Gtk.PopoverMenu()
+        menu_model = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=4,
+        )
+        menu_model.set_margin_top(4)
+        menu_model.set_margin_bottom(4)
+        menu_model.set_margin_start(4)
+        menu_model.set_margin_end(4)
+
+        rename_btn = Gtk.Button(label="Rename")
+        rename_btn.add_css_class("flat")
+        rename_btn.connect(
+            "clicked",
+            lambda _b, pid=playlist_id: self._rename_playlist(pid),
+        )
+        menu_model.append(rename_btn)
+
+        delete_btn = Gtk.Button(label="Delete")
+        delete_btn.add_css_class("flat")
+        delete_btn.add_css_class("destructive-action")
+        delete_btn.connect(
+            "clicked",
+            lambda _b, pid=playlist_id: self._delete_playlist(pid),
+        )
+        menu_model.append(delete_btn)
+
+    def _rename_playlist(self, playlist_id: int) -> None:
+        """Rename a playlist (placeholder for dialog)."""
+        if self._db is None:
+            return
+        # Simple rename for now
+        self._db.rename_playlist(playlist_id, "Renamed Playlist")
+        self.refresh_playlists()
+
+    def _delete_playlist(self, playlist_id: int) -> None:
+        """Delete a playlist."""
+        if self._db is None:
+            return
+        self._db.delete_playlist(playlist_id)
+        self.refresh_playlists()

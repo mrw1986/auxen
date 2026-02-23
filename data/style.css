@@ -852,3 +852,80 @@ button.flat:hover {
 .album-detail-track-playing .album-detail-track-number {
     color: #d4a039;
 }
+
+/* =============================================================
+   PLAYLIST VIEW
+   ============================================================= */
+
+/* -- Playlist header section -- */
+
+.playlist-header {
+    padding: 4px 0;
+}
+
+/* -- Large color dot (40px) -- */
+
+.playlist-color-dot-large {
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 9999px;
+}
+
+/* -- Editable playlist name -- */
+
+.playlist-name-editable {
+    font-size: 2rem;
+    font-weight: 800;
+    color: #f0ece4;
+    letter-spacing: -0.5px;
+}
+
+/* -- Track row with hover -- */
+
+.playlist-track-row {
+    padding: 10px 12px;
+    border-radius: 6px;
+    transition: background-color 150ms ease;
+}
+
+.playlist-track-row:hover {
+    background-color: rgba(240, 236, 228, 0.04);
+}
+
+/* -- Small remove (x) button, red on hover -- */
+
+.playlist-remove-btn {
+    color: #6b6860;
+    min-width: 28px;
+    min-height: 28px;
+    border-radius: 9999px;
+    transition: all 200ms ease;
+}
+
+.playlist-remove-btn:hover {
+    color: #e74c3c;
+    background-color: rgba(231, 76, 60, 0.12);
+}
+
+/* -- "New Playlist" row with + icon -- */
+
+.playlist-add-row {
+    opacity: 0.7;
+    transition: opacity 200ms ease;
+}
+
+.playlist-add-row:hover {
+    opacity: 1.0;
+}
+
+/* -- Centered empty state -- */
+
+.playlist-empty-state {
+    color: #6b6860;
+    padding: 48px 16px;
+}
+
+.playlist-empty-state image {
+    color: #6b6860;
+    opacity: 0.3;
+}

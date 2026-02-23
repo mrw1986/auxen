@@ -15,6 +15,7 @@ from auxen.views.album_detail import AlbumDetailView
 from auxen.views.favorites import FavoritesView
 from auxen.views.home import HomePage
 from auxen.views.now_playing import NowPlayingBar
+from auxen.views.playlist_view import PlaylistView
 from auxen.views.search import SearchView
 from auxen.views.settings import AuxenSettings
 from auxen.views.sidebar import AuxenSidebar
@@ -50,6 +51,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._sidebar = AuxenSidebar(
             on_navigate=self._switch_page,
             on_settings=self._open_settings,
+            on_playlist_selected=self._on_playlist_selected,
         )
         sidebar_page = Adw.NavigationPage.new(self._sidebar, "Sidebar")
         split_view.set_sidebar(sidebar_page)
@@ -105,6 +107,13 @@ class AuxenWindow(Adw.ApplicationWindow):
             on_back=self._on_album_back,
         )
         self._stack.add_named(self._album_detail, "album-detail")
+
+        # ---- Playlist Detail Page (programmatic navigation only) ----
+        self._playlist_view = PlaylistView()
+        self._playlist_view.on_play_track = self._on_playlist_play_track
+        self._playlist_view.on_play_all = self._on_playlist_play_all
+        self._playlist_view.on_back = self._on_playlist_back
+        self._stack.add_named(self._playlist_view, "playlist-detail")
 
         # Wire home page album click callback
         self._home_page.set_callbacks(
@@ -169,6 +178,10 @@ class AuxenWindow(Adw.ApplicationWindow):
         # --- Favorites View -> Database ---
         if app.db is not None:
             self._favorites_view.set_database(app.db)
+
+        # --- Sidebar -> Database (playlists) ---
+        if app.db is not None:
+            self._sidebar.set_database(app.db)
 
         # --- Home Page initial refresh ---
         if app.db is not None:
@@ -284,6 +297,48 @@ class AuxenWindow(Adw.ApplicationWindow):
 
     def _on_album_back(self) -> None:
         """Navigate back from the album detail view."""
+        self._stack.set_visible_child_name(self._previous_page)
+
+    # ------------------------------------------------------------------
+    # Playlist detail navigation
+    # ------------------------------------------------------------------
+
+    def _on_playlist_selected(self, playlist_id: int) -> None:
+        """Handle a playlist selection from the sidebar."""
+        visible = self._stack.get_visible_child_name()
+        if visible and visible != "playlist-detail":
+            self._previous_page = visible
+
+        if self._app_ref and self._app_ref.db is not None:
+            self._playlist_view.show_playlist(
+                playlist_id, self._app_ref.db
+            )
+        self._stack.set_visible_child_name("playlist-detail")
+
+    def _on_playlist_play_track(self, track) -> None:
+        """Play a single track from the playlist detail view."""
+        if self._app_ref and self._app_ref.player is not None:
+            tracks = self._playlist_view._tracks
+            try:
+                index = tracks.index(track)
+            except ValueError:
+                index = 0
+            self._app_ref.player.play_queue(tracks, start_index=index)
+
+    def _on_playlist_play_all(self, tracks) -> None:
+        """Play all tracks from the playlist view."""
+        if (
+            self._app_ref
+            and self._app_ref.player is not None
+            and tracks
+        ):
+            self._app_ref.player.play_queue(tracks, start_index=0)
+
+    def _on_playlist_back(self) -> None:
+        """Navigate back from the playlist detail view."""
+        # Refresh sidebar playlists in case anything changed
+        if self._app_ref and self._app_ref.db is not None:
+            self._sidebar.refresh_playlists()
         self._stack.set_visible_child_name(self._previous_page)
 
     # ------------------------------------------------------------------
