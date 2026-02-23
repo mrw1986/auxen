@@ -227,3 +227,111 @@
 .recently-played-row {
     padding: 8px 12px;
 }
+
+/* ── Now Playing Bar ─────────────────────────── */
+
+.now-playing-bar {
+    background-color: #0c0b0f;
+    border-top: 1px solid rgba(240, 236, 228, 0.08);
+    padding: 8px 16px;
+    min-height: 72px;
+}
+
+.now-playing-track-title {
+    font-weight: 700;
+    color: #f0ece4;
+    font-size: 0.9rem;
+}
+
+.now-playing-track-artist {
+    color: #6b6860;
+    font-size: 0.8rem;
+}
+
+.now-playing-art {
+    min-width: 48px;
+    min-height: 48px;
+    border-radius: 6px;
+    background-color: #1c1b22;
+}
+
+.now-playing-play-btn {
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 9999px;
+    background-color: #d4a039;
+    color: #0c0b0f;
+    padding: 0;
+}
+
+.now-playing-play-btn:hover {
+    background-color: #e0b04a;
+}
+
+.now-playing-control-btn {
+    color: #6b6860;
+    min-width: 32px;
+    min-height: 32px;
+}
+
+.now-playing-control-btn:hover {
+    color: #f0ece4;
+}
+
+.now-playing-control-btn.active {
+    color: #d4a039;
+}
+
+.now-playing-progress trough {
+    min-height: 4px;
+    border-radius: 2px;
+    background-color: rgba(240, 236, 228, 0.1);
+}
+
+.now-playing-progress trough highlight {
+    background-color: #d4a039;
+    border-radius: 2px;
+}
+
+.now-playing-progress slider {
+    min-width: 12px;
+    min-height: 12px;
+    border-radius: 9999px;
+    background-color: #f0ece4;
+    margin: -4px;
+}
+
+.now-playing-time {
+    font-size: 0.75rem;
+    font-family: monospace;
+    color: #6b6860;
+    min-width: 36px;
+}
+
+.now-playing-quality-badge {
+    background-color: rgba(212, 160, 57, 0.2);
+    color: #d4a039;
+    border-radius: 9999px;
+    padding: 2px 8px;
+    font-size: 0.65rem;
+    font-weight: 700;
+}
+
+.now-playing-volume trough {
+    min-height: 4px;
+    border-radius: 2px;
+    background-color: rgba(240, 236, 228, 0.1);
+}
+
+.now-playing-volume trough highlight {
+    background-color: #d4a039;
+    border-radius: 2px;
+}
+
+.now-playing-volume slider {
+    min-width: 10px;
+    min-height: 10px;
+    border-radius: 9999px;
+    background-color: #f0ece4;
+    margin: -3px;
+}

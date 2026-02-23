@@ -1,0 +1,378 @@
+"""Now-playing bar for the Auxen music player."""
+
+from __future__ import annotations
+
+from typing import Callable
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+
+from gi.repository import Gtk, Pango
+
+
+def _format_time(seconds: float) -> str:
+    """Format seconds as M:SS (e.g. 3:45)."""
+    total = max(0, int(seconds))
+    minutes = total // 60
+    secs = total % 60
+    return f"{minutes}:{secs:02d}"
+
+
+class NowPlayingBar(Gtk.Box):
+    """Persistent now-playing bar with track info, transport controls, and extras."""
+
+    __gtype_name__ = "NowPlayingBar"
+
+    def __init__(
+        self,
+        on_play_pause: Callable[[], None] | None = None,
+        on_next: Callable[[], None] | None = None,
+        on_previous: Callable[[], None] | None = None,
+        on_shuffle: Callable[[bool], None] | None = None,
+        on_repeat: Callable[[bool], None] | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            **kwargs,
+        )
+
+        self._on_play_pause = on_play_pause
+        self._on_next = on_next
+        self._on_previous = on_previous
+        self._on_shuffle = on_shuffle
+        self._on_repeat = on_repeat
+
+        self._is_playing = False
+        self._shuffle_active = False
+        self._repeat_active = False
+        self._favorite_active = False
+
+        self.add_css_class("now-playing-bar")
+
+        # ---- Left section: Track info ----
+        left = self._build_left_section()
+        left.set_hexpand(True)
+        self.append(left)
+
+        # ---- Center section: Transport + Progress ----
+        center = self._build_center_section()
+        center.set_hexpand(True)
+        self.append(center)
+
+        # ---- Right section: Extra controls ----
+        right = self._build_right_section()
+        right.set_hexpand(True)
+        self.append(right)
+
+    # ── Left section ──────────────────────────────────────
+
+    def _build_left_section(self) -> Gtk.Box:
+        """Build the track-info section (art, title, artist, favorite)."""
+        left = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=12,
+        )
+        left.set_valign(Gtk.Align.CENTER)
+
+        # Album art placeholder
+        art_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER,
+        )
+        art_box.add_css_class("now-playing-art")
+        art_box.set_size_request(48, 48)
+
+        art_icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
+        art_icon.set_pixel_size(24)
+        art_icon.set_opacity(0.4)
+        art_icon.set_halign(Gtk.Align.CENTER)
+        art_icon.set_valign(Gtk.Align.CENTER)
+        art_icon.set_vexpand(True)
+        art_box.append(art_icon)
+        left.append(art_box)
+
+        # Title + Artist
+        text_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=2,
+        )
+        text_box.set_valign(Gtk.Align.CENTER)
+
+        self._title_label = Gtk.Label(label="No Track Playing")
+        self._title_label.set_xalign(0)
+        self._title_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self._title_label.set_max_width_chars(30)
+        self._title_label.add_css_class("now-playing-track-title")
+        text_box.append(self._title_label)
+
+        self._artist_label = Gtk.Label(label="")
+        self._artist_label.set_xalign(0)
+        self._artist_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self._artist_label.set_max_width_chars(30)
+        self._artist_label.add_css_class("now-playing-track-artist")
+        text_box.append(self._artist_label)
+
+        left.append(text_box)
+
+        # Favorite button
+        self._fav_btn = Gtk.ToggleButton()
+        self._fav_btn.set_icon_name("emblem-favorite-symbolic")
+        self._fav_btn.add_css_class("flat")
+        self._fav_btn.add_css_class("now-playing-control-btn")
+        self._fav_btn.set_valign(Gtk.Align.CENTER)
+        self._fav_btn.connect("toggled", self._on_favorite_toggled)
+        left.append(self._fav_btn)
+
+        return left
+
+    # ── Center section ────────────────────────────────────
+
+    def _build_center_section(self) -> Gtk.Box:
+        """Build transport controls and progress bar."""
+        center = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=4,
+        )
+        center.set_valign(Gtk.Align.CENTER)
+        center.set_halign(Gtk.Align.CENTER)
+
+        # Transport controls row
+        transport = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+        )
+        transport.set_halign(Gtk.Align.CENTER)
+
+        # Shuffle
+        self._shuffle_btn = Gtk.ToggleButton()
+        self._shuffle_btn.set_icon_name("media-playlist-shuffle-symbolic")
+        self._shuffle_btn.add_css_class("flat")
+        self._shuffle_btn.add_css_class("now-playing-control-btn")
+        self._shuffle_btn.set_valign(Gtk.Align.CENTER)
+        self._shuffle_btn.connect("toggled", self._on_shuffle_toggled)
+        transport.append(self._shuffle_btn)
+
+        # Previous
+        prev_btn = Gtk.Button.new_from_icon_name(
+            "media-skip-backward-symbolic"
+        )
+        prev_btn.add_css_class("flat")
+        prev_btn.add_css_class("now-playing-control-btn")
+        prev_btn.set_valign(Gtk.Align.CENTER)
+        prev_btn.connect("clicked", self._on_prev_clicked)
+        transport.append(prev_btn)
+
+        # Play/Pause (larger, circular)
+        self._play_btn = Gtk.Button.new_from_icon_name(
+            "media-playback-start-symbolic"
+        )
+        self._play_btn.add_css_class("now-playing-play-btn")
+        self._play_btn.set_valign(Gtk.Align.CENTER)
+        self._play_btn.connect("clicked", self._on_play_pause_clicked)
+        transport.append(self._play_btn)
+
+        # Next
+        next_btn = Gtk.Button.new_from_icon_name(
+            "media-skip-forward-symbolic"
+        )
+        next_btn.add_css_class("flat")
+        next_btn.add_css_class("now-playing-control-btn")
+        next_btn.set_valign(Gtk.Align.CENTER)
+        next_btn.connect("clicked", self._on_next_clicked)
+        transport.append(next_btn)
+
+        # Repeat
+        self._repeat_btn = Gtk.ToggleButton()
+        self._repeat_btn.set_icon_name("media-playlist-repeat-symbolic")
+        self._repeat_btn.add_css_class("flat")
+        self._repeat_btn.add_css_class("now-playing-control-btn")
+        self._repeat_btn.set_valign(Gtk.Align.CENTER)
+        self._repeat_btn.connect("toggled", self._on_repeat_toggled)
+        transport.append(self._repeat_btn)
+
+        center.append(transport)
+
+        # Progress row
+        progress_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+        )
+        progress_row.set_halign(Gtk.Align.CENTER)
+
+        self._current_time_label = Gtk.Label(label="0:00")
+        self._current_time_label.add_css_class("now-playing-time")
+        progress_row.append(self._current_time_label)
+
+        self._progress_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 0, 100, 1
+        )
+        self._progress_scale.set_draw_value(False)
+        self._progress_scale.set_size_request(300, -1)
+        self._progress_scale.add_css_class("now-playing-progress")
+        progress_row.append(self._progress_scale)
+
+        self._total_time_label = Gtk.Label(label="0:00")
+        self._total_time_label.add_css_class("now-playing-time")
+        progress_row.append(self._total_time_label)
+
+        center.append(progress_row)
+
+        return center
+
+    # ── Right section ─────────────────────────────────────
+
+    def _build_right_section(self) -> Gtk.Box:
+        """Build extra controls (quality badge, volume, queue)."""
+        right = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+        )
+        right.set_valign(Gtk.Align.CENTER)
+        right.set_halign(Gtk.Align.END)
+
+        # Quality badge
+        self._quality_badge = Gtk.Label(label="")
+        self._quality_badge.add_css_class("now-playing-quality-badge")
+        self._quality_badge.set_valign(Gtk.Align.CENTER)
+        self._quality_badge.set_visible(False)
+        right.append(self._quality_badge)
+
+        # Volume icon
+        self._volume_btn = Gtk.Button.new_from_icon_name(
+            "audio-volume-high-symbolic"
+        )
+        self._volume_btn.add_css_class("flat")
+        self._volume_btn.add_css_class("now-playing-control-btn")
+        self._volume_btn.set_valign(Gtk.Align.CENTER)
+        right.append(self._volume_btn)
+
+        # Volume slider
+        self._volume_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 0, 100, 1
+        )
+        self._volume_scale.set_draw_value(False)
+        self._volume_scale.set_value(70)
+        self._volume_scale.set_size_request(120, -1)
+        self._volume_scale.add_css_class("now-playing-volume")
+        right.append(self._volume_scale)
+
+        # Queue button
+        queue_btn = Gtk.Button.new_from_icon_name("view-list-symbolic")
+        queue_btn.add_css_class("flat")
+        queue_btn.add_css_class("now-playing-control-btn")
+        queue_btn.set_valign(Gtk.Align.CENTER)
+        queue_btn.connect("clicked", self._on_queue_clicked)
+        right.append(queue_btn)
+
+        return right
+
+    # ── Public API ────────────────────────────────────────
+
+    def update_track(
+        self,
+        title: str,
+        artist: str,
+        quality_label: str = "",
+        source: str = "",
+    ) -> None:
+        """Update the displayed track info."""
+        self._title_label.set_label(title)
+        self._artist_label.set_label(artist)
+
+        if quality_label:
+            self._quality_badge.set_label(quality_label)
+            self._quality_badge.set_visible(True)
+        else:
+            self._quality_badge.set_visible(False)
+
+    def update_position(
+        self, position_seconds: float, duration_seconds: float
+    ) -> None:
+        """Update the progress bar and time labels."""
+        self._current_time_label.set_label(_format_time(position_seconds))
+        self._total_time_label.set_label(_format_time(duration_seconds))
+
+        if duration_seconds > 0:
+            pct = (position_seconds / duration_seconds) * 100
+            self._progress_scale.set_value(min(pct, 100))
+        else:
+            self._progress_scale.set_value(0)
+
+    def set_playing(self, is_playing: bool) -> None:
+        """Toggle the play/pause button icon."""
+        self._is_playing = is_playing
+        icon = (
+            "media-playback-pause-symbolic"
+            if is_playing
+            else "media-playback-start-symbolic"
+        )
+        self._play_btn.set_icon_name(icon)
+
+    # ── Internal handlers ─────────────────────────────────
+
+    def _on_play_pause_clicked(self, _btn: Gtk.Button) -> None:
+        if self._on_play_pause:
+            self._on_play_pause()
+        else:
+            self._is_playing = not self._is_playing
+            self.set_playing(self._is_playing)
+            print(  # noqa: T201
+                f"[NowPlaying] play/pause -> playing={self._is_playing}"
+            )
+
+    def _on_prev_clicked(self, _btn: Gtk.Button) -> None:
+        if self._on_previous:
+            self._on_previous()
+        else:
+            print("[NowPlaying] previous")  # noqa: T201
+
+    def _on_next_clicked(self, _btn: Gtk.Button) -> None:
+        if self._on_next:
+            self._on_next()
+        else:
+            print("[NowPlaying] next")  # noqa: T201
+
+    def _on_shuffle_toggled(self, btn: Gtk.ToggleButton) -> None:
+        self._shuffle_active = btn.get_active()
+        if self._shuffle_active:
+            btn.add_css_class("active")
+        else:
+            btn.remove_css_class("active")
+
+        if self._on_shuffle:
+            self._on_shuffle(self._shuffle_active)
+        else:
+            print(  # noqa: T201
+                f"[NowPlaying] shuffle -> {self._shuffle_active}"
+            )
+
+    def _on_repeat_toggled(self, btn: Gtk.ToggleButton) -> None:
+        self._repeat_active = btn.get_active()
+        if self._repeat_active:
+            btn.add_css_class("active")
+        else:
+            btn.remove_css_class("active")
+
+        if self._on_repeat:
+            self._on_repeat(self._repeat_active)
+        else:
+            print(  # noqa: T201
+                f"[NowPlaying] repeat -> {self._repeat_active}"
+            )
+
+    def _on_favorite_toggled(self, btn: Gtk.ToggleButton) -> None:
+        self._favorite_active = btn.get_active()
+        if self._favorite_active:
+            btn.add_css_class("active")
+        else:
+            btn.remove_css_class("active")
+        print(  # noqa: T201
+            f"[NowPlaying] favorite -> {self._favorite_active}"
+        )
+
+    def _on_queue_clicked(self, _btn: Gtk.Button) -> None:
+        print("[NowPlaying] queue")  # noqa: T201

@@ -8,6 +8,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
 from auxen.views.home import HomePage
+from auxen.views.now_playing import NowPlayingBar
 from auxen.views.sidebar import AuxenSidebar
 
 
@@ -72,6 +73,10 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._stack.add_named(placeholder, name)
 
         content_box.append(self._stack)
+
+        # ---- Now Playing Bar (pinned at bottom of content area) ----
+        self._now_playing = NowPlayingBar()
+        content_box.append(self._now_playing)
 
         content_page = Adw.NavigationPage.new(content_box, "Content")
         split_view.set_content(content_page)
