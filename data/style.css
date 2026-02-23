@@ -903,6 +903,52 @@ button.flat:hover {
 }
 
 /* =============================================================
+   ARTIST DETAIL PAGE
+   ============================================================= */
+
+/* -- Header section with subtle gradient -- */
+
+.artist-detail-header {
+    padding: 24px;
+    border-radius: 16px;
+    background: linear-gradient(
+        135deg,
+        rgba(212, 160, 57, 0.08) 0%,
+        rgba(28, 27, 34, 0.6) 100%
+    );
+    border: 1px solid rgba(240, 236, 228, 0.06);
+}
+
+/* -- Artist icon placeholder (circular) -- */
+
+.artist-detail-icon {
+    min-width: 120px;
+    min-height: 120px;
+    background-color: #25242d;
+    border-radius: 9999px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* -- Large artist name -- */
+
+.artist-detail-name {
+    font-size: 2rem;
+    font-weight: 800;
+    color: #f0ece4;
+    letter-spacing: -0.5px;
+}
+
+/* -- Horizontal scrollable album cards row -- */
+
+.artist-detail-albums-row {
+    background-color: transparent;
+}
+
+.artist-detail-albums-row scrollbar {
+    background-color: transparent;
+}
+
+/* =============================================================
    PLAYLIST VIEW
    ============================================================= */
 

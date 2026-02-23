@@ -14,6 +14,7 @@ from gi.repository import Adw, Gtk
 from auxen.equalizer import Equalizer
 from auxen.lyrics import LyricsService
 from auxen.views.album_detail import AlbumDetailView
+from auxen.views.artist_detail import ArtistDetailView
 from auxen.views.equalizer_dialog import EqualizerDialog
 from auxen.views.explore import ExploreView
 from auxen.views.favorites import FavoritesView
@@ -140,6 +141,16 @@ class AuxenWindow(Adw.ApplicationWindow):
             on_back=self._on_album_back,
         )
         self._stack.add_named(self._album_detail, "album-detail")
+
+        # ---- Artist Detail Page (programmatic navigation only) ----
+        self._artist_detail = ArtistDetailView()
+        self._artist_detail.set_callbacks(
+            on_play_track=self._on_artist_play_track,
+            on_play_all=self._on_artist_play_all,
+            on_back=self._on_artist_back,
+            on_album_clicked=self._on_album_clicked,
+        )
+        self._stack.add_named(self._artist_detail, "artist-detail")
 
         # ---- Playlist Detail Page (programmatic navigation only) ----
         self._playlist_view = PlaylistView()
@@ -277,6 +288,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._library_view.set_callbacks(
                 on_album_clicked=self._on_album_clicked,
                 on_play_track=self._on_library_play_track,
+                on_artist_clicked=self._on_artist_clicked,
             )
 
         # --- Explore View -> Tidal Provider ---
@@ -430,6 +442,61 @@ class AuxenWindow(Adw.ApplicationWindow):
 
     def _on_album_back(self) -> None:
         """Navigate back from the album detail view."""
+        self._stack.set_visible_child_name(self._previous_page)
+
+    # ------------------------------------------------------------------
+    # Artist detail navigation
+    # ------------------------------------------------------------------
+
+    def _on_artist_clicked(self, artist_name: str) -> None:
+        """Handle an artist row click from the library view."""
+        # Store current page for back navigation
+        visible = self._stack.get_visible_child_name()
+        if visible and visible != "artist-detail":
+            self._previous_page = visible
+
+        albums: list[dict] = []
+        tracks: list = []
+        source = "local"
+
+        if self._app_ref and self._app_ref.db is not None:
+            try:
+                albums = self._app_ref.db.get_artist_albums(artist_name)
+                tracks = self._app_ref.db.get_artist_tracks(artist_name)
+            except Exception:
+                logger.warning(
+                    "Failed to fetch artist data", exc_info=True
+                )
+
+        if tracks:
+            source = tracks[0].source.value
+
+        self._artist_detail.show_artist(
+            artist_name=artist_name,
+            albums=albums,
+            tracks=tracks,
+            source=source,
+        )
+        self._stack.set_visible_child_name("artist-detail")
+
+    def _on_artist_play_track(self, track) -> None:
+        """Play a single track from the artist detail view."""
+        if self._app_ref and self._app_ref.player is not None:
+            # Load the artist tracks into the queue starting from this track
+            tracks = self._artist_detail._tracks
+            try:
+                index = tracks.index(track)
+            except ValueError:
+                index = 0
+            self._app_ref.player.play_queue(tracks, start_index=index)
+
+    def _on_artist_play_all(self, tracks) -> None:
+        """Play all tracks from the artist detail view."""
+        if self._app_ref and self._app_ref.player is not None and tracks:
+            self._app_ref.player.play_queue(tracks, start_index=0)
+
+    def _on_artist_back(self) -> None:
+        """Navigate back from the artist detail view."""
         self._stack.set_visible_child_name(self._previous_page)
 
     # ------------------------------------------------------------------
