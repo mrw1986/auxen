@@ -1,0 +1,14 @@
+[project]
+name = "auxen"
+version = "0.1.0"
+description = "Tidal + local media player for Linux"
+requires-python = ">=3.9"
+dependencies = [
+    "tidalapi>=0.8.0",
+    "mutagen>=1.47.0",
+    "thefuzz>=0.22.0",
+    "PyGObject>=3.46.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
