@@ -357,6 +357,15 @@ class AuxenSidebar(Gtk.Box):
             settings_btn.connect("clicked", lambda *_: self._on_settings())
         account_box.append(settings_btn)
 
+        about_btn = Gtk.Button.new_from_icon_name(
+            "help-about-symbolic"
+        )
+        about_btn.add_css_class("flat")
+        about_btn.set_valign(Gtk.Align.CENTER)
+        about_btn.set_tooltip_text("About Auxen")
+        about_btn.connect("clicked", self._on_about_clicked)
+        account_box.append(about_btn)
+
         self.append(account_box)
 
         # ---- Select "Home" by default ----
@@ -555,3 +564,10 @@ class AuxenSidebar(Gtk.Box):
             return
         self._db.delete_playlist(playlist_id)
         self.refresh_playlists()
+
+    def _on_about_clicked(self, _button: Gtk.Button) -> None:
+        """Open the About dialog."""
+        from auxen.views.about_dialog import show_about_dialog
+
+        root = self.get_root()
+        show_about_dialog(root)
