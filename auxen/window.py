@@ -870,23 +870,7 @@ class AuxenWindow(Adw.ApplicationWindow):
     def _on_queue_move(self, from_index: int, to_index: int) -> None:
         """Reorder a track in the queue."""
         if self._app_ref and self._app_ref.player is not None:
-            player = self._app_ref.player
-            tracks = player.queue._tracks
-            if (
-                0 <= from_index < len(tracks)
-                and 0 <= to_index < len(tracks)
-            ):
-                current_pos = player.queue.position
-                # Swap the tracks
-                tracks[from_index], tracks[to_index] = (
-                    tracks[to_index],
-                    tracks[from_index],
-                )
-                # Adjust current position if affected
-                if current_pos == from_index:
-                    player.queue._position = to_index
-                elif current_pos == to_index:
-                    player.queue._position = from_index
+            self._app_ref.player.queue.move(from_index, to_index)
             self._refresh_queue_panel()
 
     def _switch_page(self, page_name: str) -> None:

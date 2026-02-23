@@ -91,9 +91,9 @@ class TidalProvider(ContentProvider):
 
             future.result()
 
-            # Re-check that our session is still the active one.  If
-            # logout() replaced it while we were waiting, discard the
-            # login result — the user explicitly logged out.
+            # Atomically verify the session identity and snapshot
+            # tokens under one lock acquisition, so a concurrent
+            # logout() cannot slip in between the check and the save.
             with self._session_lock:
                 if self._session is not session:
                     logger.info(
@@ -101,10 +101,13 @@ class TidalProvider(ContentProvider):
                         "by a concurrent logout — discarding."
                     )
                     return False
-            # Pass the local session reference so _save_session persists
-            # exactly the tokens we validated, not whatever self._session
-            # happens to point to by the time the write occurs.
-            self._save_session(session)
+                token_data = {
+                    "token_type": session.token_type,
+                    "access_token": session.access_token,
+                    "refresh_token": session.refresh_token,
+                    "expiry_time": session.expiry_time,
+                }
+            self._write_session_file(token_data)
             return True
         except Exception:
             logger.error("Tidal login failed.", exc_info=True)
@@ -490,25 +493,21 @@ class TidalProvider(ContentProvider):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _save_session(self, session: Any = None) -> None:
-        """Persist OAuth tokens to disk with restricted permissions.
-
-        If *session* is provided, its tokens are saved directly (without
-        reading ``self._session``).  This avoids a TOCTOU race when
-        ``login()`` verifies identity and then persists tokens.
-        """
+    def _save_session(self) -> None:
+        """Snapshot current session tokens under lock and write to disk."""
         with self._session_lock:
-            src = session if session is not None else self._session
             data = {
-                "token_type": src.token_type,
-                "access_token": src.access_token,
-                "refresh_token": src.refresh_token,
-                "expiry_time": src.expiry_time,
+                "token_type": self._session.token_type,
+                "access_token": self._session.access_token,
+                "refresh_token": self._session.refresh_token,
+                "expiry_time": self._session.expiry_time,
             }
+        self._write_session_file(data)
+
+    @staticmethod
+    def _write_session_file(data: dict) -> None:
+        """Write *data* as JSON to the session file with 0o600 permissions."""
         content = json.dumps(data)
-        # Write with 0o600 to prevent other users from reading tokens.
-        # fchmod ensures permissions are corrected even if the file
-        # already existed with weaker permissions.
         fd = os.open(str(SESSION_FILE), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
             os.fchmod(fd, 0o600)

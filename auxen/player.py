@@ -327,13 +327,19 @@ class Player(GObject.Object):
         """
         self._play_generation += 1
         gen = self._play_generation
+        with self._cache_lock:
+            self._uri_cache.clear()
 
         def _resolve_and_play() -> None:
+            # Skip if a newer play request was already issued
+            if gen != self._play_generation:
+                return
+
             uri = self._resolve_uri(track)
             if uri is None:
                 return
 
-            # Check generation before any cache/playback side-effects
+            # Re-check after the (potentially slow) resolve
             if gen != self._play_generation:
                 return
 

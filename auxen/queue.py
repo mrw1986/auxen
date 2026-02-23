@@ -153,6 +153,30 @@ class PlayQueue:
             self._shuffled = False
             self._original_tracks = None
 
+    def move(self, from_index: int, to_index: int) -> bool:
+        """Swap tracks at *from_index* and *to_index*, adjusting position.
+
+        Returns ``True`` on success, ``False`` for invalid indices.
+        """
+        with self._lock:
+            length = len(self._tracks)
+            if (
+                from_index < 0
+                or from_index >= length
+                or to_index < 0
+                or to_index >= length
+            ):
+                return False
+            self._tracks[from_index], self._tracks[to_index] = (
+                self._tracks[to_index],
+                self._tracks[from_index],
+            )
+            if self._position == from_index:
+                self._position = to_index
+            elif self._position == to_index:
+                self._position = from_index
+            return True
+
     # ------------------------------------------------------------------
     # Navigation
     # ------------------------------------------------------------------
