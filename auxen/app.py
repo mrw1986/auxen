@@ -32,6 +32,7 @@ class AuxenApp(Adw.Application):
         self.tidal_provider = None
         self.mpris = None
         self.sleep_timer = None
+        self.notification_service = None
 
         # Play history tracking
         self._current_track_start: float | None = None
@@ -230,6 +231,21 @@ class AuxenApp(Adw.Application):
                 "Failed to initialize sleep timer", exc_info=True
             )
 
+        # --- Notification Service ---
+        try:
+            from auxen.notifications import NotificationService
+
+            self.notification_service = NotificationService(app=self)
+            # Load persisted enabled state from database
+            if self.db is not None:
+                raw = self.db.get_setting("notifications_enabled")
+                if raw is not None:
+                    self.notification_service.set_enabled(raw == "1")
+        except Exception:
+            logger.warning(
+                "Failed to initialize notification service", exc_info=True
+            )
+
         # --- Player signal handlers ---
         if self.player is not None:
             self.player.connect("track-changed", self._on_track_changed)
@@ -365,7 +381,20 @@ class AuxenApp(Adw.Application):
     # ------------------------------------------------------------------
 
     def _on_track_changed(self, _player, track) -> None:
-        """Update MPRIS metadata when the track changes."""
+        """Update MPRIS metadata and send notification when the track changes."""
+        # Desktop notification
+        if self.notification_service is not None and track is not None:
+            try:
+                self.notification_service.notify_track_change(
+                    title=track.title,
+                    artist=track.artist,
+                    album=track.album or "",
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to send track notification", exc_info=True
+                )
+
         if self.mpris is not None and track is not None:
             try:
                 track_id_path = (
