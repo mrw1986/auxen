@@ -18,6 +18,7 @@ from auxen.views.home import HomePage
 from auxen.views.library import LibraryView
 from auxen.views.lyrics_panel import LyricsPanel
 from auxen.views.now_playing import NowPlayingBar
+from auxen.views.queue_panel import QueuePanel
 from auxen.views.playlist_view import PlaylistView
 from auxen.views.search import SearchView
 from auxen.views.settings import AuxenSettings
@@ -136,18 +137,32 @@ class AuxenWindow(Adw.ApplicationWindow):
         )
         self._lyrics_panel.set_visible(False)
 
-        # Horizontal box: content stack + lyrics panel side by side
+        # ---- Queue Panel (right side, hidden by default) ----
+        self._queue_panel = QueuePanel(
+            on_close=self._on_queue_panel_close,
+        )
+        self._queue_panel.set_visible(False)
+        self._queue_panel.set_callbacks(
+            on_jump_to=self._on_queue_jump_to,
+            on_remove=self._on_queue_remove,
+            on_clear=self._on_queue_clear,
+            on_move=self._on_queue_move,
+        )
+
+        # Horizontal box: content stack + side panels (only one visible)
         content_hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         content_hbox.set_vexpand(True)
         self._stack.set_hexpand(True)
         content_hbox.append(self._stack)
         content_hbox.append(self._lyrics_panel)
+        content_hbox.append(self._queue_panel)
 
         content_box.append(content_hbox)
 
         # ---- Now Playing Bar (pinned at bottom of content area) ----
         self._now_playing = NowPlayingBar(
             on_lyrics_toggle=self._on_lyrics_toggle,
+            on_queue_toggle=self._on_queue_toggle,
         )
         content_box.append(self._now_playing)
 
@@ -251,6 +266,9 @@ class AuxenWindow(Adw.ApplicationWindow):
             # Update lyrics panel if it is visible
             if self._lyrics_panel.get_visible():
                 self._fetch_and_show_lyrics(track)
+            # Update queue panel if it is visible
+            if self._queue_panel.get_visible():
+                self._refresh_queue_panel()
 
     def _on_position_updated(self, _player, position, duration) -> None:
         """Update the now-playing bar progress."""
@@ -404,6 +422,11 @@ class AuxenWindow(Adw.ApplicationWindow):
 
     def _on_lyrics_toggle(self, active: bool) -> None:
         """Show or hide the lyrics panel from the now-playing bar button."""
+        if active:
+            # Hide queue panel if visible (mutual exclusion)
+            if self._queue_panel.get_visible():
+                self._queue_panel.set_visible(False)
+                self._now_playing.set_queue_active(False)
         self._lyrics_panel.set_visible(active)
         if active and self._current_track is not None:
             self._fetch_and_show_lyrics(self._current_track)
@@ -428,6 +451,88 @@ class AuxenWindow(Adw.ApplicationWindow):
                 self._lyrics_panel.show_no_lyrics(title, artist)
 
         self._lyrics_service.get_lyrics_async(track, _on_lyrics_result)
+
+    # ------------------------------------------------------------------
+    # Queue panel
+    # ------------------------------------------------------------------
+
+    def _on_queue_toggle(self, active: bool) -> None:
+        """Show or hide the queue panel from the now-playing bar button."""
+        if active:
+            # Hide lyrics panel if visible (mutual exclusion)
+            if self._lyrics_panel.get_visible():
+                self._lyrics_panel.set_visible(False)
+                self._now_playing.set_lyrics_active(False)
+            self._refresh_queue_panel()
+        self._queue_panel.set_visible(active)
+
+    def _on_queue_panel_close(self) -> None:
+        """Handle the queue panel close button."""
+        self._queue_panel.set_visible(False)
+        self._now_playing.set_queue_active(False)
+
+    def _refresh_queue_panel(self) -> None:
+        """Refresh the queue panel with the current player queue state."""
+        if self._app_ref and self._app_ref.player is not None:
+            player = self._app_ref.player
+            tracks = player.queue.tracks
+            position = player.queue.position
+            self._queue_panel.update_queue(tracks, position)
+        else:
+            self._queue_panel.update_queue([], -1)
+
+    def _on_queue_jump_to(self, index: int) -> None:
+        """Jump to a specific track in the queue."""
+        if self._app_ref and self._app_ref.player is not None:
+            player = self._app_ref.player
+            track = player.queue.jump_to(index)
+            if track is not None:
+                player.play_track(track)
+            self._refresh_queue_panel()
+
+    def _on_queue_remove(self, index: int) -> None:
+        """Remove a track from the queue by index."""
+        if self._app_ref and self._app_ref.player is not None:
+            player = self._app_ref.player
+            was_current = index == player.queue.position
+            player.queue.remove(index)
+            if was_current:
+                # Play the track that is now at the current position
+                current = player.queue.current
+                if current is not None:
+                    player.play_track(current)
+                else:
+                    player.stop()
+            self._refresh_queue_panel()
+
+    def _on_queue_clear(self) -> None:
+        """Clear the entire play queue."""
+        if self._app_ref and self._app_ref.player is not None:
+            self._app_ref.player.queue.clear()
+            self._app_ref.player.stop()
+            self._refresh_queue_panel()
+
+    def _on_queue_move(self, from_index: int, to_index: int) -> None:
+        """Reorder a track in the queue."""
+        if self._app_ref and self._app_ref.player is not None:
+            player = self._app_ref.player
+            tracks = player.queue._tracks
+            if (
+                0 <= from_index < len(tracks)
+                and 0 <= to_index < len(tracks)
+            ):
+                current_pos = player.queue.position
+                # Swap the tracks
+                tracks[from_index], tracks[to_index] = (
+                    tracks[to_index],
+                    tracks[from_index],
+                )
+                # Adjust current position if affected
+                if current_pos == from_index:
+                    player.queue._position = to_index
+                elif current_pos == to_index:
+                    player.queue._position = from_index
+            self._refresh_queue_panel()
 
     def _switch_page(self, page_name: str) -> None:
         """Switch the content stack to the requested page."""
