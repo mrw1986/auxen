@@ -35,6 +35,7 @@ class AuxenApp(Adw.Application):
         self.notification_service = None
         self.favorites_sync = None
         self.smart_playlist_service = None
+        self.crossfade_service = None
 
         # Play history tracking
         self._current_track_start: float | None = None
@@ -242,6 +243,42 @@ class AuxenApp(Adw.Application):
         # --- URI resolver ---
         if self.player is not None:
             self.player.set_uri_resolver(self._resolve_uri)
+
+        # --- Crossfade Service ---
+        try:
+            from auxen.crossfade import CrossfadeService
+
+            self.crossfade_service = CrossfadeService()
+            if self.player is not None:
+                self.player.set_crossfade_service(self.crossfade_service)
+        except Exception:
+            logger.warning(
+                "Failed to initialize crossfade service", exc_info=True
+            )
+
+        # --- Apply stored crossfade settings ---
+        if self.crossfade_service is not None and self.db is not None:
+            try:
+                cf_enabled_raw = self.db.get_setting(
+                    "crossfade_enabled", "0"
+                )
+                cf_enabled = cf_enabled_raw == "1"
+                self.crossfade_service.set_enabled(cf_enabled)
+
+                cf_duration_raw = self.db.get_setting(
+                    "crossfade_duration", "5.0"
+                )
+                try:
+                    self.crossfade_service.set_duration(
+                        float(cf_duration_raw)
+                    )
+                except (ValueError, TypeError):
+                    pass
+            except Exception:
+                logger.warning(
+                    "Failed to apply stored crossfade settings",
+                    exc_info=True,
+                )
 
         # --- MPRIS ---
         try:

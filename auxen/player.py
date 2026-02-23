@@ -13,6 +13,9 @@ from gi.repository import GLib, GObject, Gst  # noqa: E402
 from auxen.models import Track  # noqa: E402
 from auxen.queue import PlayQueue  # noqa: E402
 
+if False:  # TYPE_CHECKING
+    from auxen.crossfade import CrossfadeService
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,6 +80,8 @@ class Player(GObject.Object):
         self._state: str = PlayerState.STOPPED
         self._uri_resolver: Optional[Callable[[Track], str]] = None
         self._position_poll_id: Optional[int] = None
+        self._crossfade: Optional["CrossfadeService"] = None
+        self._target_volume: float = 0.7
 
         # --- ReplayGain + Equalizer audio chain (optional) ---
         self._rgvolume_element: Optional[Gst.Element] = None
@@ -163,6 +168,12 @@ class Player(GObject.Object):
         """Set the function that converts a Track into a playable URI."""
         self._uri_resolver = resolver
 
+    def set_crossfade_service(
+        self, crossfade: Optional["CrossfadeService"]
+    ) -> None:
+        """Set the crossfade service for fade-in/fade-out transitions."""
+        self._crossfade = crossfade
+
     # ------------------------------------------------------------------
     # Equalizer
     # ------------------------------------------------------------------
@@ -238,6 +249,10 @@ class Player(GObject.Object):
     def volume(self, value: float) -> None:
         clamped = max(0.0, min(1.0, value))
         self._pipeline.set_property("volume", clamped)
+        # Track the user-intended volume (not fade volume) for crossfade
+        # restore.  Only update when not in a crossfade operation.
+        if self._crossfade is None or not self._crossfade.is_fading:
+            self._target_volume = clamped
 
     @property
     def state(self) -> str:
@@ -260,6 +275,10 @@ class Player(GObject.Object):
         self._set_state(PlayerState.PLAYING)
         self.emit("track-changed", track)
         self._start_position_polling()
+
+        # Start fade-in if crossfade is enabled.
+        if self._crossfade is not None and self._crossfade.enabled:
+            self._crossfade.start_fade_in(self, self._target_volume)
 
     def play(self) -> None:
         """Resume playback or play the current queue track."""
@@ -288,6 +307,8 @@ class Player(GObject.Object):
 
     def stop(self) -> None:
         """Stop playback entirely."""
+        if self._crossfade is not None:
+            self._crossfade.cancel()
         self._pipeline.set_state(Gst.State.NULL)
         self._set_state(PlayerState.STOPPED)
         self._stop_position_polling()
@@ -350,6 +371,8 @@ class Player(GObject.Object):
 
     def dispose(self) -> None:
         """Release GStreamer resources."""
+        if self._crossfade is not None:
+            self._crossfade.cancel()
         self._stop_position_polling()
         self._pipeline.set_state(Gst.State.NULL)
 
@@ -408,6 +431,9 @@ class Player(GObject.Object):
         This callback fires shortly before the current stream ends.  We
         peek at the next track *without* advancing the queue position
         (the actual advance happens in the EOS handler).
+
+        If crossfade is enabled, a fade-out is started on the current
+        track's audio.
         """
         next_index = self.queue.position + 1
         tracks = self.queue.tracks
@@ -422,6 +448,10 @@ class Player(GObject.Object):
         uri = self._resolve_uri(next_track)
         if uri is not None:
             self._pipeline.set_property("uri", uri)
+
+        # Start fade-out if crossfade is enabled.
+        if self._crossfade is not None and self._crossfade.enabled:
+            self._crossfade.start_fade_out(self)
 
     # ------------------------------------------------------------------
     # Position polling

@@ -35,6 +35,7 @@ class AuxenSettings(Adw.PreferencesWindow):
         self._player = None
         self._notification_service = None
         self._favorites_sync = None
+        self._crossfade_service = None
 
         self.set_default_size(600, 700)
 
@@ -59,6 +60,7 @@ class AuxenSettings(Adw.PreferencesWindow):
         player=None,
         notification_service=None,
         favorites_sync=None,
+        crossfade_service=None,
     ) -> None:
         """Wire backend services to the settings dialog.
 
@@ -76,6 +78,8 @@ class AuxenSettings(Adw.PreferencesWindow):
             NotificationService for toggling desktop notifications.
         favorites_sync:
             FavoritesSyncService for syncing Tidal favourites.
+        crossfade_service:
+            CrossfadeService for crossfade transitions.
         """
         self._db = db
         self._tidal_provider = tidal_provider
@@ -83,6 +87,7 @@ class AuxenSettings(Adw.PreferencesWindow):
         self._player = player
         self._notification_service = notification_service
         self._favorites_sync = favorites_sync
+        self._crossfade_service = crossfade_service
 
         # Load current settings from database
         self._load_settings()
@@ -194,6 +199,36 @@ class AuxenSettings(Adw.PreferencesWindow):
             "notify::active", self._on_notifications_toggled
         )
         group.add(self._notifications)
+
+        # Crossfade
+        self._crossfade_switch = Adw.SwitchRow(
+            title="Crossfade",
+            subtitle="Smooth volume transition between tracks",
+        )
+        self._crossfade_switch.set_active(False)
+        self._crossfade_switch.connect(
+            "notify::active", self._on_crossfade_toggled
+        )
+        group.add(self._crossfade_switch)
+
+        # Crossfade duration
+        self._crossfade_duration_row = Adw.ActionRow(
+            title="Crossfade Duration",
+        )
+        self._crossfade_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 1.0, 12.0, 0.5
+        )
+        self._crossfade_scale.set_value(5.0)
+        self._crossfade_scale.set_hexpand(True)
+        self._crossfade_scale.set_size_request(200, -1)
+        self._crossfade_scale.set_valign(Gtk.Align.CENTER)
+        self._crossfade_scale.set_draw_value(True)
+        self._crossfade_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        self._crossfade_scale.connect(
+            "value-changed", self._on_crossfade_duration_changed
+        )
+        self._crossfade_duration_row.add_suffix(self._crossfade_scale)
+        group.add(self._crossfade_duration_row)
 
         # Equalizer
         eq_row = Adw.ActionRow(
@@ -355,6 +390,26 @@ class AuxenSettings(Adw.PreferencesWindow):
                 "Failed to load notifications_enabled", exc_info=True
             )
 
+        try:
+            # Load crossfade enabled
+            cf_enabled = self._db.get_setting("crossfade_enabled")
+            if cf_enabled is not None:
+                self._crossfade_switch.set_active(cf_enabled == "1")
+        except Exception:
+            logger.warning(
+                "Failed to load crossfade_enabled", exc_info=True
+            )
+
+        try:
+            # Load crossfade duration
+            cf_duration = self._db.get_setting("crossfade_duration")
+            if cf_duration is not None:
+                self._crossfade_scale.set_value(float(cf_duration))
+        except Exception:
+            logger.warning(
+                "Failed to load crossfade_duration", exc_info=True
+            )
+
         # Check Tidal login status
         if self._tidal_provider is not None:
             try:
@@ -507,6 +562,34 @@ class AuxenSettings(Adw.PreferencesWindow):
                 )
         if self._notification_service is not None:
             self._notification_service.set_enabled(active)
+
+    def _on_crossfade_toggled(self, row: Adw.SwitchRow, _pspec) -> None:
+        """Persist and apply crossfade enabled/disabled."""
+        enabled = row.get_active()
+        if self._db is not None:
+            try:
+                self._db.set_setting(
+                    "crossfade_enabled", "1" if enabled else "0"
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to save crossfade_enabled", exc_info=True
+                )
+        if self._crossfade_service is not None:
+            self._crossfade_service.set_enabled(enabled)
+
+    def _on_crossfade_duration_changed(self, scale: Gtk.Scale) -> None:
+        """Persist and apply crossfade duration change."""
+        value = scale.get_value()
+        if self._db is not None:
+            try:
+                self._db.set_setting("crossfade_duration", str(value))
+            except Exception:
+                logger.warning(
+                    "Failed to save crossfade_duration", exc_info=True
+                )
+        if self._crossfade_service is not None:
+            self._crossfade_service.set_duration(value)
 
     def _on_open_equalizer(self, _button: Gtk.Button) -> None:
         """Open the equalizer dialog via the parent window."""
