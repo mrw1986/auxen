@@ -992,10 +992,16 @@ class AuxenWindow(Adw.ApplicationWindow):
                 title=self._current_track.title,
                 artist=self._current_track.artist,
             )
-            # Load album art for the mini player
+            # Load album art for the mini player (guarded against stale)
+            _track = self._current_track
+
+            def _on_mini_entry_art(pixbuf, _t=_track):
+                if self._current_track is _t:
+                    self._mini_player.set_album_art(pixbuf)
+
             self._album_art_service.get_art_async(
                 self._current_track,
-                self._mini_player.set_album_art,
+                _on_mini_entry_art,
                 width=48,
                 height=48,
             )
