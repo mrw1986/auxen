@@ -49,6 +49,11 @@ class AuxenApp(Adw.Application):
         self.add_action(settings_action)
         self.set_accels_for_action("app.settings", ["<primary>comma"])
 
+        eq_action = Gio.SimpleAction.new("equalizer", None)
+        eq_action.connect("activate", self._on_equalizer_action)
+        self.add_action(eq_action)
+        self.set_accels_for_action("app.equalizer", ["<Control>e"])
+
         # --- CSS ---
         css_provider = Gtk.CssProvider()
         css_path = Path(__file__).resolve().parent.parent / "data" / "style.css"
@@ -314,3 +319,8 @@ class AuxenApp(Adw.Application):
         win = self.props.active_window
         if win:
             win._open_settings()
+
+    def _on_equalizer_action(self, _action: Gio.SimpleAction, _param) -> None:
+        win = self.props.active_window
+        if win:
+            win.open_equalizer()

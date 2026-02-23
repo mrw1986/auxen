@@ -11,8 +11,10 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk
 
+from auxen.equalizer import Equalizer
 from auxen.lyrics import LyricsService
 from auxen.views.album_detail import AlbumDetailView
+from auxen.views.equalizer_dialog import EqualizerDialog
 from auxen.views.explore import ExploreView
 from auxen.views.favorites import FavoritesView
 from auxen.views.home import HomePage
@@ -52,6 +54,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._previous_page: str = "home"
         self._lyrics_service = LyricsService()
         self._current_track = None
+        self._equalizer: Equalizer | None = None
 
         split_view = Adw.NavigationSplitView()
 
@@ -183,6 +186,30 @@ class AuxenWindow(Adw.ApplicationWindow):
 
         self.set_content(split_view)
 
+        # Wire context menu callbacks for all views that support them
+        context_callbacks = {
+            "on_play": self._on_context_play,
+            "on_play_next": self._on_context_play_next,
+            "on_add_to_queue": self._on_context_add_to_queue,
+            "on_add_to_playlist": self._on_context_add_to_playlist,
+            "on_new_playlist": self._on_context_new_playlist_with_track,
+            "on_toggle_favorite": self._on_context_toggle_favorite,
+            "on_go_to_album": self._on_context_go_to_album,
+        }
+
+        self._home_page.set_context_callbacks(
+            context_callbacks, self._get_playlists
+        )
+        self._library_view.set_context_callbacks(
+            context_callbacks, self._get_playlists
+        )
+        self._search_view.set_context_callbacks(
+            context_callbacks, self._get_playlists
+        )
+        self._favorites_view.set_context_callbacks(
+            context_callbacks, self._get_playlists
+        )
+
         # Show home by default
         self._stack.set_visible_child_name("home")
 
@@ -196,6 +223,12 @@ class AuxenWindow(Adw.ApplicationWindow):
         Called once from do_activate after the window is created.
         """
         self._app_ref = app
+
+        # --- Equalizer ---
+        if app.player is not None:
+            self._equalizer = Equalizer(
+                on_band_changed=app.player.set_eq_band
+            )
 
         # --- Now-Playing Bar -> Player ---
         if app.player is not None:
@@ -488,6 +521,23 @@ class AuxenWindow(Adw.ApplicationWindow):
         settings.present()
 
     # ------------------------------------------------------------------
+    # Equalizer
+    # ------------------------------------------------------------------
+
+    def open_equalizer(self) -> None:
+        """Create and present the equalizer dialog."""
+        if self._equalizer is None:
+            logger.warning(
+                "Equalizer not available (player may not be initialised)"
+            )
+            return
+        dialog = EqualizerDialog(
+            equalizer=self._equalizer,
+            transient_for=self,
+        )
+        dialog.present()
+
+    # ------------------------------------------------------------------
     # Lyrics panel
     # ------------------------------------------------------------------
 
@@ -646,3 +696,89 @@ class AuxenWindow(Adw.ApplicationWindow):
                 logger.warning(
                     "Failed to refresh mixes page", exc_info=True
                 )
+
+    # ------------------------------------------------------------------
+    # Context menu handlers
+    # ------------------------------------------------------------------
+
+    def _get_playlists(self) -> list[dict]:
+        """Return the current list of user playlists for context menus."""
+        if self._app_ref and self._app_ref.db is not None:
+            try:
+                return self._app_ref.db.get_playlists()
+            except Exception:
+                logger.warning(
+                    "Failed to get playlists for context menu",
+                    exc_info=True,
+                )
+        return []
+
+    def _on_context_play(self, track) -> None:
+        """Play the given track immediately via context menu."""
+        if self._app_ref and self._app_ref.player is not None:
+            self._app_ref.player.play_queue([track], start_index=0)
+
+    def _on_context_play_next(self, track) -> None:
+        """Insert a track into the queue after the currently playing track."""
+        if self._app_ref and self._app_ref.player is not None:
+            self._app_ref.player.queue.insert_after_current(track)
+            if self._queue_panel.get_visible():
+                self._refresh_queue_panel()
+
+    def _on_context_add_to_queue(self, track) -> None:
+        """Append a track to the end of the play queue."""
+        if self._app_ref and self._app_ref.player is not None:
+            self._app_ref.player.queue.add(track)
+            if self._queue_panel.get_visible():
+                self._refresh_queue_panel()
+
+    def _on_context_add_to_playlist(self, track, playlist_id: int) -> None:
+        """Add a track to the specified playlist."""
+        if self._app_ref and self._app_ref.db is not None:
+            try:
+                if track.id is not None:
+                    self._app_ref.db.add_track_to_playlist(
+                        playlist_id, track.id
+                    )
+                    # Refresh sidebar playlist counts
+                    self._sidebar.refresh_playlists()
+            except Exception:
+                logger.warning(
+                    "Failed to add track to playlist", exc_info=True
+                )
+
+    def _on_context_new_playlist_with_track(self, track) -> None:
+        """Create a new playlist and add the given track to it."""
+        if self._app_ref and self._app_ref.db is not None:
+            try:
+                playlist_id = self._app_ref.db.create_playlist(
+                    f"Playlist"
+                )
+                if track.id is not None:
+                    self._app_ref.db.add_track_to_playlist(
+                        playlist_id, track.id
+                    )
+                self._sidebar.refresh_playlists()
+            except Exception:
+                logger.warning(
+                    "Failed to create playlist from context menu",
+                    exc_info=True,
+                )
+
+    def _on_context_toggle_favorite(self, track) -> None:
+        """Toggle the favorite state of a track."""
+        if self._app_ref and self._app_ref.db is not None:
+            try:
+                if track.id is not None:
+                    is_fav = self._app_ref.db.is_favorite(track.id)
+                    self._app_ref.db.set_favorite(track.id, not is_fav)
+            except Exception:
+                logger.warning(
+                    "Failed to toggle favorite from context menu",
+                    exc_info=True,
+                )
+
+    def _on_context_go_to_album(self, track) -> None:
+        """Navigate to the album detail view for the track's album."""
+        if track.album:
+            self._on_album_clicked(track.album, track.artist)

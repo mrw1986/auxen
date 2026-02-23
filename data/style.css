@@ -1391,3 +1391,130 @@ button.flat:hover {
 .queue-toggle-btn.active:hover {
     color: #e0b04a;
 }
+
+/* =============================================================
+   CONTEXT MENU (Right-Click Popover)
+   ============================================================= */
+
+/* -- Dark popover menu styling -- */
+
+.context-menu {
+    background-color: #1c1b22;
+    border: 1px solid rgba(240, 236, 228, 0.1);
+    border-radius: 12px;
+    padding: 4px;
+}
+
+.context-menu contents {
+    background-color: transparent;
+    padding: 4px;
+}
+
+.context-menu modelbutton {
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: #f0ece4;
+    font-size: 0.85rem;
+    transition: background-color 150ms ease;
+}
+
+.context-menu modelbutton:hover {
+    background-color: rgba(212, 160, 57, 0.12);
+    color: #f0ece4;
+}
+
+.context-menu separator {
+    background-color: rgba(240, 236, 228, 0.06);
+    margin: 4px 8px;
+    min-height: 1px;
+}
+
+/* =============================================================
+   EQUALIZER DIALOG
+   ============================================================= */
+
+/* -- Dialog container -- */
+
+.equalizer-dialog {
+    background-color: #0c0b0f;
+}
+
+/* -- Band sliders — vertical, amber fill -- */
+
+.equalizer-band-slider trough {
+    min-width: 4px;
+    border-radius: 2px;
+    background-color: rgba(240, 236, 228, 0.08);
+}
+
+.equalizer-band-slider trough highlight {
+    background-color: #d4a039;
+    border-radius: 2px;
+}
+
+.equalizer-band-slider slider {
+    min-width: 14px;
+    min-height: 14px;
+    border-radius: 9999px;
+    background-color: #d4a039;
+    border: 2px solid #f0ece4;
+    margin: -5px;
+}
+
+.equalizer-band-slider:hover slider {
+    background-color: #e0b04a;
+    min-width: 16px;
+    min-height: 16px;
+    margin: -6px;
+}
+
+/* -- Mark at 0 dB (center reference line) -- */
+
+.equalizer-band-slider indicator {
+    background-color: rgba(240, 236, 228, 0.15);
+    min-width: 12px;
+    min-height: 1px;
+}
+
+/* -- Frequency labels below sliders -- */
+
+.equalizer-band-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #6b6860;
+    letter-spacing: 0.3px;
+}
+
+/* -- Current dB value above sliders -- */
+
+.equalizer-band-value {
+    font-size: 0.7rem;
+    font-family: monospace;
+    color: #a39e93;
+    min-width: 36px;
+}
+
+/* -- Preset dropdown -- */
+
+.equalizer-preset-dropdown {
+    background-color: #1c1b22;
+    color: #f0ece4;
+    border-radius: 8px;
+    border: 1px solid rgba(240, 236, 228, 0.08);
+    min-height: 0;
+    padding: 4px 8px;
+}
+
+.equalizer-preset-dropdown:hover {
+    border-color: rgba(240, 236, 228, 0.15);
+}
+
+/* -- Enable/disable switch — amber when active -- */
+
+.equalizer-enable-switch:checked slider {
+    background-color: #d4a039;
+}
+
+.equalizer-enable-switch:checked {
+    background-color: rgba(212, 160, 57, 0.4);
+}

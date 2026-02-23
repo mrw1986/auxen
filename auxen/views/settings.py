@@ -151,6 +151,22 @@ class AuxenSettings(Adw.PreferencesWindow):
         self._replaygain.set_active(False)
         group.add(self._replaygain)
 
+        # Equalizer
+        eq_row = Adw.ActionRow(
+            title="Equalizer",
+            subtitle="10-band graphic equalizer with presets",
+        )
+        eq_row.set_icon_name("media-eq-symbolic")
+        eq_btn = Gtk.Button(
+            icon_name="go-next-symbolic",
+            valign=Gtk.Align.CENTER,
+        )
+        eq_btn.add_css_class("flat")
+        eq_btn.connect("clicked", self._on_open_equalizer)
+        eq_row.add_suffix(eq_btn)
+        eq_row.set_activatable_widget(eq_btn)
+        group.add(eq_row)
+
         return group
 
     # ── Tidal ────────────────────────────────────────────
@@ -344,6 +360,12 @@ class AuxenSettings(Adw.PreferencesWindow):
         """Re-enable the rescan button on the main thread."""
         self._rescan_btn.set_sensitive(True)
         return False
+
+    def _on_open_equalizer(self, _button: Gtk.Button) -> None:
+        """Open the equalizer dialog via the parent window."""
+        parent = self.get_transient_for()
+        if parent is not None and hasattr(parent, "open_equalizer"):
+            parent.open_equalizer()
 
     def _on_tidal_login(self, _button: Gtk.Button) -> None:
         """Start or manage the Tidal login flow."""

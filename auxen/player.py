@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Callable, Optional
 
 import gi
@@ -11,6 +12,8 @@ from gi.repository import GLib, GObject, Gst  # noqa: E402
 
 from auxen.models import Track  # noqa: E402
 from auxen.queue import PlayQueue  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 class PlayerState:
@@ -75,6 +78,36 @@ class Player(GObject.Object):
         self._uri_resolver: Optional[Callable[[Track], str]] = None
         self._position_poll_id: Optional[int] = None
 
+        # --- Equalizer element (optional) ---
+        self._equalizer_element: Optional[Gst.Element] = None
+        try:
+            eq = Gst.ElementFactory.make("equalizer-10bands", "eq")
+            audio_sink = Gst.ElementFactory.make(
+                "autoaudiosink", "audio-out"
+            )
+            if eq is not None and audio_sink is not None:
+                audio_bin = Gst.Bin.new("audio-bin")
+                audio_bin.add(eq)
+                audio_bin.add(audio_sink)
+                eq.link(audio_sink)
+                # Ghost pad so playbin3 can connect to our bin
+                pad = eq.get_static_pad("sink")
+                ghost = Gst.GhostPad.new("sink", pad)
+                audio_bin.add_pad(ghost)
+                self._pipeline.set_property("audio-sink", audio_bin)
+                self._equalizer_element = eq
+                logger.info("GStreamer equalizer-10bands element loaded")
+            else:
+                logger.warning(
+                    "equalizer-10bands or autoaudiosink not available; "
+                    "equalizer disabled"
+                )
+        except Exception:
+            logger.warning(
+                "Failed to set up equalizer element; continuing without it",
+                exc_info=True,
+            )
+
         # Set initial volume
         self._pipeline.set_property("volume", 0.7)
 
@@ -93,6 +126,23 @@ class Player(GObject.Object):
     def set_uri_resolver(self, resolver: Callable[[Track], str]) -> None:
         """Set the function that converts a Track into a playable URI."""
         self._uri_resolver = resolver
+
+    # ------------------------------------------------------------------
+    # Equalizer
+    # ------------------------------------------------------------------
+
+    def set_eq_band(self, band: int, gain_db: float) -> None:
+        """Set a single equalizer band gain (dB).
+
+        Does nothing if the equalizer element was not available at
+        initialisation time.
+        """
+        if self._equalizer_element is not None:
+            self._equalizer_element.set_property(f"band{band}", gain_db)
+
+    def get_equalizer_element(self) -> Optional[Gst.Element]:
+        """Return the GStreamer equalizer element, or ``None``."""
+        return self._equalizer_element
 
     # ------------------------------------------------------------------
     # Properties
