@@ -524,6 +524,113 @@ class Database:
         self._conn.commit()
 
     # ------------------------------------------------------------------
+    # Library browsing
+    # ------------------------------------------------------------------
+
+    def get_albums(self, source: Source | None = None) -> list[dict]:
+        """Get distinct albums with artist, track count, source.
+
+        Ordered by added_at descending (most recently added first).
+
+        Returns
+        -------
+        list of dicts with keys: album, artist, track_count, source, year
+        """
+        if source is not None:
+            cur = self._conn.execute(
+                """
+                SELECT album,
+                       COALESCE(album_artist, artist) AS artist,
+                       COUNT(*) AS track_count,
+                       source,
+                       MAX(year) AS year,
+                       MAX(added_at) AS latest_added
+                FROM tracks
+                WHERE album IS NOT NULL AND album != '' AND source = ?
+                GROUP BY album, COALESCE(album_artist, artist), source
+                ORDER BY latest_added DESC
+                """,
+                (source.value,),
+            )
+        else:
+            cur = self._conn.execute(
+                """
+                SELECT album,
+                       COALESCE(album_artist, artist) AS artist,
+                       COUNT(*) AS track_count,
+                       source,
+                       MAX(year) AS year,
+                       MAX(added_at) AS latest_added
+                FROM tracks
+                WHERE album IS NOT NULL AND album != ''
+                GROUP BY album, COALESCE(album_artist, artist), source
+                ORDER BY latest_added DESC
+                """
+            )
+        return [
+            {
+                "album": row["album"],
+                "artist": row["artist"],
+                "track_count": row["track_count"],
+                "source": row["source"],
+                "year": row["year"],
+            }
+            for row in cur.fetchall()
+        ]
+
+    def get_artists(self, source: Source | None = None) -> list[dict]:
+        """Get distinct artists with track count.
+
+        Ordered by artist name ascending.
+
+        Returns
+        -------
+        list of dicts with keys: artist, track_count, sources
+        """
+        if source is not None:
+            cur = self._conn.execute(
+                """
+                SELECT artist, COUNT(*) AS track_count,
+                       GROUP_CONCAT(DISTINCT source) AS sources
+                FROM tracks
+                WHERE source = ?
+                GROUP BY artist
+                ORDER BY artist COLLATE NOCASE ASC
+                """,
+                (source.value,),
+            )
+        else:
+            cur = self._conn.execute(
+                """
+                SELECT artist, COUNT(*) AS track_count,
+                       GROUP_CONCAT(DISTINCT source) AS sources
+                FROM tracks
+                GROUP BY artist
+                ORDER BY artist COLLATE NOCASE ASC
+                """
+            )
+        return [
+            {
+                "artist": row["artist"],
+                "track_count": row["track_count"],
+                "sources": row["sources"].split(",") if row["sources"] else [],
+            }
+            for row in cur.fetchall()
+        ]
+
+    def get_track_count(self, source: Source | None = None) -> int:
+        """Get total track count, optionally filtered by source."""
+        if source is not None:
+            cur = self._conn.execute(
+                "SELECT COUNT(*) AS cnt FROM tracks WHERE source = ?",
+                (source.value,),
+            )
+        else:
+            cur = self._conn.execute("SELECT COUNT(*) AS cnt FROM tracks")
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
+
+    # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 

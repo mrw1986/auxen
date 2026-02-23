@@ -745,6 +745,55 @@ button.flat:hover {
 }
 
 /* =============================================================
+   LIBRARY VIEW
+   ============================================================= */
+
+/* -- Library header section -- */
+
+.library-header {
+    padding: 4px 0;
+}
+
+/* -- View mode toggle button group -- */
+
+.library-view-toggle {
+    border-radius: 9999px;
+    background-color: rgba(240, 236, 228, 0.04);
+    padding: 2px;
+}
+
+/* -- Artist list row -- */
+
+.library-artist-row {
+    padding: 10px 12px;
+    border-radius: 8px;
+    transition: background-color 150ms ease;
+}
+
+.library-artist-row:hover {
+    background-color: rgba(240, 236, 228, 0.04);
+}
+
+/* -- Track list row -- */
+
+.library-track-row {
+    padding: 10px 12px;
+    border-radius: 8px;
+    transition: background-color 150ms ease;
+}
+
+.library-track-row:hover {
+    background-color: rgba(240, 236, 228, 0.04);
+}
+
+/* -- Dim count text -- */
+
+.library-track-count {
+    color: #6b6860;
+    font-size: 0.8rem;
+}
+
+/* =============================================================
    ALBUM DETAIL PAGE
    ============================================================= */
 
@@ -928,4 +977,83 @@ button.flat:hover {
 .playlist-empty-state image {
     color: #6b6860;
     opacity: 0.3;
+}
+
+/* =============================================================
+   LYRICS PANEL
+   ============================================================= */
+
+/* -- Panel container — dark side panel with left border -- */
+
+.lyrics-panel {
+    background-color: #0c0b0f;
+    border-left: 1px solid rgba(240, 236, 228, 0.06);
+    min-width: 300px;
+}
+
+/* -- Header row with title and close button -- */
+
+.lyrics-header {
+    padding: 16px 16px 8px 16px;
+    border-bottom: 1px solid rgba(240, 236, 228, 0.06);
+}
+
+.lyrics-close-btn {
+    color: #6b6860;
+    min-width: 28px;
+    min-height: 28px;
+    border-radius: 9999px;
+    transition: all 200ms ease;
+}
+
+.lyrics-close-btn:hover {
+    color: #f0ece4;
+    background-color: rgba(240, 236, 228, 0.06);
+}
+
+/* -- Track info below the header -- */
+
+.lyrics-track-info {
+    padding: 12px 16px 8px 16px;
+}
+
+.lyrics-info-title {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: #f0ece4;
+}
+
+.lyrics-info-artist {
+    font-size: 0.75rem;
+    color: #6b6860;
+}
+
+/* -- Lyrics text area — secondary color, good line height -- */
+
+.lyrics-text {
+    color: #a39e93;
+    font-size: 0.95rem;
+    line-height: 1.8;
+}
+
+/* -- Empty state — centred icon + message -- */
+
+.lyrics-empty-state {
+    color: #6b6860;
+    padding: 48px 16px;
+}
+
+.lyrics-empty-state image {
+    color: #6b6860;
+    opacity: 0.3;
+}
+
+/* -- Lyrics toggle button in now-playing bar — amber when active -- */
+
+.lyrics-toggle-btn.active {
+    color: #d4a039;
+}
+
+.lyrics-toggle-btn.active:hover {
+    color: #e0b04a;
 }
