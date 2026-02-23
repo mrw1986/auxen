@@ -131,6 +131,21 @@ class AuxenSettings(Adw.PreferencesWindow):
         rescan_row.set_activatable_widget(self._rescan_btn)
         group.add(rescan_row)
 
+        # Import Playlist (M3U) button
+        import_row = Adw.ActionRow(
+            title="Import Playlist (M3U)",
+            subtitle="Import a playlist from an M3U or M3U8 file",
+        )
+        self._import_btn = Gtk.Button(
+            icon_name="document-open-symbolic",
+            valign=Gtk.Align.CENTER,
+        )
+        self._import_btn.add_css_class("flat")
+        self._import_btn.connect("clicked", self._on_import_playlist)
+        import_row.add_suffix(self._import_btn)
+        import_row.set_activatable_widget(self._import_btn)
+        group.add(import_row)
+
         return group
 
     # ── Playback ─────────────────────────────────────────
@@ -672,3 +687,72 @@ class AuxenSettings(Adw.PreferencesWindow):
             logger.info("Favorites sync result: %s", summary)
 
         self._favorites_sync.sync_async(_on_result)
+
+    def _on_import_playlist(self, _button: Gtk.Button) -> None:
+        """Open a file dialog to import an M3U/M3U8 playlist."""
+        if self._db is None:
+            return
+
+        try:
+            dialog = Gtk.FileDialog()
+            dialog.set_title("Import M3U Playlist")
+
+            # Set up M3U file filter
+            m3u_filter = Gtk.FileFilter()
+            m3u_filter.set_name("M3U Playlists (*.m3u, *.m3u8)")
+            m3u_filter.add_pattern("*.m3u")
+            m3u_filter.add_pattern("*.m3u8")
+            dialog.set_default_filter(m3u_filter)
+
+            dialog.open(
+                self,
+                None,
+                self._on_import_file_selected,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to open import playlist dialog", exc_info=True
+            )
+
+    def _on_import_file_selected(self, dialog, result) -> None:
+        """Handle the M3U file selection result."""
+        try:
+            selected = dialog.open_finish(result)
+            if selected is None:
+                return
+            filepath = selected.get_path()
+            if not filepath or self._db is None:
+                return
+
+            from auxen.m3u import M3UService
+
+            svc = M3UService()
+            tracks = svc.import_playlist(filepath, self._db)
+
+            if not tracks:
+                logger.info(
+                    "No matching tracks found in %s", filepath
+                )
+                return
+
+            # Create a new playlist named after the file (without extension)
+            playlist_name = Path(filepath).stem
+            playlist_id = self._db.create_playlist(playlist_name)
+
+            for track in tracks:
+                if track.id is not None:
+                    self._db.add_track_to_playlist(playlist_id, track.id)
+
+            logger.info(
+                "Imported playlist '%s' with %d tracks from %s",
+                playlist_name,
+                len(tracks),
+                filepath,
+            )
+        except GLib.Error:
+            # User cancelled — normal
+            pass
+        except Exception:
+            logger.warning(
+                "Failed to import playlist", exc_info=True
+            )

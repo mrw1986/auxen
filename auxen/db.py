@@ -342,6 +342,22 @@ class Database:
         row = cur.fetchone()
         return row["file_path"] if row else None
 
+    def get_track_by_file_path(self, file_path: str) -> Optional[Track]:
+        """Look up a track by its local file path.
+
+        Returns the Track if found, or None.
+        """
+        cur = self._conn.execute(
+            """
+            SELECT t.* FROM tracks t
+            JOIN local_files lf ON lf.track_id = t.id
+            WHERE lf.file_path = ?
+            """,
+            (file_path,),
+        )
+        row = cur.fetchone()
+        return self._row_to_track(row) if row else None
+
     # ------------------------------------------------------------------
     # Match groups
     # ------------------------------------------------------------------

@@ -373,6 +373,24 @@ class PlaylistView(Gtk.ScrolledWindow):
         spacer.set_hexpand(True)
         actions_box.append(spacer)
 
+        # Export button
+        export_btn = Gtk.Button()
+        export_icon = Gtk.Image.new_from_icon_name(
+            "document-save-as-symbolic"
+        )
+        export_label = Gtk.Label(label="Export")
+        export_inner = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=6,
+        )
+        export_inner.append(export_icon)
+        export_inner.append(export_label)
+        export_btn.set_child(export_inner)
+        export_btn.add_css_class("flat")
+        export_btn.set_tooltip_text("Export playlist as M3U")
+        export_btn.connect("clicked", self._on_export_clicked)
+        actions_box.append(export_btn)
+
         # Edit name button
         edit_btn = Gtk.Button.new_from_icon_name("document-edit-symbolic")
         edit_btn.add_css_class("flat")
@@ -832,3 +850,62 @@ class PlaylistView(Gtk.ScrolledWindow):
 
         dialog.connect("response", on_response)
         dialog.present()
+
+    def _on_export_clicked(self, _btn) -> None:
+        """Export the playlist as an M3U file using Gtk.FileDialog."""
+        if not self._tracks or self._playlist_data is None:
+            return
+
+        try:
+            dialog = Gtk.FileDialog()
+            dialog.set_title("Export Playlist")
+
+            # Suggest a filename based on playlist name
+            safe_name = (
+                self._playlist_data["name"]
+                .replace("/", "_")
+                .replace("\\", "_")
+            )
+            dialog.set_initial_name(f"{safe_name}.m3u")
+
+            # Add M3U file filter
+            m3u_filter = Gtk.FileFilter()
+            m3u_filter.set_name("M3U Playlists")
+            m3u_filter.add_pattern("*.m3u")
+            m3u_filter.add_pattern("*.m3u8")
+            dialog.set_default_filter(m3u_filter)
+
+            # Find parent window
+            parent = self
+            while parent is not None:
+                if isinstance(parent, Gtk.Window):
+                    break
+                parent = parent.get_parent()
+
+            dialog.save(
+                parent,
+                None,
+                self._on_export_save_response,
+            )
+        except Exception:
+            logger.warning("Failed to open export dialog", exc_info=True)
+
+    def _on_export_save_response(self, dialog, result) -> None:
+        """Handle the file dialog save result for M3U export."""
+        try:
+            dest = dialog.save_finish(result)
+            if dest is not None:
+                filepath = dest.get_path()
+                if filepath:
+                    from auxen.m3u import M3UService
+
+                    svc = M3UService()
+                    svc.export_playlist(
+                        self._tracks, filepath, db=self._db
+                    )
+                    logger.info("Exported playlist to %s", filepath)
+        except GLib.Error:
+            # User cancelled — normal
+            pass
+        except Exception:
+            logger.warning("Failed to export playlist", exc_info=True)
