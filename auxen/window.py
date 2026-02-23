@@ -735,6 +735,7 @@ class AuxenWindow(Adw.ApplicationWindow):
                 notification_service=self._app_ref.notification_service,
                 favorites_sync=self._app_ref.favorites_sync,
                 crossfade_service=self._app_ref.crossfade_service,
+                lastfm_service=self._app_ref.lastfm_service,
             )
         settings.present()
 

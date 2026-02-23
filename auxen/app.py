@@ -36,10 +36,15 @@ class AuxenApp(Adw.Application):
         self.favorites_sync = None
         self.smart_playlist_service = None
         self.crossfade_service = None
+        self.lastfm_service = None
 
         # Play history tracking
         self._current_track_start: float | None = None
         self._previous_track_id: int | None = None
+
+        # Last.fm scrobble tracking
+        self._scrobble_start_time: float | None = None
+        self._scrobble_track = None
 
     # ------------------------------------------------------------------
     # Startup
@@ -333,6 +338,17 @@ class AuxenApp(Adw.Application):
                 "Failed to initialize notification service", exc_info=True
             )
 
+        # --- Last.fm Service ---
+        if self.db is not None:
+            try:
+                from auxen.lastfm import LastFmService
+
+                self.lastfm_service = LastFmService(db=self.db)
+            except Exception:
+                logger.warning(
+                    "Failed to initialize Last.fm service", exc_info=True
+                )
+
         # --- Player signal handlers ---
         if self.player is not None:
             self.player.connect("track-changed", self._on_track_changed)
@@ -561,6 +577,33 @@ class AuxenApp(Adw.Application):
                     "Failed to update MPRIS metadata", exc_info=True
                 )
 
+        # Last.fm: scrobble the *previous* track if criteria are met
+        if (
+            self.lastfm_service is not None
+            and self._scrobble_track is not None
+            and self._scrobble_start_time is not None
+        ):
+            try:
+                from auxen.lastfm import should_scrobble
+
+                prev = self._scrobble_track
+                play_secs = time.monotonic() - self._scrobble_start_time
+                track_dur = prev.duration or 0
+                if should_scrobble(play_secs, track_dur):
+                    self.lastfm_service.scrobble(
+                        title=prev.title,
+                        artist=prev.artist,
+                        album=prev.album or "",
+                        duration=track_dur,
+                        timestamp=int(
+                            time.time() - play_secs
+                        ),
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to scrobble to Last.fm", exc_info=True
+                )
+
         # Record play history for the *previous* track
         if (
             self.db is not None
@@ -585,6 +628,20 @@ class AuxenApp(Adw.Application):
             except Exception:
                 logger.warning("Failed to record play", exc_info=True)
 
+        # Last.fm: send now-playing for the *new* track
+        if self.lastfm_service is not None and track is not None:
+            try:
+                self.lastfm_service.update_now_playing(
+                    title=track.title,
+                    artist=track.artist,
+                    album=track.album or "",
+                    duration=track.duration or 0,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to send Last.fm now-playing", exc_info=True
+                )
+
         # Track the new track for play history duration calculation
         if track is not None and track.id is not None:
             self._previous_track_id = track.id
@@ -592,6 +649,14 @@ class AuxenApp(Adw.Application):
         else:
             self._previous_track_id = None
             self._current_track_start = None
+
+        # Track the new track for Last.fm scrobble duration
+        if track is not None:
+            self._scrobble_track = track
+            self._scrobble_start_time = time.monotonic()
+        else:
+            self._scrobble_track = None
+            self._scrobble_start_time = None
 
     def _on_state_changed(self, _player, state) -> None:
         """Update MPRIS playback status when the player state changes."""

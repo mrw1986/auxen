@@ -36,6 +36,7 @@ class AuxenSettings(Adw.PreferencesWindow):
         self._notification_service = None
         self._favorites_sync = None
         self._crossfade_service = None
+        self._lastfm_service = None
 
         self.set_default_size(600, 700)
 
@@ -46,6 +47,7 @@ class AuxenSettings(Adw.PreferencesWindow):
         page.add(self._build_library_group())
         page.add(self._build_playback_group())
         page.add(self._build_tidal_group())
+        page.add(self._build_lastfm_group())
         page.add(self._build_about_group())
 
         self.add(page)
@@ -61,6 +63,7 @@ class AuxenSettings(Adw.PreferencesWindow):
         notification_service=None,
         favorites_sync=None,
         crossfade_service=None,
+        lastfm_service=None,
     ) -> None:
         """Wire backend services to the settings dialog.
 
@@ -80,6 +83,8 @@ class AuxenSettings(Adw.PreferencesWindow):
             FavoritesSyncService for syncing Tidal favourites.
         crossfade_service:
             CrossfadeService for crossfade transitions.
+        lastfm_service:
+            LastFmService for Last.fm scrobbling.
         """
         self._db = db
         self._tidal_provider = tidal_provider
@@ -88,6 +93,7 @@ class AuxenSettings(Adw.PreferencesWindow):
         self._notification_service = notification_service
         self._favorites_sync = favorites_sync
         self._crossfade_service = crossfade_service
+        self._lastfm_service = lastfm_service
 
         # Load current settings from database
         self._load_settings()
@@ -291,6 +297,40 @@ class AuxenSettings(Adw.PreferencesWindow):
 
         return group
 
+    # ── Last.fm ──────────────────────────────────────────
+
+    def _build_lastfm_group(self) -> Adw.PreferencesGroup:
+        group = Adw.PreferencesGroup(title="Last.fm")
+
+        # Account status
+        self._lastfm_account_row = Adw.ActionRow(
+            title="Account",
+            subtitle="Not connected",
+        )
+        self._lastfm_connect_btn = Gtk.Button(
+            label="Connect",
+            valign=Gtk.Align.CENTER,
+        )
+        self._lastfm_connect_btn.add_css_class("settings-login-btn")
+        self._lastfm_connect_btn.connect(
+            "clicked", self._on_lastfm_connect
+        )
+        self._lastfm_account_row.add_suffix(self._lastfm_connect_btn)
+        group.add(self._lastfm_account_row)
+
+        # Enable scrobbling toggle
+        self._lastfm_scrobble_switch = Adw.SwitchRow(
+            title="Enable Scrobbling",
+            subtitle="Track your listening history on Last.fm",
+        )
+        self._lastfm_scrobble_switch.set_active(False)
+        self._lastfm_scrobble_switch.connect(
+            "notify::active", self._on_lastfm_scrobble_toggled
+        )
+        group.add(self._lastfm_scrobble_switch)
+
+        return group
+
     # ── About ────────────────────────────────────────────
 
     def _build_about_group(self) -> Adw.PreferencesGroup:
@@ -419,6 +459,23 @@ class AuxenSettings(Adw.PreferencesWindow):
             except Exception:
                 logger.warning(
                     "Failed to check Tidal login status", exc_info=True
+                )
+
+        # Check Last.fm status
+        if self._lastfm_service is not None:
+            try:
+                if self._lastfm_service.is_authenticated():
+                    username = self._lastfm_service.username or "Connected"
+                    self._lastfm_account_row.set_subtitle(
+                        f"Connected as {username}"
+                    )
+                    self._lastfm_connect_btn.set_label("Disconnect")
+                self._lastfm_scrobble_switch.set_active(
+                    self._lastfm_service.enabled
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to check Last.fm status", exc_info=True
                 )
 
     # ── Signal handlers ──────────────────────────────────
@@ -649,6 +706,119 @@ class AuxenSettings(Adw.PreferencesWindow):
         else:
             self._account_row.set_subtitle("Login failed")
         return False
+
+    # ── Last.fm handlers ───────────────────────────────────
+
+    def _on_lastfm_connect(self, _button: Gtk.Button) -> None:
+        """Start or manage the Last.fm connection flow."""
+        if self._lastfm_service is None:
+            return
+
+        try:
+            if self._lastfm_service.is_authenticated():
+                # Disconnect
+                self._lastfm_service.disconnect()
+                self._lastfm_account_row.set_subtitle("Not connected")
+                self._lastfm_connect_btn.set_label("Connect")
+                return
+        except Exception:
+            pass
+
+        # Show auth URL and prompt for token
+        try:
+            url = self._lastfm_service.get_auth_url()
+            self._lastfm_account_row.set_subtitle(
+                f"Visit: {url}"
+            )
+            self._lastfm_connect_btn.set_sensitive(False)
+            self._show_lastfm_token_dialog(url)
+        except Exception:
+            logger.warning("Failed to start Last.fm auth", exc_info=True)
+            self._lastfm_account_row.set_subtitle("Auth failed")
+
+    def _show_lastfm_token_dialog(self, url: str) -> None:
+        """Show a dialog prompting the user to enter their Last.fm auth token."""
+        dialog = Adw.MessageDialog.new(
+            self,
+            "Connect to Last.fm",
+            (
+                "1. Visit the URL shown below and authorize Auxen.\n"
+                "2. Copy the token from the URL after authorization.\n"
+                "3. Paste it below and click Connect.\n\n"
+                f"{url}"
+            ),
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("connect", "Connect")
+        dialog.set_response_appearance(
+            "connect", Adw.ResponseAppearance.SUGGESTED
+        )
+
+        # Add a text entry to the dialog's extra child area
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("Paste token here")
+        entry.set_hexpand(True)
+        dialog.set_extra_child(entry)
+
+        dialog.connect(
+            "response",
+            self._on_lastfm_token_response,
+            entry,
+        )
+        dialog.present()
+
+    def _on_lastfm_token_response(
+        self, dialog, response: str, entry: Gtk.Entry
+    ) -> None:
+        """Handle the token dialog response."""
+        self._lastfm_connect_btn.set_sensitive(True)
+
+        if response != "connect":
+            self._lastfm_account_row.set_subtitle("Not connected")
+            return
+
+        token = entry.get_text().strip()
+        if not token:
+            self._lastfm_account_row.set_subtitle("Not connected")
+            return
+
+        # Complete auth in background thread
+        self._lastfm_account_row.set_subtitle("Authenticating...")
+        self._lastfm_connect_btn.set_sensitive(False)
+
+        def _auth_thread() -> None:
+            success = False
+            try:
+                success = self._lastfm_service.complete_auth(token)
+            except Exception:
+                logger.warning(
+                    "Last.fm auth failed", exc_info=True
+                )
+            GLib.idle_add(self._on_lastfm_auth_complete, success)
+
+        thread = threading.Thread(target=_auth_thread, daemon=True)
+        thread.start()
+
+    def _on_lastfm_auth_complete(self, success: bool) -> bool:
+        """Update the UI after Last.fm auth completes."""
+        self._lastfm_connect_btn.set_sensitive(True)
+        if success and self._lastfm_service is not None:
+            username = self._lastfm_service.username or "Connected"
+            self._lastfm_account_row.set_subtitle(
+                f"Connected as {username}"
+            )
+            self._lastfm_connect_btn.set_label("Disconnect")
+        else:
+            self._lastfm_account_row.set_subtitle("Auth failed")
+        return False
+
+    def _on_lastfm_scrobble_toggled(
+        self, row: Adw.SwitchRow, _pspec
+    ) -> None:
+        """Persist the Last.fm scrobbling toggle."""
+        active = row.get_active()
+        if self._lastfm_service is not None:
+            self._lastfm_service.set_enabled(active)
 
     def _on_sync_favorites(self, _button: Gtk.Button) -> None:
         """Trigger a two-way Tidal favorites sync."""
