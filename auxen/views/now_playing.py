@@ -12,6 +12,8 @@ gi.require_version("GdkPixbuf", "2.0")
 
 from gi.repository import GdkPixbuf, Gtk, Pango
 
+from auxen.views.visualizer import SpectrumVisualizer
+
 
 def _format_time(seconds: float) -> str:
     """Format seconds as M:SS (e.g. 3:45)."""
@@ -217,6 +219,17 @@ class NowPlayingBar(Gtk.Box):
 
         center.append(transport)
 
+        # Spectrum visualizer (between transport and progress)
+        self._visualizer = SpectrumVisualizer(
+            bar_count=16,
+            bar_width=4,
+            bar_gap=2,
+            bar_color="#d4a039",
+            max_height=32,
+        )
+        self._visualizer.set_visible(False)
+        center.append(self._visualizer)
+
         # Progress row
         progress_row = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
@@ -385,6 +398,16 @@ class NowPlayingBar(Gtk.Box):
         """Show or hide the sleep timer indicator dot."""
         self._sleep_timer_active = active
         self._sleep_timer_indicator.set_visible(active)
+
+    @property
+    def visualizer(self) -> SpectrumVisualizer:
+        """Return the spectrum visualizer widget."""
+        return self._visualizer
+
+    def set_visualizer_active(self, active: bool) -> None:
+        """Show/hide the spectrum visualizer and toggle its animation."""
+        self._visualizer.set_visible(active)
+        self._visualizer.set_active(active)
 
     # ── Internal handlers ─────────────────────────────────
 

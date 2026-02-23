@@ -281,6 +281,9 @@ class AuxenWindow(Adw.ApplicationWindow):
                 "position-updated", self._on_position_updated
             )
             app.player.connect("state-changed", self._on_state_changed)
+            app.player.connect(
+                "spectrum-data", self._on_spectrum_data
+            )
 
             # Volume slider -> Player volume
             self._now_playing._volume_scale.connect(
@@ -433,12 +436,18 @@ class AuxenWindow(Adw.ApplicationWindow):
     def _on_state_changed(self, _player, state) -> None:
         """Update the now-playing bar play/pause icon."""
         self._now_playing.set_playing(state == "playing")
+        # Toggle spectrum visualizer based on playback state
+        self._now_playing.set_visualizer_active(state == "playing")
         # Update mini player play state if visible
         if (
             self._mini_player is not None
             and self._mini_player.get_visible()
         ):
             self._mini_player.set_playing(state == "playing")
+
+    def _on_spectrum_data(self, _player, levels) -> None:
+        """Forward spectrum data to the now-playing visualizer."""
+        self._now_playing.visualizer.update_spectrum(levels)
 
     def _on_volume_changed(self, scale) -> None:
         """Set the player volume from the volume slider."""
