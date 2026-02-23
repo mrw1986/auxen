@@ -9,6 +9,7 @@ from gi.repository import Adw, Gtk
 
 from auxen.views.home import HomePage
 from auxen.views.now_playing import NowPlayingBar
+from auxen.views.search import SearchView
 from auxen.views.sidebar import AuxenSidebar
 
 
@@ -54,6 +55,11 @@ class AuxenWindow(Adw.ApplicationWindow):
             if name == "home":
                 self._home_page = HomePage()
                 self._stack.add_named(self._home_page, name)
+                continue
+
+            if name == "search":
+                self._search_view = SearchView()
+                self._stack.add_named(self._search_view, name)
                 continue
 
             placeholder = Gtk.Box(
