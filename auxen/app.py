@@ -141,6 +141,17 @@ class AuxenApp(Adw.Application):
         self.add_action(queue_action)
         self.set_accels_for_action("app.toggle-queue", ["<Control>k"])
 
+        mini_player_action = Gio.SimpleAction.new(
+            "toggle-mini-player", None
+        )
+        mini_player_action.connect(
+            "activate", self._on_toggle_mini_player_action
+        )
+        self.add_action(mini_player_action)
+        self.set_accels_for_action(
+            "app.toggle-mini-player", ["<Control>m"]
+        )
+
         sleep_timer_action = Gio.SimpleAction.new("sleep-timer", None)
         sleep_timer_action.connect(
             "activate", self._on_sleep_timer_action
@@ -733,6 +744,22 @@ class AuxenApp(Adw.Application):
         win = self.props.active_window
         if win is not None:
             win.toggle_queue_panel()
+
+    def _on_toggle_mini_player_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        win = self.props.active_window
+        if win is None:
+            # If no active window, try to get any window (mini player
+            # may be visible while main window is hidden)
+            windows = self.get_windows()
+            for w in windows:
+                if hasattr(w, "toggle_mini_player"):
+                    w.toggle_mini_player()
+                    return
+        else:
+            if hasattr(win, "toggle_mini_player"):
+                win.toggle_mini_player()
 
     def _on_sleep_timer_action(
         self, _action: Gio.SimpleAction, _param
