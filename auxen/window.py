@@ -698,6 +698,53 @@ class AuxenWindow(Adw.ApplicationWindow):
                 )
 
     # ------------------------------------------------------------------
+    # Keyboard shortcut helpers (called from app actions)
+    # ------------------------------------------------------------------
+
+    def navigate_to(self, page_name: str) -> None:
+        """Switch to a named page (e.g. 'home', 'search', 'library')."""
+        self._switch_page(page_name)
+
+    def focus_search(self) -> None:
+        """Navigate to the search page and focus the search entry."""
+        self._switch_page("search")
+        self._search_view.focus_entry()
+
+    def toggle_lyrics_panel(self) -> None:
+        """Toggle the lyrics side-panel visibility."""
+        currently_visible = self._lyrics_panel.get_visible()
+        # Toggle through the same path as the now-playing bar button
+        self._on_lyrics_toggle(not currently_visible)
+        self._now_playing.set_lyrics_active(not currently_visible)
+
+    def toggle_queue_panel(self) -> None:
+        """Toggle the queue side-panel visibility."""
+        currently_visible = self._queue_panel.get_visible()
+        self._on_queue_toggle(not currently_visible)
+        self._now_playing.set_queue_active(not currently_visible)
+
+    def adjust_volume(self, delta: float) -> None:
+        """Adjust the volume slider by *delta* (e.g. +5.0 or -5.0).
+
+        The value is clamped to [0, 100].  This updates both the UI slider
+        and the player backend.
+        """
+        current = self._now_playing._volume_scale.get_value()
+        new_val = max(0.0, min(100.0, current + delta))
+        self._now_playing._volume_scale.set_value(new_val)
+        # The volume-changed signal handler will propagate to the player.
+
+    def toggle_mute(self) -> None:
+        """Toggle mute/unmute.  Muting sets volume to 0; unmuting restores."""
+        current = self._now_playing._volume_scale.get_value()
+        if current > 0:
+            self._pre_mute_volume = current
+            self._now_playing._volume_scale.set_value(0)
+        else:
+            restored = getattr(self, "_pre_mute_volume", 70.0)
+            self._now_playing._volume_scale.set_value(restored)
+
+    # ------------------------------------------------------------------
     # Context menu handlers
     # ------------------------------------------------------------------
 

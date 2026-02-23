@@ -54,6 +54,83 @@ class AuxenApp(Adw.Application):
         self.add_action(eq_action)
         self.set_accels_for_action("app.equalizer", ["<Control>e"])
 
+        # --- Playback shortcuts ---
+        play_pause_action = Gio.SimpleAction.new("play-pause", None)
+        play_pause_action.connect("activate", self._on_play_pause_action)
+        self.add_action(play_pause_action)
+        self.set_accels_for_action(
+            "app.play-pause", ["space", "AudioPlay"]
+        )
+
+        next_action = Gio.SimpleAction.new("next-track", None)
+        next_action.connect("activate", self._on_next_action)
+        self.add_action(next_action)
+        self.set_accels_for_action(
+            "app.next-track", ["n", "AudioNext"]
+        )
+
+        prev_action = Gio.SimpleAction.new("previous-track", None)
+        prev_action.connect("activate", self._on_previous_action)
+        self.add_action(prev_action)
+        self.set_accels_for_action(
+            "app.previous-track", ["p", "AudioPrev"]
+        )
+
+        stop_action = Gio.SimpleAction.new("stop", None)
+        stop_action.connect("activate", self._on_stop_action)
+        self.add_action(stop_action)
+        self.set_accels_for_action("app.stop", ["AudioStop"])
+
+        vol_up_action = Gio.SimpleAction.new("volume-up", None)
+        vol_up_action.connect("activate", self._on_volume_up_action)
+        self.add_action(vol_up_action)
+        self.set_accels_for_action("app.volume-up", ["plus", "equal"])
+
+        vol_down_action = Gio.SimpleAction.new("volume-down", None)
+        vol_down_action.connect("activate", self._on_volume_down_action)
+        self.add_action(vol_down_action)
+        self.set_accels_for_action("app.volume-down", ["minus"])
+
+        mute_action = Gio.SimpleAction.new("mute-toggle", None)
+        mute_action.connect("activate", self._on_mute_action)
+        self.add_action(mute_action)
+        self.set_accels_for_action("app.mute-toggle", ["m"])
+
+        # --- Navigation shortcuts ---
+        nav_home_action = Gio.SimpleAction.new("nav-home", None)
+        nav_home_action.connect("activate", self._on_nav_home_action)
+        self.add_action(nav_home_action)
+        self.set_accels_for_action("app.nav-home", ["<Control>1"])
+
+        nav_search_action = Gio.SimpleAction.new("nav-search", None)
+        nav_search_action.connect("activate", self._on_nav_search_action)
+        self.add_action(nav_search_action)
+        self.set_accels_for_action(
+            "app.nav-search", ["<Control>2"]
+        )
+
+        nav_library_action = Gio.SimpleAction.new("nav-library", None)
+        nav_library_action.connect("activate", self._on_nav_library_action)
+        self.add_action(nav_library_action)
+        self.set_accels_for_action("app.nav-library", ["<Control>3"])
+
+        focus_search_action = Gio.SimpleAction.new("focus-search", None)
+        focus_search_action.connect(
+            "activate", self._on_focus_search_action
+        )
+        self.add_action(focus_search_action)
+        self.set_accels_for_action("app.focus-search", ["<Control>f"])
+
+        lyrics_action = Gio.SimpleAction.new("toggle-lyrics", None)
+        lyrics_action.connect("activate", self._on_toggle_lyrics_action)
+        self.add_action(lyrics_action)
+        self.set_accels_for_action("app.toggle-lyrics", ["<Control>l"])
+
+        queue_action = Gio.SimpleAction.new("toggle-queue", None)
+        queue_action.connect("activate", self._on_toggle_queue_action)
+        self.add_action(queue_action)
+        self.set_accels_for_action("app.toggle-queue", ["<Control>k"])
+
         # --- CSS ---
         css_provider = Gtk.CssProvider()
         css_path = Path(__file__).resolve().parent.parent / "data" / "style.css"
@@ -324,3 +401,117 @@ class AuxenApp(Adw.Application):
         win = self.props.active_window
         if win:
             win.open_equalizer()
+
+    # ------------------------------------------------------------------
+    # Playback shortcut handlers
+    # ------------------------------------------------------------------
+
+    def _on_play_pause_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        """Play/pause — skip if focus is on a text entry widget."""
+        win = self.props.active_window
+        if win is not None:
+            focus = win.get_focus()
+            if isinstance(focus, (Gtk.Entry, Gtk.SearchEntry, Gtk.Text)):
+                return
+        if self.player is not None:
+            self.player.play_pause()
+
+    def _on_next_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        win = self.props.active_window
+        if win is not None:
+            focus = win.get_focus()
+            if isinstance(focus, (Gtk.Entry, Gtk.SearchEntry, Gtk.Text)):
+                return
+        if self.player is not None:
+            self.player.next_track()
+
+    def _on_previous_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        win = self.props.active_window
+        if win is not None:
+            focus = win.get_focus()
+            if isinstance(focus, (Gtk.Entry, Gtk.SearchEntry, Gtk.Text)):
+                return
+        if self.player is not None:
+            self.player.previous_track()
+
+    def _on_stop_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        if self.player is not None:
+            self.player.stop()
+
+    def _on_volume_up_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        win = self.props.active_window
+        if win is not None:
+            win.adjust_volume(5.0)
+
+    def _on_volume_down_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        win = self.props.active_window
+        if win is not None:
+            win.adjust_volume(-5.0)
+
+    def _on_mute_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        win = self.props.active_window
+        if win is not None:
+            focus = win.get_focus()
+            if isinstance(focus, (Gtk.Entry, Gtk.SearchEntry, Gtk.Text)):
+                return
+            win.toggle_mute()
+
+    # ------------------------------------------------------------------
+    # Navigation shortcut handlers
+    # ------------------------------------------------------------------
+
+    def _on_nav_home_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        win = self.props.active_window
+        if win is not None:
+            win.navigate_to("home")
+
+    def _on_nav_search_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        win = self.props.active_window
+        if win is not None:
+            win.focus_search()
+
+    def _on_nav_library_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        win = self.props.active_window
+        if win is not None:
+            win.navigate_to("library")
+
+    def _on_focus_search_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        win = self.props.active_window
+        if win is not None:
+            win.focus_search()
+
+    def _on_toggle_lyrics_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        win = self.props.active_window
+        if win is not None:
+            win.toggle_lyrics_panel()
+
+    def _on_toggle_queue_action(
+        self, _action: Gio.SimpleAction, _param
+    ) -> None:
+        win = self.props.active_window
+        if win is not None:
+            win.toggle_queue_panel()

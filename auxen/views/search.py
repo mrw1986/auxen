@@ -253,6 +253,10 @@ class SearchView(Gtk.Box):
 
     # ---- Public API ----
 
+    def focus_entry(self) -> None:
+        """Focus the search text input so the user can start typing."""
+        self._search_entry.grab_focus()
+
     def set_providers(self, db=None, tidal_provider=None) -> None:
         """Wire the search view to real data providers.
 
