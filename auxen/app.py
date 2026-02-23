@@ -14,7 +14,7 @@ gi.require_version("Adw", "1")
 
 from pathlib import Path
 
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from auxen.window import AuxenWindow
 
@@ -181,11 +181,13 @@ class AuxenApp(Adw.Application):
         css_provider = Gtk.CssProvider()
         css_path = Path(__file__).resolve().parent.parent / "data" / "style.css"
         css_provider.load_from_path(str(css_path))
-        Gtk.StyleContext.add_provider_for_display(
-            self.get_style_manager().get_display(),
-            css_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-        )
+        display = Gdk.Display.get_default()
+        if display is not None:
+            Gtk.StyleContext.add_provider_for_display(
+                display,
+                css_provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+            )
 
         # --- Database ---
         try:

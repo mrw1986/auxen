@@ -1211,7 +1211,7 @@ button.flat:hover {
     border-radius: 16px;
     padding: 48px 32px;
     border: 1px solid rgba(240, 236, 228, 0.06);
-    max-width: 480px;
+
 }
 
 .explore-login-prompt image {
@@ -1279,7 +1279,7 @@ button.flat:hover {
     border-radius: 16px;
     padding: 48px 32px;
     border: 1px solid rgba(240, 236, 228, 0.06);
-    max-width: 480px;
+
 }
 
 .mixes-login-prompt image {
@@ -1291,7 +1291,7 @@ button.flat:hover {
 .mix-card {
     min-width: 200px;
     border-radius: 12px;
-    overflow: hidden;
+
     transition: all 250ms ease;
     border: 1px solid rgba(240, 236, 228, 0.06);
 }
@@ -1525,7 +1525,7 @@ button.flat:hover {
     min-width: 16px;
     min-height: 16px;
     transition: all 200ms ease;
-    cursor: grab;
+
 }
 
 .drag-handle:hover {
