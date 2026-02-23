@@ -103,3 +103,127 @@
 .sidebar-tidal-plan {
     color: #00c4cc;
 }
+
+/* ── Home Page ────────────────────────────────────────── */
+
+/* Greeting */
+
+.greeting-label {
+    font-size: 2rem;
+    font-weight: 800;
+    color: #f0ece4;
+}
+
+/* Section Headers */
+
+.section-header {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #f0ece4;
+    margin-top: 8px;
+}
+
+/* Filter Toggle Buttons */
+
+.filter-btn {
+    border-radius: 9999px;
+    padding: 6px 18px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    background-color: #1c1b22;
+    color: #6b6860;
+    border: 1px solid rgba(240, 236, 228, 0.08);
+    min-height: 0;
+}
+
+.filter-btn:checked {
+    background-color: #d4a039;
+    color: #0c0b0f;
+    border-color: #d4a039;
+}
+
+.filter-btn:hover:not(:checked) {
+    background-color: #25242d;
+    color: #f0ece4;
+}
+
+/* Stat Cards */
+
+.stat-card {
+    background-color: #1c1b22;
+    border-radius: 12px;
+    padding: 20px;
+}
+
+.stat-card-value {
+    font-size: 2rem;
+    font-weight: 800;
+    color: #f0ece4;
+}
+
+.stat-card-label {
+    font-size: 0.8rem;
+    color: #6b6860;
+}
+
+.stat-accent-tidal {
+    color: #00c4cc;
+}
+
+.stat-accent-local {
+    color: #7cb87a;
+}
+
+/* Album Cards */
+
+.album-card {
+    min-width: 160px;
+    border-radius: 8px;
+    padding-bottom: 8px;
+    transition: background-color 200ms ease;
+}
+
+.album-card:hover {
+    background-color: rgba(240, 236, 228, 0.04);
+}
+
+/* Album Art Placeholder */
+
+.album-art-placeholder {
+    min-width: 160px;
+    min-height: 160px;
+    background-color: #25242d;
+    border-radius: 8px 8px 0 0;
+}
+
+.album-art-placeholder.album-art-mini {
+    min-width: 48px;
+    min-height: 48px;
+    border-radius: 6px;
+}
+
+/* Source Badges */
+
+.source-badge-tidal {
+    background-color: #00c4cc;
+    color: #0c0b0f;
+    border-radius: 9999px;
+    padding: 2px 8px;
+    font-size: 0.65rem;
+    font-weight: 700;
+}
+
+.source-badge-local {
+    background-color: #7cb87a;
+    color: #0c0b0f;
+    border-radius: 9999px;
+    padding: 2px 8px;
+    font-size: 0.65rem;
+    font-weight: 700;
+}
+
+/* Recently Played Rows */
+
+.recently-played-row {
+    padding: 8px 12px;
+}

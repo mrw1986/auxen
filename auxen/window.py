@@ -7,6 +7,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk
 
+from auxen.views.home import HomePage
 from auxen.views.sidebar import AuxenSidebar
 
 
@@ -49,6 +50,11 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._stack.set_hexpand(True)
 
         for name, title in _PAGES:
+            if name == "home":
+                self._home_page = HomePage()
+                self._stack.add_named(self._home_page, name)
+                continue
+
             placeholder = Gtk.Box(
                 orientation=Gtk.Orientation.VERTICAL,
                 valign=Gtk.Align.CENTER,
