@@ -1125,3 +1125,173 @@ button.flat:hover {
 .explore-track-row:hover {
     background-color: rgba(240, 236, 228, 0.04);
 }
+
+/* =============================================================
+   QUEUE PANEL
+   ============================================================= */
+
+/* -- Panel container — dark side panel with left border -- */
+
+.queue-panel {
+    background-color: #0c0b0f;
+    border-left: 1px solid rgba(240, 236, 228, 0.06);
+    min-width: 320px;
+}
+
+/* -- Header row with title, count, and close button -- */
+
+.queue-header {
+    padding: 16px 16px 8px 16px;
+    border-bottom: 1px solid rgba(240, 236, 228, 0.06);
+}
+
+.queue-close-btn {
+    color: #6b6860;
+    min-width: 28px;
+    min-height: 28px;
+    border-radius: 9999px;
+    transition: all 200ms ease;
+}
+
+.queue-close-btn:hover {
+    color: #f0ece4;
+    background-color: rgba(240, 236, 228, 0.06);
+}
+
+/* -- Now-playing section — amber-highlighted current track -- */
+
+.queue-now-playing {
+    border-bottom: 1px solid rgba(240, 236, 228, 0.06);
+    padding-bottom: 4px;
+}
+
+/* -- Track rows in the queue list -- */
+
+.queue-track-row {
+    padding: 8px 12px;
+    border-radius: 6px;
+    transition: background-color 150ms ease;
+}
+.queue-track-row:hover {
+    background-color: rgba(240, 236, 228, 0.04);
+}
+
+/* -- Amber highlight for the currently playing track -- */
+
+.queue-track-active {
+    background-color: rgba(212, 160, 57, 0.1);
+    border-radius: 6px;
+}
+
+.queue-track-active .queue-track-title {
+    color: #d4a039;
+}
+
+.queue-track-active .queue-track-number {
+    color: #d4a039;
+}
+
+.queue-track-active image {
+    color: #d4a039;
+}
+
+/* -- Track title in queue rows -- */
+
+.queue-track-title {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: #f0ece4;
+}
+
+/* -- Track artist in queue rows -- */
+
+.queue-track-artist {
+    font-size: 0.75rem;
+    color: #6b6860;
+}
+
+/* -- Queue position number -- */
+
+.queue-track-number {
+    font-size: 0.8rem;
+    color: #6b6860;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+/* -- Track duration text -- */
+
+.queue-track-duration {
+    font-size: 0.75rem;
+    font-family: monospace;
+    color: #6b6860;
+    min-width: 36px;
+}
+
+/* -- Move up/down buttons -- */
+
+.queue-move-btn {
+    color: #6b6860;
+    min-width: 24px;
+    min-height: 24px;
+    border-radius: 9999px;
+    transition: all 200ms ease;
+}
+
+.queue-move-btn:hover {
+    color: #f0ece4;
+    background-color: rgba(240, 236, 228, 0.06);
+}
+
+/* -- Small remove (x) button, red on hover -- */
+
+.queue-remove-btn {
+    color: #6b6860;
+    min-width: 24px;
+    min-height: 24px;
+    border-radius: 9999px;
+    transition: all 200ms ease;
+}
+
+.queue-remove-btn:hover {
+    color: #e74c3c;
+    background-color: rgba(231, 76, 60, 0.12);
+}
+
+/* -- Clear queue button at the bottom -- */
+
+.queue-clear-btn {
+    color: #6b6860;
+    font-size: 0.85rem;
+    font-weight: 500;
+    border-radius: 9999px;
+    padding: 6px 16px;
+    transition: all 200ms ease;
+}
+
+.queue-clear-btn:hover {
+    color: #e74c3c;
+    background-color: rgba(231, 76, 60, 0.08);
+}
+
+/* -- Centered empty state -- */
+
+.queue-empty-state {
+    color: #6b6860;
+    padding: 48px 16px;
+}
+
+.queue-empty-state image {
+    color: #6b6860;
+    opacity: 0.3;
+}
+
+/* -- Queue toggle button in now-playing bar — amber when active -- */
+
+.queue-toggle-btn.active {
+    color: #d4a039;
+}
+
+.queue-toggle-btn.active:hover {
+    color: #e0b04a;
+}

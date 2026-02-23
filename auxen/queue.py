@@ -62,6 +62,32 @@ class PlayQueue:
         self._tracks = list(tracks)
         self._position = 0
 
+    def remove(self, index: int) -> bool:
+        """Remove the track at *index*.
+
+        Adjusts the current position so the same track stays current
+        (unless the removed track *is* the current one, in which case
+        position stays and shifts to the next track, or decrements if
+        the removed track was the last).
+
+        Returns ``True`` if removed, ``False`` for invalid index.
+        """
+        if index < 0 or index >= len(self._tracks):
+            return False
+
+        self._tracks.pop(index)
+
+        if not self._tracks:
+            self._position = 0
+        elif index < self._position:
+            self._position -= 1
+        elif index == self._position:
+            # If we removed the last element, step back
+            if self._position >= len(self._tracks):
+                self._position = max(0, len(self._tracks) - 1)
+
+        return True
+
     def clear(self) -> None:
         """Remove all tracks and reset position."""
         self._tracks.clear()

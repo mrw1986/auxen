@@ -33,6 +33,7 @@ class NowPlayingBar(Gtk.Box):
         on_shuffle: Callable[[bool], None] | None = None,
         on_repeat: Callable[[bool], None] | None = None,
         on_lyrics_toggle: Callable[[bool], None] | None = None,
+        on_queue_toggle: Callable[[bool], None] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(
@@ -46,12 +47,14 @@ class NowPlayingBar(Gtk.Box):
         self._on_shuffle = on_shuffle
         self._on_repeat = on_repeat
         self._on_lyrics_toggle = on_lyrics_toggle
+        self._on_queue_toggle = on_queue_toggle
 
         self._is_playing = False
         self._shuffle_active = False
         self._repeat_active = False
         self._favorite_active = False
         self._lyrics_active = False
+        self._queue_active = False
 
         self.add_css_class("now-playing-bar")
 
@@ -276,13 +279,16 @@ class NowPlayingBar(Gtk.Box):
         self._lyrics_btn.connect("toggled", self._on_lyrics_toggled)
         right.append(self._lyrics_btn)
 
-        # Queue button
-        queue_btn = Gtk.Button.new_from_icon_name("view-list-symbolic")
-        queue_btn.add_css_class("flat")
-        queue_btn.add_css_class("now-playing-control-btn")
-        queue_btn.set_valign(Gtk.Align.CENTER)
-        queue_btn.connect("clicked", self._on_queue_clicked)
-        right.append(queue_btn)
+        # Queue toggle button
+        self._queue_btn = Gtk.ToggleButton()
+        self._queue_btn.set_icon_name("view-list-symbolic")
+        self._queue_btn.add_css_class("flat")
+        self._queue_btn.add_css_class("now-playing-control-btn")
+        self._queue_btn.add_css_class("queue-toggle-btn")
+        self._queue_btn.set_valign(Gtk.Align.CENTER)
+        self._queue_btn.set_tooltip_text("Queue")
+        self._queue_btn.connect("toggled", self._on_queue_toggled)
+        right.append(self._queue_btn)
 
         return right
 
@@ -415,5 +421,27 @@ class NowPlayingBar(Gtk.Box):
             self._lyrics_btn.remove_css_class("active")
         self._lyrics_btn.handler_unblock_by_func(self._on_lyrics_toggled)
 
-    def _on_queue_clicked(self, _btn: Gtk.Button) -> None:
-        print("[NowPlaying] queue")  # noqa: T201
+    def _on_queue_toggled(self, btn: Gtk.ToggleButton) -> None:
+        self._queue_active = btn.get_active()
+        if self._queue_active:
+            btn.add_css_class("active")
+        else:
+            btn.remove_css_class("active")
+
+        if self._on_queue_toggle:
+            self._on_queue_toggle(self._queue_active)
+        else:
+            print(  # noqa: T201
+                f"[NowPlaying] queue -> {self._queue_active}"
+            )
+
+    def set_queue_active(self, active: bool) -> None:
+        """Programmatically set the queue toggle state without triggering callback."""
+        self._queue_active = active
+        self._queue_btn.handler_block_by_func(self._on_queue_toggled)
+        self._queue_btn.set_active(active)
+        if active:
+            self._queue_btn.add_css_class("active")
+        else:
+            self._queue_btn.remove_css_class("active")
+        self._queue_btn.handler_unblock_by_func(self._on_queue_toggled)
