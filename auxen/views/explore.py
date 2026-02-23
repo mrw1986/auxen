@@ -185,6 +185,10 @@ class ExploreView(Gtk.ScrolledWindow):
         Shows the login prompt if not connected, otherwise fetches
         new releases, top tracks, and genres.
         """
+        # Bump generation before auth check to invalidate any in-flight
+        # fetch that may still be pending from a previous refresh.
+        self._refresh_generation += 1
+
         if self._tidal_provider is None or not self._tidal_provider.is_logged_in:
             self._show_login_state()
             return
@@ -193,8 +197,6 @@ class ExploreView(Gtk.ScrolledWindow):
         self._content_box.set_visible(False)
         self._spinner_box.set_visible(True)
 
-        # Fetch data in a background thread to avoid blocking the UI
-        self._refresh_generation += 1
         gen = self._refresh_generation
         thread = threading.Thread(
             target=self._fetch_content_thread, args=(gen,), daemon=True

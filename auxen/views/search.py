@@ -553,6 +553,7 @@ class SearchView(Gtk.Box):
         query = entry.get_text().strip()
 
         if not query:
+            self._search_generation += 1
             self._clear_results()
             self._refresh_history()
             return
@@ -583,7 +584,7 @@ class SearchView(Gtk.Box):
         def _search_thread() -> None:
             results = self._do_search(query)
             if gen == self._search_generation:
-                GLib.idle_add(self._populate_results, results)
+                GLib.idle_add(self._populate_results, results, gen)
 
         thread = threading.Thread(target=_search_thread, daemon=True)
         thread.start()
@@ -603,8 +604,11 @@ class SearchView(Gtk.Box):
     def _populate_results(
         self,
         results: list[dict[str, str]],
+        gen: int | None = None,
     ) -> None:
         """Fill the result list with search result rows."""
+        if gen is not None and gen != self._search_generation:
+            return
         self._clear_results()
 
         if not results:

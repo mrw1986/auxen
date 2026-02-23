@@ -422,6 +422,8 @@ class Player(GObject.Object):
 
     def seek(self, position_seconds: float) -> None:
         """Seek to *position_seconds* in the current track."""
+        if position_seconds < 0:
+            position_seconds = 0.0
         position_ns = int(position_seconds * Gst.SECOND)
         self._pipeline.seek_simple(
             Gst.Format.TIME,

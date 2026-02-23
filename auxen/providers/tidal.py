@@ -112,11 +112,9 @@ class TidalProvider(ContentProvider):
                     "refresh_token": session.refresh_token,
                     "expiry_time": session.expiry_time,
                 }
-                # Mark that we're about to write so a concurrent logout
-                # after lock release knows not to just unlink — but since
-                # we snapshot under lock and write immediately after, the
-                # window is minimal.
-            self._write_session_file(token_data)
+                # Write within the lock to eliminate the race window
+                # between identity check and file I/O.
+                self._write_session_file(token_data)
             return True
         except Exception:
             logger.error("Tidal login failed.", exc_info=True)

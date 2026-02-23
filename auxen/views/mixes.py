@@ -163,6 +163,9 @@ class MixesView(Gtk.ScrolledWindow):
         Shows the login prompt if not connected, otherwise fetches
         personalized mixes and user playlists.
         """
+        # Bump generation before auth check to invalidate in-flight fetches.
+        self._refresh_generation += 1
+
         if (
             self._tidal_provider is None
             or not self._tidal_provider.is_logged_in
@@ -174,8 +177,6 @@ class MixesView(Gtk.ScrolledWindow):
         self._content_box.set_visible(False)
         self._spinner_box.set_visible(True)
 
-        # Fetch data in a background thread to avoid blocking the UI
-        self._refresh_generation += 1
         gen = self._refresh_generation
         thread = threading.Thread(
             target=self._fetch_content_thread, args=(gen,), daemon=True

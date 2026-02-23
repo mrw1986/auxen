@@ -382,11 +382,17 @@ class AuxenWindow(Adw.ApplicationWindow):
                 quality_label=track.quality_label,
                 source=track.source.value,
             )
-            # Load album art asynchronously for the now-playing bar
+            # Load album art asynchronously for the now-playing bar.
+            # Wrap callbacks to discard stale results for a different track.
             self._now_playing.set_album_art(None)  # clear while loading
+
+            def _on_art(pixbuf, _track=track):
+                if self._current_track is _track:
+                    self._now_playing.set_album_art(pixbuf)
+
             self._album_art_service.get_art_async(
                 track,
-                self._now_playing.set_album_art,
+                _on_art,
                 width=48,
                 height=48,
             )
@@ -408,9 +414,14 @@ class AuxenWindow(Adw.ApplicationWindow):
                     artist=track.artist,
                 )
                 self._mini_player.set_album_art(None)
+
+                def _on_mini_art(pixbuf, _track=track):
+                    if self._current_track is _track:
+                        self._mini_player.set_album_art(pixbuf)
+
                 self._album_art_service.get_art_async(
                     track,
-                    self._mini_player.set_album_art,
+                    _on_mini_art,
                     width=48,
                     height=48,
                 )
@@ -991,7 +1002,7 @@ class AuxenWindow(Adw.ApplicationWindow):
 
         # Sync play state
         if self._app_ref and self._app_ref.player is not None:
-            state = self._app_ref.player.get_state()
+            state = self._app_ref.player.state
             self._mini_player.set_playing(state == "playing")
 
         self.set_visible(False)
