@@ -11,7 +11,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Gdk, GLib, GObject, Gtk, Pango
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango
 
 from auxen.views.context_menu import TrackContextMenu
 from auxen.views.widgets import make_tidal_source_badge
@@ -549,6 +549,19 @@ class PlaylistView(Gtk.ScrolledWindow):
             css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1
         )
 
+    def _show_toast(self, message: str, timeout: int = 3) -> None:
+        """Show a toast notification by finding the nearest ToastOverlay."""
+        widget = self.get_parent()
+        while widget is not None:
+            if isinstance(widget, Adw.ToastOverlay):
+                toast = Adw.Toast.new(message)
+                toast.set_timeout(timeout)
+                widget.add_toast(toast)
+                return
+            widget = widget.get_parent()
+        # Fallback: log only if no toast overlay found
+        logger.info("Toast (no overlay): %s", message)
+
     def _rebuild_track_list(self) -> None:
         """Clear and repopulate the track list."""
         while True:
@@ -932,6 +945,7 @@ class PlaylistView(Gtk.ScrolledWindow):
     def _on_export_clicked(self, _btn) -> None:
         """Export the playlist as an M3U file using Gtk.FileDialog."""
         if not self._tracks or self._playlist_data is None:
+            self._show_toast("No tracks to export")
             return
 
         try:
@@ -946,11 +960,22 @@ class PlaylistView(Gtk.ScrolledWindow):
             )
             dialog.set_initial_name(f"{safe_name}.m3u")
 
-            # Add M3U file filter
+            # Add M3U file filter — both set_filters and
+            # set_default_filter are required for GTK 4.10+ portal
+            # dialogs to work correctly.
             m3u_filter = Gtk.FileFilter()
             m3u_filter.set_name("M3U Playlists")
             m3u_filter.add_pattern("*.m3u")
             m3u_filter.add_pattern("*.m3u8")
+
+            all_filter = Gtk.FileFilter()
+            all_filter.set_name("All Files")
+            all_filter.add_pattern("*")
+
+            filter_store = Gio.ListStore.new(Gtk.FileFilter)
+            filter_store.append(m3u_filter)
+            filter_store.append(all_filter)
+            dialog.set_filters(filter_store)
             dialog.set_default_filter(m3u_filter)
 
             # Find parent window
@@ -967,6 +992,7 @@ class PlaylistView(Gtk.ScrolledWindow):
             )
         except Exception:
             logger.warning("Failed to open export dialog", exc_info=True)
+            self._show_toast("Failed to open export dialog", timeout=5)
 
     def _on_export_save_response(self, dialog, result) -> None:
         """Handle the file dialog save result for M3U export."""
@@ -982,8 +1008,14 @@ class PlaylistView(Gtk.ScrolledWindow):
                         self._tracks, filepath, db=self._db
                     )
                     logger.info("Exported playlist to %s", filepath)
-        except GLib.Error:
-            # User cancelled — normal
-            pass
+                    self._show_toast("Playlist exported successfully")
+        except GLib.Error as err:
+            # Code 2 = user dismissed the dialog — not an error.
+            if err.code != 2:
+                logger.warning(
+                    "Export dialog error: %s", err.message
+                )
+                self._show_toast("Export failed", timeout=5)
         except Exception:
             logger.warning("Failed to export playlist", exc_info=True)
+            self._show_toast("Failed to export playlist", timeout=5)
