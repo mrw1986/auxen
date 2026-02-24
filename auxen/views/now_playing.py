@@ -158,7 +158,7 @@ class NowPlayingBar(Gtk.Box):
         """Build transport controls and progress bar."""
         center = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
-            spacing=4,
+            spacing=2,
         )
         center.set_valign(Gtk.Align.CENTER)
         center.set_halign(Gtk.Align.CENTER)
@@ -166,7 +166,7 @@ class NowPlayingBar(Gtk.Box):
         # Transport controls row
         transport = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=8,
+            spacing=6,
         )
         transport.set_halign(Gtk.Align.CENTER)
 
@@ -225,7 +225,7 @@ class NowPlayingBar(Gtk.Box):
             bar_width=4,
             bar_gap=2,
             bar_color="#d4a039",
-            max_height=32,
+            max_height=24,
         )
         self._visualizer.set_visible(False)
         center.append(self._visualizer)
@@ -233,7 +233,7 @@ class NowPlayingBar(Gtk.Box):
         # Progress row
         progress_row = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=8,
+            spacing=6,
         )
         progress_row.set_halign(Gtk.Align.CENTER)
 
@@ -245,7 +245,7 @@ class NowPlayingBar(Gtk.Box):
             Gtk.Orientation.HORIZONTAL, 0, 100, 1
         )
         self._progress_scale.set_draw_value(False)
-        self._progress_scale.set_size_request(300, -1)
+        self._progress_scale.set_size_request(280, -1)
         self._progress_scale.add_css_class("now-playing-progress")
         progress_row.append(self._progress_scale)
 

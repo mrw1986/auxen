@@ -506,8 +506,8 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 
 .now-playing-control-btn {
     color: #6b6860;
-    min-width: 32px;
-    min-height: 32px;
+    min-width: 28px;
+    min-height: 28px;
     border-radius: 9999px;
     transition: all 200ms ease;
 }
