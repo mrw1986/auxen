@@ -132,9 +132,9 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 .sidebar-section-label {
     font-variant: all-small-caps;
     letter-spacing: 1.5px;
-    font-weight: 600;
-    color: #9e9a91;
-    font-size: 0.7rem;
+    font-weight: 700;
+    color: #c0bcb3;
+    font-size: 0.8rem;
 }
 
 /* ── Navigation Sidebar — amber highlight on selection ── */
@@ -454,8 +454,8 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 .now-playing-bar {
     background-color: #0c0b0f;
     border-top: 1px solid rgba(212, 160, 57, 0.15);
-    padding: 8px 16px;
-    min-height: 72px;
+    padding: 4px 16px;
+    min-height: 64px;
 }
 
 .now-playing-track-title {
@@ -485,8 +485,8 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 /* ── Play Button — circular, amber, slightly larger ────── */
 
 .now-playing-play-btn {
-    min-width: 40px;
-    min-height: 40px;
+    min-width: 36px;
+    min-height: 36px;
     border-radius: 9999px;
     background-color: #d4a039;
     color: #0c0b0f;
