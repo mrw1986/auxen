@@ -392,10 +392,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._now_playing.update_track(title="", artist="", album="")
             self._now_playing.set_album_art(None)
             self._album_detail.set_current_track(None)
-            if (
-                self._mini_player is not None
-                and self._mini_player.get_visible()
-            ):
+            if self._mini_player is not None:
                 self._mini_player.update_track(title="", artist="")
                 self._mini_player.set_album_art(None)
             return

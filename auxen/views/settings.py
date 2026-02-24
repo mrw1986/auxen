@@ -694,6 +694,8 @@ class AuxenSettings(Adw.PreferencesWindow):
                 self._tidal_provider.logout()
             except Exception:
                 logger.warning("Tidal logout failed", exc_info=True)
+                self._account_row.set_subtitle("Logout failed")
+                return
             self._account_row.set_subtitle("Not connected")
             self._login_btn.set_label("Log In")
             parent = self.get_transient_for()
