@@ -14,7 +14,7 @@ gi.require_version("GdkPixbuf", "2.0")
 
 from gi.repository import Gdk, GdkPixbuf, Gtk, Pango
 
-from auxen.views.context_menu import TrackContextMenu
+from auxen.views.context_menu import AlbumContextMenu, TrackContextMenu
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +256,10 @@ class HomePage(Gtk.ScrolledWindow):
         self._context_callbacks: Optional[dict] = None
         self._get_playlists: Optional[Callable] = None
 
+        # Album context menu callbacks
+        self._album_context_callbacks: Optional[dict] = None
+        self._get_album_playlists: Optional[Callable] = None
+
         # Root container
         root = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -404,6 +408,7 @@ class HomePage(Gtk.ScrolledWindow):
                         source=track.source.value,
                     )
                     self._attach_artist_click_gesture(card)
+                    self._attach_album_context_gesture(card)
                     self._album_grid.append(card)
                     # Load album art asynchronously
                     self.load_album_art_for_card(card, track)
@@ -583,6 +588,23 @@ class HomePage(Gtk.ScrolledWindow):
         self._context_callbacks = callbacks
         self._get_playlists = get_playlists
 
+    def set_album_context_callbacks(
+        self,
+        callbacks: dict,
+        get_playlists: Callable,
+    ) -> None:
+        """Set callback functions for the album right-click context menu.
+
+        Parameters
+        ----------
+        callbacks:
+            Dict of album context menu action callbacks.
+        get_playlists:
+            Callable returning current list of user playlists.
+        """
+        self._album_context_callbacks = callbacks
+        self._get_album_playlists = get_playlists
+
     def _attach_artist_click_gesture(self, child: Gtk.FlowBoxChild) -> None:
         """Attach a click gesture to the artist label on an album card."""
         artist_label = getattr(child, "_artist_label", None)
@@ -642,8 +664,6 @@ class HomePage(Gtk.ScrolledWindow):
         if self._context_callbacks is None:
             return
 
-        from auxen.views.context_menu import TrackContextMenu
-
         is_favorite = False
         playlists = []
         if self._get_playlists is not None:
@@ -658,6 +678,7 @@ class HomePage(Gtk.ScrolledWindow):
             "on_new_playlist": lambda t=track: self._context_callbacks["on_new_playlist"](t),
             "on_toggle_favorite": lambda t=track: self._context_callbacks["on_toggle_favorite"](t),
             "on_go_to_album": lambda t=track: self._context_callbacks["on_go_to_album"](t),
+            "on_go_to_artist": lambda t=track: self._context_callbacks["on_go_to_artist"](t),
         }
 
         track_data = {
@@ -671,6 +692,72 @@ class HomePage(Gtk.ScrolledWindow):
 
         menu = TrackContextMenu(
             track_data=track_data,
+            callbacks=callbacks,
+            playlists=playlists,
+        )
+        menu.show(widget, x, y)
+
+    # ------------------------------------------------------------------
+    # Album context menu helpers
+    # ------------------------------------------------------------------
+
+    def _attach_album_context_gesture(
+        self, child: Gtk.FlowBoxChild
+    ) -> None:
+        """Attach a right-click gesture to an album card."""
+        if self._album_context_callbacks is None:
+            return
+
+        album_title = getattr(child, "_album_title", None)
+        album_artist = getattr(child, "_album_artist", None)
+        if album_title is None or album_artist is None:
+            return
+
+        gesture = Gtk.GestureClick(button=3)
+
+        def _on_right_click(
+            _gesture, _n_press, x, y,
+            a=album_title, ar=album_artist
+        ):
+            self._show_album_context_menu(child, x, y, a, ar)
+
+        gesture.connect("pressed", _on_right_click)
+        child.add_controller(gesture)
+
+    def _show_album_context_menu(
+        self,
+        widget: Gtk.Widget,
+        x: float,
+        y: float,
+        album_name: str,
+        artist: str,
+    ) -> None:
+        """Create and display a context menu for an album card."""
+        if self._album_context_callbacks is None:
+            return
+
+        playlists = []
+        if self._get_album_playlists is not None:
+            playlists = self._get_album_playlists()
+
+        cbs = self._album_context_callbacks
+        callbacks = {
+            "on_play_album": lambda a=album_name, ar=artist: cbs["on_play_album"](a, ar),
+            "on_play_album_next": lambda a=album_name, ar=artist: cbs["on_play_album_next"](a, ar),
+            "on_add_album_to_queue": lambda a=album_name, ar=artist: cbs["on_add_album_to_queue"](a, ar),
+            "on_add_to_playlist": lambda pid, a=album_name, ar=artist: cbs["on_add_to_playlist"](a, ar, pid),
+            "on_new_playlist": lambda a=album_name, ar=artist: cbs["on_new_playlist"](a, ar),
+            "on_add_to_favorites": lambda a=album_name, ar=artist: cbs["on_add_to_favorites"](a, ar),
+            "on_go_to_artist": lambda a=album_name, ar=artist: cbs["on_go_to_artist"](a, ar),
+        }
+
+        album_data = {
+            "album": album_name,
+            "artist": artist,
+        }
+
+        menu = AlbumContextMenu(
+            album_data=album_data,
             callbacks=callbacks,
             playlists=playlists,
         )

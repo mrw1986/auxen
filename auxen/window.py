@@ -244,6 +244,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             "on_new_playlist": self._on_context_new_playlist_with_track,
             "on_toggle_favorite": self._on_context_toggle_favorite,
             "on_go_to_album": self._on_context_go_to_album,
+            "on_go_to_artist": self._on_context_go_to_artist,
         }
 
         self._home_page.set_context_callbacks(
@@ -257,6 +258,45 @@ class AuxenWindow(Adw.ApplicationWindow):
         )
         self._favorites_view.set_context_callbacks(
             context_callbacks, self._get_playlists
+        )
+        self._album_detail.set_context_callbacks(
+            context_callbacks, self._get_playlists
+        )
+        self._artist_detail.set_context_callbacks(
+            context_callbacks, self._get_playlists
+        )
+        self._playlist_view.set_context_callbacks(
+            context_callbacks, self._get_playlists
+        )
+        self._smart_playlist_view.set_context_callbacks(
+            context_callbacks, self._get_playlists
+        )
+
+        # Wire album context menu callbacks for views with album cards
+        album_context_callbacks = {
+            "on_play_album": self._on_context_play_album,
+            "on_play_album_next": self._on_context_play_album_next,
+            "on_add_album_to_queue": self._on_context_add_album_to_queue,
+            "on_add_to_playlist": self._on_context_add_album_to_playlist,
+            "on_new_playlist": self._on_context_new_playlist_with_album,
+            "on_add_to_favorites": self._on_context_add_album_to_favorites,
+            "on_go_to_artist": self._on_context_album_go_to_artist,
+        }
+        self._home_page.set_album_context_callbacks(
+            album_context_callbacks, self._get_playlists
+        )
+        self._library_view.set_album_context_callbacks(
+            album_context_callbacks, self._get_playlists
+        )
+
+        # Wire artist context menu callbacks for library artist rows
+        artist_context_callbacks = {
+            "on_play_all": self._on_context_play_all_by_artist,
+            "on_add_all_to_queue": self._on_context_add_all_by_artist,
+            "on_view_artist": self._on_context_view_artist,
+        }
+        self._library_view.set_artist_context_callbacks(
+            artist_context_callbacks
         )
 
         # Show home by default
@@ -1403,3 +1443,162 @@ class AuxenWindow(Adw.ApplicationWindow):
         """Navigate to the album detail view for the track's album."""
         if track.album:
             self._on_album_clicked(track.album, track.artist)
+
+    def _on_context_go_to_artist(self, track) -> None:
+        """Navigate to the artist detail view for the track's artist."""
+        if track.artist:
+            self._navigate_to_artist(track.artist)
+
+    # ------------------------------------------------------------------
+    # Album context menu handlers
+    # ------------------------------------------------------------------
+
+    def _get_album_tracks(
+        self, album_name: str, artist: str
+    ) -> list:
+        """Fetch tracks for an album from the database."""
+        if self._app_ref and self._app_ref.db is not None:
+            try:
+                return self._app_ref.db.get_tracks_by_album(
+                    album_name, artist=artist
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to fetch album tracks for context menu",
+                    exc_info=True,
+                )
+        return []
+
+    def _on_context_play_album(
+        self, album_name: str, artist: str
+    ) -> None:
+        """Play all tracks in the album."""
+        tracks = self._get_album_tracks(album_name, artist)
+        if tracks and self._app_ref and self._app_ref.player is not None:
+            self._app_ref.player.play_queue(tracks, start_index=0)
+
+    def _on_context_play_album_next(
+        self, album_name: str, artist: str
+    ) -> None:
+        """Insert all album tracks into the queue after the current track."""
+        tracks = self._get_album_tracks(album_name, artist)
+        if tracks and self._app_ref and self._app_ref.player is not None:
+            for track in reversed(tracks):
+                self._app_ref.player.queue.insert_after_current(track)
+            if self._queue_panel.get_visible():
+                self._refresh_queue_panel()
+
+    def _on_context_add_album_to_queue(
+        self, album_name: str, artist: str
+    ) -> None:
+        """Append all album tracks to the end of the play queue."""
+        tracks = self._get_album_tracks(album_name, artist)
+        if tracks and self._app_ref and self._app_ref.player is not None:
+            for track in tracks:
+                self._app_ref.player.queue.add(track)
+            if self._queue_panel.get_visible():
+                self._refresh_queue_panel()
+
+    def _on_context_add_album_to_playlist(
+        self, album_name: str, artist: str, playlist_id: int
+    ) -> None:
+        """Add all tracks from an album to a playlist."""
+        tracks = self._get_album_tracks(album_name, artist)
+        if tracks and self._app_ref and self._app_ref.db is not None:
+            try:
+                for track in tracks:
+                    if track.id is not None:
+                        self._app_ref.db.add_track_to_playlist(
+                            playlist_id, track.id
+                        )
+                self._sidebar.refresh_playlists()
+            except Exception:
+                logger.warning(
+                    "Failed to add album to playlist", exc_info=True
+                )
+
+    def _on_context_new_playlist_with_album(
+        self, album_name: str, artist: str
+    ) -> None:
+        """Create a new playlist and add all album tracks to it."""
+        tracks = self._get_album_tracks(album_name, artist)
+        if tracks and self._app_ref and self._app_ref.db is not None:
+            try:
+                playlist_id = self._app_ref.db.create_playlist(
+                    album_name
+                )
+                for track in tracks:
+                    if track.id is not None:
+                        self._app_ref.db.add_track_to_playlist(
+                            playlist_id, track.id
+                        )
+                self._sidebar.refresh_playlists()
+            except Exception:
+                logger.warning(
+                    "Failed to create playlist from album context menu",
+                    exc_info=True,
+                )
+
+    def _on_context_add_album_to_favorites(
+        self, album_name: str, artist: str
+    ) -> None:
+        """Add all tracks from an album to favorites."""
+        tracks = self._get_album_tracks(album_name, artist)
+        if tracks and self._app_ref and self._app_ref.db is not None:
+            try:
+                for track in tracks:
+                    if track.id is not None:
+                        if not self._app_ref.db.is_favorite(track.id):
+                            self._app_ref.db.set_favorite(
+                                track.id, True
+                            )
+            except Exception:
+                logger.warning(
+                    "Failed to add album to favorites", exc_info=True
+                )
+
+    def _on_context_album_go_to_artist(
+        self, _album_name: str, artist: str
+    ) -> None:
+        """Navigate to artist detail from an album context menu."""
+        if artist:
+            self._navigate_to_artist(artist)
+
+    # ------------------------------------------------------------------
+    # Artist context menu handlers
+    # ------------------------------------------------------------------
+
+    def _get_artist_tracks(self, artist_name: str) -> list:
+        """Fetch all tracks by an artist from the database."""
+        if self._app_ref and self._app_ref.db is not None:
+            try:
+                return self._app_ref.db.get_artist_tracks(artist_name)
+            except Exception:
+                logger.warning(
+                    "Failed to fetch artist tracks for context menu",
+                    exc_info=True,
+                )
+        return []
+
+    def _on_context_play_all_by_artist(
+        self, artist_name: str
+    ) -> None:
+        """Play all tracks by the artist."""
+        tracks = self._get_artist_tracks(artist_name)
+        if tracks and self._app_ref and self._app_ref.player is not None:
+            self._app_ref.player.play_queue(tracks, start_index=0)
+
+    def _on_context_add_all_by_artist(
+        self, artist_name: str
+    ) -> None:
+        """Add all tracks by the artist to the queue."""
+        tracks = self._get_artist_tracks(artist_name)
+        if tracks and self._app_ref and self._app_ref.player is not None:
+            for track in tracks:
+                self._app_ref.player.queue.add(track)
+            if self._queue_panel.get_visible():
+                self._refresh_queue_panel()
+
+    def _on_context_view_artist(self, artist_name: str) -> None:
+        """Navigate to the artist detail page."""
+        self._navigate_to_artist(artist_name)

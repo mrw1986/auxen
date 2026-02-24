@@ -13,7 +13,11 @@ gi.require_version("Adw", "1")
 from gi.repository import GLib, Gtk, Pango
 
 from auxen.models import Source
-from auxen.views.context_menu import TrackContextMenu
+from auxen.views.context_menu import (
+    AlbumContextMenu,
+    ArtistContextMenu,
+    TrackContextMenu,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -308,6 +312,13 @@ class LibraryView(Gtk.Box):
         self._context_callbacks: Optional[dict] = None
         self._get_playlists: Optional[Callable] = None
 
+        # Album context menu callbacks
+        self._album_context_callbacks: Optional[dict] = None
+        self._get_album_playlists: Optional[Callable] = None
+
+        # Artist context menu callbacks
+        self._artist_context_callbacks: Optional[dict] = None
+
         # Track data caches
         self._all_tracks: list = []
         self._all_albums: list[dict] = []
@@ -595,6 +606,22 @@ class LibraryView(Gtk.Box):
         self._context_callbacks = callbacks
         self._get_playlists = get_playlists
 
+    def set_album_context_callbacks(
+        self,
+        callbacks: dict,
+        get_playlists: Callable,
+    ) -> None:
+        """Set callback functions for the album right-click context menu."""
+        self._album_context_callbacks = callbacks
+        self._get_album_playlists = get_playlists
+
+    def set_artist_context_callbacks(
+        self,
+        callbacks: dict,
+    ) -> None:
+        """Set callback functions for the artist right-click context menu."""
+        self._artist_context_callbacks = callbacks
+
     # ------------------------------------------------------------------
     # Context menu helpers
     # ------------------------------------------------------------------
@@ -633,6 +660,7 @@ class LibraryView(Gtk.Box):
             "on_new_playlist": lambda t=track: self._context_callbacks["on_new_playlist"](t),
             "on_toggle_favorite": lambda t=track: self._context_callbacks["on_toggle_favorite"](t),
             "on_go_to_album": lambda t=track: self._context_callbacks["on_go_to_album"](t),
+            "on_go_to_artist": lambda t=track: self._context_callbacks["on_go_to_artist"](t),
         }
 
         track_data = {
@@ -648,6 +676,123 @@ class LibraryView(Gtk.Box):
             track_data=track_data,
             callbacks=callbacks,
             playlists=playlists,
+        )
+        menu.show(widget, x, y)
+
+    # ------------------------------------------------------------------
+    # Album context menu helpers
+    # ------------------------------------------------------------------
+
+    def _attach_album_context_gesture(
+        self, child: Gtk.FlowBoxChild
+    ) -> None:
+        """Attach a right-click gesture to an album card."""
+        if self._album_context_callbacks is None:
+            return
+
+        album_title = getattr(child, "_album_title", None)
+        album_artist = getattr(child, "_album_artist", None)
+        if album_title is None or album_artist is None:
+            return
+
+        gesture = Gtk.GestureClick(button=3)
+
+        def _on_right_click(
+            _gesture, _n_press, x, y,
+            a=album_title, ar=album_artist
+        ):
+            self._show_album_context_menu(child, x, y, a, ar)
+
+        gesture.connect("pressed", _on_right_click)
+        child.add_controller(gesture)
+
+    def _show_album_context_menu(
+        self,
+        widget: Gtk.Widget,
+        x: float,
+        y: float,
+        album_name: str,
+        artist: str,
+    ) -> None:
+        """Create and display a context menu for an album card."""
+        if self._album_context_callbacks is None:
+            return
+
+        playlists = []
+        if self._get_album_playlists is not None:
+            playlists = self._get_album_playlists()
+
+        cbs = self._album_context_callbacks
+        callbacks = {
+            "on_play_album": lambda a=album_name, ar=artist: cbs["on_play_album"](a, ar),
+            "on_play_album_next": lambda a=album_name, ar=artist: cbs["on_play_album_next"](a, ar),
+            "on_add_album_to_queue": lambda a=album_name, ar=artist: cbs["on_add_album_to_queue"](a, ar),
+            "on_add_to_playlist": lambda pid, a=album_name, ar=artist: cbs["on_add_to_playlist"](a, ar, pid),
+            "on_new_playlist": lambda a=album_name, ar=artist: cbs["on_new_playlist"](a, ar),
+            "on_add_to_favorites": lambda a=album_name, ar=artist: cbs["on_add_to_favorites"](a, ar),
+            "on_go_to_artist": lambda a=album_name, ar=artist: cbs["on_go_to_artist"](a, ar),
+        }
+
+        album_data = {
+            "album": album_name,
+            "artist": artist,
+        }
+
+        menu = AlbumContextMenu(
+            album_data=album_data,
+            callbacks=callbacks,
+            playlists=playlists,
+        )
+        menu.show(widget, x, y)
+
+    # ------------------------------------------------------------------
+    # Artist context menu helpers
+    # ------------------------------------------------------------------
+
+    def _attach_artist_context_gesture(
+        self, row: Gtk.ListBoxRow
+    ) -> None:
+        """Attach a right-click gesture to an artist row."""
+        if self._artist_context_callbacks is None:
+            return
+
+        artist_name = getattr(row, "_artist_name", None)
+        if artist_name is None:
+            return
+
+        gesture = Gtk.GestureClick(button=3)
+
+        def _on_right_click(
+            _gesture, _n_press, x, y, name=artist_name
+        ):
+            self._show_artist_context_menu(row, x, y, name)
+
+        gesture.connect("pressed", _on_right_click)
+        row.add_controller(gesture)
+
+    def _show_artist_context_menu(
+        self,
+        widget: Gtk.Widget,
+        x: float,
+        y: float,
+        artist_name: str,
+    ) -> None:
+        """Create and display a context menu for an artist row."""
+        if self._artist_context_callbacks is None:
+            return
+
+        cbs = self._artist_context_callbacks
+        callbacks = {
+            "on_play_all": lambda name=artist_name: cbs["on_play_all"](name),
+            "on_add_all_to_queue": lambda name=artist_name: cbs["on_add_all_to_queue"](name),
+            "on_view_artist": lambda name=artist_name: cbs["on_view_artist"](name),
+        }
+
+        artist_data = {"artist": artist_name}
+
+        menu = ArtistContextMenu(
+            artist_data=artist_data,
+            callbacks=callbacks,
         )
         menu.show(widget, x, y)
 
@@ -865,13 +1010,13 @@ class LibraryView(Gtk.Box):
             return
 
         for album_data in sorted_albums:
-            self._album_grid.append(
-                _make_album_card(
-                    album=album_data["album"],
-                    artist=album_data["artist"],
-                    source=album_data["source"],
-                )
+            card = _make_album_card(
+                album=album_data["album"],
+                artist=album_data["artist"],
+                source=album_data["source"],
             )
+            self._attach_album_context_gesture(card)
+            self._album_grid.append(card)
         self._content_stack.set_visible_child_name("albums")
 
     def _refresh_artists(self) -> None:
@@ -886,13 +1031,13 @@ class LibraryView(Gtk.Box):
             return
 
         for artist_data in sorted_artists:
-            self._artist_list.append(
-                _make_artist_row(
-                    artist=artist_data["artist"],
-                    track_count=artist_data["track_count"],
-                    sources=artist_data["sources"],
-                )
+            row = _make_artist_row(
+                artist=artist_data["artist"],
+                track_count=artist_data["track_count"],
+                sources=artist_data["sources"],
             )
+            self._attach_artist_context_gesture(row)
+            self._artist_list.append(row)
         self._content_stack.set_visible_child_name("artists")
 
     def _refresh_tracks(self) -> None:

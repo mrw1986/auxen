@@ -14,6 +14,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Pango
 
 from auxen.models import Track
+from auxen.views.context_menu import TrackContextMenu
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,10 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         self._on_album_clicked: Optional[
             Callable[[str, str], None]
         ] = None
+
+        # Context menu callbacks
+        self._context_callbacks: Optional[dict] = None
+        self._get_playlists: Optional[Callable] = None
 
         # Data
         self._tracks: list[Track] = []
@@ -350,6 +355,15 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         self._on_back = on_back
         self._on_album_clicked = on_album_clicked
 
+    def set_context_callbacks(
+        self,
+        callbacks: dict,
+        get_playlists: Callable,
+    ) -> None:
+        """Set callback functions for the right-click context menu."""
+        self._context_callbacks = callbacks
+        self._get_playlists = get_playlists
+
     def show_artist(
         self,
         artist_name: str,
@@ -420,6 +434,7 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         self._clear_list_box(self._track_list)
         for i, track in enumerate(tracks):
             row = self._make_track_row(track, i)
+            self._attach_context_gesture(row, track)
             self._track_list.append(row)
 
     # ---- Internal ----
@@ -527,6 +542,63 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         """Handle the Back button."""
         if self._on_back is not None:
             self._on_back()
+
+    # ------------------------------------------------------------------
+    # Context menu helpers
+    # ------------------------------------------------------------------
+
+    def _attach_context_gesture(
+        self, row: Gtk.ListBoxRow, track: Track
+    ) -> None:
+        """Attach a right-click gesture to a track row."""
+        if self._context_callbacks is None or track is None:
+            return
+
+        gesture = Gtk.GestureClick(button=3)
+
+        def _on_right_click(_gesture, _n_press, x, y, trk=track):
+            self._show_track_context_menu(row, x, y, trk)
+
+        gesture.connect("pressed", _on_right_click)
+        row.add_controller(gesture)
+
+    def _show_track_context_menu(
+        self, widget: Gtk.Widget, x: float, y: float, track: Track
+    ) -> None:
+        """Create and display a context menu for a track."""
+        if self._context_callbacks is None:
+            return
+
+        playlists = []
+        if self._get_playlists is not None:
+            playlists = self._get_playlists()
+
+        callbacks = {
+            "on_play": lambda t=track: self._context_callbacks["on_play"](t),
+            "on_play_next": lambda t=track: self._context_callbacks["on_play_next"](t),
+            "on_add_to_queue": lambda t=track: self._context_callbacks["on_add_to_queue"](t),
+            "on_add_to_playlist": lambda pid, t=track: self._context_callbacks["on_add_to_playlist"](t, pid),
+            "on_new_playlist": lambda t=track: self._context_callbacks["on_new_playlist"](t),
+            "on_toggle_favorite": lambda t=track: self._context_callbacks["on_toggle_favorite"](t),
+            "on_go_to_album": lambda t=track: self._context_callbacks["on_go_to_album"](t),
+            "on_go_to_artist": lambda t=track: self._context_callbacks["on_go_to_artist"](t),
+        }
+
+        track_data = {
+            "id": track.id,
+            "title": track.title,
+            "artist": track.artist,
+            "album": track.album or "",
+            "source": track.source,
+            "is_favorite": False,
+        }
+
+        menu = TrackContextMenu(
+            track_data=track_data,
+            callbacks=callbacks,
+            playlists=playlists,
+        )
+        menu.show(widget, x, y)
 
     @staticmethod
     def _clear_list_box(list_box: Gtk.ListBox) -> None:

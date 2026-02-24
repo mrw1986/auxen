@@ -327,6 +327,7 @@ class SearchView(Gtk.Box):
             "on_new_playlist": lambda t=track: self._context_callbacks["on_new_playlist"](t),
             "on_toggle_favorite": lambda t=track: self._context_callbacks["on_toggle_favorite"](t),
             "on_go_to_album": lambda t=track: self._context_callbacks["on_go_to_album"](t),
+            "on_go_to_artist": lambda t=track: self._context_callbacks["on_go_to_artist"](t),
         }
 
         track_data = {

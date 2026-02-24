@@ -13,6 +13,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gdk, GLib, GObject, Gtk, Pango
 
+from auxen.views.context_menu import TrackContextMenu
+
 logger = logging.getLogger(__name__)
 
 PLAYLIST_COLORS = [
@@ -274,6 +276,10 @@ class PlaylistView(Gtk.ScrolledWindow):
         self.on_play_all: Callable | None = None
         self.on_back: Callable | None = None
 
+        # Context menu callbacks
+        self._context_callbacks: Optional[dict] = None
+        self._get_playlists: Optional[Callable] = None
+
         # Root container
         self._root = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -480,6 +486,15 @@ class PlaylistView(Gtk.ScrolledWindow):
 
     # ---- Public API ----
 
+    def set_context_callbacks(
+        self,
+        callbacks: dict,
+        get_playlists: Callable,
+    ) -> None:
+        """Set callback functions for the right-click context menu."""
+        self._context_callbacks = callbacks
+        self._get_playlists = get_playlists
+
     def show_playlist(self, playlist_id: int, db) -> None:
         """Load and display a playlist from the database."""
         self._db = db
@@ -563,9 +578,65 @@ class PlaylistView(Gtk.ScrolledWindow):
                 is_last=(idx == len(self._tracks) - 1),
                 drag_handlers=drag_handlers,
             )
+            self._attach_context_gesture(row, track)
             self._track_list.append(row)
 
         self._content_stack.set_visible_child_name("list")
+
+    # ---- Context menu helpers ----
+
+    def _attach_context_gesture(
+        self, row: Gtk.ListBoxRow, track
+    ) -> None:
+        """Attach a right-click gesture to a playlist track row."""
+        if self._context_callbacks is None or track is None:
+            return
+
+        gesture = Gtk.GestureClick(button=3)
+
+        def _on_right_click(_gesture, _n_press, x, y, trk=track):
+            self._show_track_context_menu(row, x, y, trk)
+
+        gesture.connect("pressed", _on_right_click)
+        row.add_controller(gesture)
+
+    def _show_track_context_menu(
+        self, widget: Gtk.Widget, x: float, y: float, track
+    ) -> None:
+        """Create and display a context menu for a playlist track."""
+        if self._context_callbacks is None:
+            return
+
+        playlists = []
+        if self._get_playlists is not None:
+            playlists = self._get_playlists()
+
+        callbacks = {
+            "on_play": lambda t=track: self._context_callbacks["on_play"](t),
+            "on_play_next": lambda t=track: self._context_callbacks["on_play_next"](t),
+            "on_add_to_queue": lambda t=track: self._context_callbacks["on_add_to_queue"](t),
+            "on_add_to_playlist": lambda pid, t=track: self._context_callbacks["on_add_to_playlist"](t, pid),
+            "on_new_playlist": lambda t=track: self._context_callbacks["on_new_playlist"](t),
+            "on_toggle_favorite": lambda t=track: self._context_callbacks["on_toggle_favorite"](t),
+            "on_go_to_album": lambda t=track: self._context_callbacks["on_go_to_album"](t),
+            "on_go_to_artist": lambda t=track: self._context_callbacks["on_go_to_artist"](t),
+        }
+
+        track_data = {
+            "id": getattr(track, "id", None),
+            "title": getattr(track, "title", ""),
+            "artist": getattr(track, "artist", ""),
+            "album": getattr(track, "album", ""),
+            "source": getattr(track, "source", None),
+            "is_favorite": False,
+        }
+
+        menu = TrackContextMenu(
+            track_data=track_data,
+            callbacks=callbacks,
+            playlists=playlists,
+        )
+        menu.show(widget, x, y)
 
     # ---- Drag-and-drop handlers ----
 
