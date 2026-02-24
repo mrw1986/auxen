@@ -27,7 +27,7 @@ from auxen.equalizer import (  # noqa: E402
 logger = logging.getLogger(__name__)
 
 
-class EqualizerDialog(Gtk.Window):
+class EqualizerDialog(Adw.Window):
     """Modal-style window presenting a 10-band graphic equalizer."""
 
     __gtype_name__ = "EqualizerDialog"
@@ -53,12 +53,17 @@ class EqualizerDialog(Gtk.Window):
         self.set_default_size(620, 480)
         self.add_css_class("equalizer-dialog")
 
+        # ---- Toolbar view with header bar for close button ----
+        toolbar_view = Adw.ToolbarView()
+        header_bar = Adw.HeaderBar()
+        toolbar_view.add_top_bar(header_bar)
+
         # ---- Root layout ----
         root = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=16,
         )
-        root.set_margin_top(20)
+        root.set_margin_top(8)
         root.set_margin_bottom(20)
         root.set_margin_start(24)
         root.set_margin_end(24)
@@ -176,7 +181,8 @@ class EqualizerDialog(Gtk.Window):
 
         root.append(footer)
 
-        self.set_child(root)
+        toolbar_view.set_content(root)
+        self.set_content(toolbar_view)
 
     # ------------------------------------------------------------------
     # Helpers

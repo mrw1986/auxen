@@ -15,7 +15,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Gtk  # noqa: E402
+from gi.repository import Adw, Gtk  # noqa: E402
 
 from auxen.sleep_timer import PRESET_DURATIONS, SleepTimer  # noqa: E402
 
@@ -30,7 +30,7 @@ def _label_for_minutes(minutes: int) -> str:
     return f"{minutes}m"
 
 
-class SleepTimerDialog(Gtk.Window):
+class SleepTimerDialog(Adw.Window):
     """Modal dialog for configuring and monitoring the sleep timer."""
 
     __gtype_name__ = "SleepTimerDialog"
@@ -54,12 +54,17 @@ class SleepTimerDialog(Gtk.Window):
         self.set_default_size(380, -1)
         self.add_css_class("sleep-timer-dialog")
 
+        # ---- Toolbar view with header bar for close button ----
+        toolbar_view = Adw.ToolbarView()
+        header_bar = Adw.HeaderBar()
+        toolbar_view.add_top_bar(header_bar)
+
         # ---- Root layout ----
         root = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=16,
         )
-        root.set_margin_top(24)
+        root.set_margin_top(12)
         root.set_margin_bottom(24)
         root.set_margin_start(24)
         root.set_margin_end(24)
@@ -178,7 +183,8 @@ class SleepTimerDialog(Gtk.Window):
         self._cancel_btn.set_visible(sleep_timer.is_active)
         root.append(self._cancel_btn)
 
-        self.set_child(root)
+        toolbar_view.set_content(root)
+        self.set_content(toolbar_view)
 
         # Sync display if timer is already running.
         self._sync_active_state()
