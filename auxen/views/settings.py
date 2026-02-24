@@ -675,7 +675,12 @@ class AuxenSettings(Adw.PreferencesWindow):
         show_about_dialog(parent or self)
 
     def _on_tidal_login(self, _button: Gtk.Button) -> None:
-        """Start or manage the Tidal login flow."""
+        """Start or manage the Tidal login flow.
+
+        For logout, handles it directly.  For login, delegates to the
+        main window's proven ``_start_tidal_login()`` flow which uses an
+        ``Adw.AlertDialog`` and ``Gtk.UriLauncher`` reliably.
+        """
         if self._tidal_provider is None:
             return
 
@@ -689,49 +694,11 @@ class AuxenSettings(Adw.PreferencesWindow):
         except Exception:
             pass
 
-        # Start login in a background thread
-        self._login_btn.set_sensitive(False)
-        self._account_row.set_subtitle("Authenticating...")
-
-        def _login_thread() -> None:
-            try:
-
-                def _url_callback(url: str) -> None:
-                    GLib.idle_add(
-                        self._show_login_url, url
-                    )
-
-                success = self._tidal_provider.login(
-                    url_callback=_url_callback
-                )
-                GLib.idle_add(self._on_login_complete, success)
-            except Exception:
-                logger.warning("Tidal login failed", exc_info=True)
-                GLib.idle_add(self._on_login_complete, False)
-
-        thread = threading.Thread(target=_login_thread, daemon=True)
-        thread.start()
-
-    def _show_login_url(self, url: str) -> bool:
-        """Display the Tidal login URL and open it in the browser."""
-        self._account_row.set_subtitle(
-            f"Complete login in browser.\nURL: {url}"
-        )
-        # Open the URL in the default browser
-        parent = self.get_transient_for() or self
-        launcher = Gtk.UriLauncher.new(url)
-        launcher.launch(parent, None, None, None)
-        return False
-
-    def _on_login_complete(self, success: bool) -> bool:
-        """Update the UI after Tidal login completes."""
-        self._login_btn.set_sensitive(True)
-        if success:
-            self._account_row.set_subtitle("Connected")
-            self._login_btn.set_label("Log Out")
-        else:
-            self._account_row.set_subtitle("Login failed")
-        return False
+        # Delegate to the main window's proven login flow
+        parent = self.get_transient_for()
+        if parent is not None and hasattr(parent, "_start_tidal_login"):
+            self.close()
+            parent._start_tidal_login()
 
     # ── Last.fm handlers ───────────────────────────────────
 
@@ -763,15 +730,26 @@ class AuxenSettings(Adw.PreferencesWindow):
             self._lastfm_account_row.set_subtitle("Auth failed")
 
     def _show_lastfm_token_dialog(self, url: str) -> None:
-        """Show a dialog prompting the user to enter their Last.fm auth token."""
+        """Show a dialog prompting the user to enter their Last.fm auth token.
+
+        Opens the authorization URL in the default browser first so the
+        user can actually complete the authorization flow, then shows the
+        dialog asking for the resulting token.
+        """
+        # Open the auth URL in the default browser FIRST
+        parent = self.get_transient_for() or self
+        launcher = Gtk.UriLauncher.new(url)
+        launcher.launch(parent, None, None, None)
+
         dialog = Adw.MessageDialog.new(
             self,
             "Connect to Last.fm",
             (
-                "1. Visit the URL shown below and authorize Auxen.\n"
+                "A browser window has been opened to Last.fm.\n"
+                "1. Authorize Auxen in the browser.\n"
                 "2. Copy the token from the URL after authorization.\n"
                 "3. Paste it below and click Connect.\n\n"
-                f"{url}"
+                f"If the browser didn't open, visit:\n{url}"
             ),
         )
         dialog.add_response("cancel", "Cancel")
