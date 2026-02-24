@@ -10,7 +10,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import GdkPixbuf, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, Gtk, Pango
 
 from auxen.views.visualizer import SpectrumVisualizer
 
@@ -59,6 +59,12 @@ class NowPlayingBar(Gtk.Box):
         self._lyrics_active = False
         self._queue_active = False
         self._sleep_timer_active = False
+
+        # Navigation callbacks for clickable artist/title
+        self.on_artist_clicked: Callable[[str], None] | None = None
+        self.on_album_clicked: Callable[[str, str], None] | None = None
+        self._current_artist: str = ""
+        self._current_album: str = ""
 
         self.add_css_class("now-playing-bar")
 
@@ -130,6 +136,13 @@ class NowPlayingBar(Gtk.Box):
         self._title_label.set_ellipsize(Pango.EllipsizeMode.END)
         self._title_label.set_max_width_chars(30)
         self._title_label.add_css_class("now-playing-track-title")
+        self._title_label.add_css_class("clickable-link")
+        self._title_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+
+        title_click = Gtk.GestureClick.new()
+        title_click.connect("released", self._on_title_label_clicked)
+        self._title_label.add_controller(title_click)
+
         text_box.append(self._title_label)
 
         self._artist_label = Gtk.Label(label="")
@@ -137,6 +150,13 @@ class NowPlayingBar(Gtk.Box):
         self._artist_label.set_ellipsize(Pango.EllipsizeMode.END)
         self._artist_label.set_max_width_chars(30)
         self._artist_label.add_css_class("now-playing-track-artist")
+        self._artist_label.add_css_class("clickable-link")
+        self._artist_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+
+        artist_click = Gtk.GestureClick.new()
+        artist_click.connect("released", self._on_artist_label_clicked)
+        self._artist_label.add_controller(artist_click)
+
         text_box.append(self._artist_label)
 
         left.append(text_box)
@@ -350,10 +370,13 @@ class NowPlayingBar(Gtk.Box):
         artist: str,
         quality_label: str = "",
         source: str = "",
+        album: str = "",
     ) -> None:
         """Update the displayed track info."""
         self._title_label.set_label(title)
         self._artist_label.set_label(artist)
+        self._current_artist = artist
+        self._current_album = album
 
         if quality_label:
             self._quality_badge.set_label(quality_label)
@@ -410,6 +433,32 @@ class NowPlayingBar(Gtk.Box):
         self._visualizer.set_active(active)
 
     # ── Internal handlers ─────────────────────────────────
+
+    def _on_artist_label_clicked(
+        self,
+        _gesture: Gtk.GestureClick,
+        _n_press: int,
+        _x: float,
+        _y: float,
+    ) -> None:
+        """Handle click on the artist label — navigate to artist detail."""
+        if self.on_artist_clicked is not None and self._current_artist:
+            self.on_artist_clicked(self._current_artist)
+
+    def _on_title_label_clicked(
+        self,
+        _gesture: Gtk.GestureClick,
+        _n_press: int,
+        _x: float,
+        _y: float,
+    ) -> None:
+        """Handle click on the title label — navigate to album detail."""
+        if (
+            self.on_album_clicked is not None
+            and self._current_album
+            and self._current_artist
+        ):
+            self.on_album_clicked(self._current_album, self._current_artist)
 
     def _on_play_pause_clicked(self, _btn: Gtk.Button) -> None:
         if self._on_play_pause:

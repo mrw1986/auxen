@@ -133,7 +133,8 @@ def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
     artist_label.set_ellipsize(Pango.EllipsizeMode.END)
     artist_label.set_max_width_chars(18)
     artist_label.add_css_class("caption")
-    artist_label.add_css_class("dim-label")
+    artist_label.add_css_class("clickable-link")
+    artist_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
     artist_label.set_margin_start(4)
     artist_label.set_margin_end(4)
     card.append(artist_label)
@@ -146,6 +147,8 @@ def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
     # Store references to art widgets for async loading
     child._art_icon = art_icon  # type: ignore[attr-defined]
     child._art_image = art_image  # type: ignore[attr-defined]
+    # Store artist label for click gesture attachment
+    child._artist_label = artist_label  # type: ignore[attr-defined]
     return child
 
 
@@ -244,6 +247,11 @@ class HomePage(Gtk.ScrolledWindow):
             Callable[[str, str], None]
         ] = None
 
+        # Artist click callback
+        self._on_artist_clicked: Optional[
+            Callable[[str], None]
+        ] = None
+
         # Context menu callbacks
         self._context_callbacks: Optional[dict] = None
         self._get_playlists: Optional[Callable] = None
@@ -339,7 +347,9 @@ class HomePage(Gtk.ScrolledWindow):
         )
 
         for title, artist, source in _SAMPLE_ALBUMS:
-            self._album_grid.append(_make_album_card(title, artist, source))
+            card = _make_album_card(title, artist, source)
+            self._attach_artist_click_gesture(card)
+            self._album_grid.append(card)
 
         root.append(self._album_grid)
 
@@ -393,6 +403,7 @@ class HomePage(Gtk.ScrolledWindow):
                         artist=track.artist,
                         source=track.source.value,
                     )
+                    self._attach_artist_click_gesture(card)
                     self._album_grid.append(card)
                     # Load album art asynchronously
                     self.load_album_art_for_card(card, track)
@@ -535,6 +546,7 @@ class HomePage(Gtk.ScrolledWindow):
     def set_callbacks(
         self,
         on_album_clicked: Callable[[str, str], None] | None = None,
+        on_artist_clicked: Callable[[str], None] | None = None,
     ) -> None:
         """Set callback functions for user actions.
 
@@ -542,8 +554,11 @@ class HomePage(Gtk.ScrolledWindow):
         ----------
         on_album_clicked:
             Called with (album_name, artist) when an album card is clicked.
+        on_artist_clicked:
+            Called with (artist_name) when an artist label is clicked.
         """
         self._on_album_clicked = on_album_clicked
+        self._on_artist_clicked = on_artist_clicked
 
     def set_context_callbacks(
         self,
@@ -561,6 +576,24 @@ class HomePage(Gtk.ScrolledWindow):
         """
         self._context_callbacks = callbacks
         self._get_playlists = get_playlists
+
+    def _attach_artist_click_gesture(self, child: Gtk.FlowBoxChild) -> None:
+        """Attach a click gesture to the artist label on an album card."""
+        artist_label = getattr(child, "_artist_label", None)
+        album_artist = getattr(child, "_album_artist", None)
+        if artist_label is None or album_artist is None:
+            return
+
+        gesture = Gtk.GestureClick.new()
+
+        def _on_artist_clicked(
+            _gesture, _n_press, _x, _y, artist=album_artist
+        ):
+            if self._on_artist_clicked is not None:
+                self._on_artist_clicked(artist)
+
+        gesture.connect("released", _on_artist_clicked)
+        artist_label.add_controller(gesture)
 
     def _on_album_card_activated(
         self,

@@ -150,6 +150,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             on_play_all=self._on_album_play_all,
             on_back=self._on_album_back,
         )
+        self._album_detail._on_artist_navigate = self._navigate_to_artist
         self._stack.add_named(self._album_detail, "album-detail")
 
         # ---- Artist Detail Page (programmatic navigation only) ----
@@ -181,9 +182,10 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._smart_playlist_view, "smart-playlist-detail"
         )
 
-        # Wire home page album click callback
+        # Wire home page album and artist click callbacks
         self._home_page.set_callbacks(
             on_album_clicked=self._on_album_clicked,
+            on_artist_clicked=self._navigate_to_artist,
         )
 
         # ---- Lyrics Panel (right side, hidden by default) ----
@@ -219,6 +221,8 @@ class AuxenWindow(Adw.ApplicationWindow):
             on_lyrics_toggle=self._on_lyrics_toggle,
             on_queue_toggle=self._on_queue_toggle,
         )
+        self._now_playing.on_artist_clicked = self._navigate_to_artist
+        self._now_playing.on_album_clicked = self._navigate_to_album
         content_box.append(self._now_playing)
 
         self._toast_overlay = Adw.ToastOverlay()
@@ -390,6 +394,7 @@ class AuxenWindow(Adw.ApplicationWindow):
                 artist=track.artist,
                 quality_label=track.quality_label,
                 source=track.source.value,
+                album=track.album or "",
             )
             # Load album art asynchronously for the now-playing bar.
             # Wrap callbacks to discard stale results for a different track.
@@ -556,6 +561,18 @@ class AuxenWindow(Adw.ApplicationWindow):
     def _on_album_back(self) -> None:
         """Navigate back from the album detail view."""
         self._stack.set_visible_child_name(self._previous_page)
+
+    # ------------------------------------------------------------------
+    # Clickable name navigation helpers
+    # ------------------------------------------------------------------
+
+    def _navigate_to_artist(self, artist_name: str) -> None:
+        """Navigate to artist detail view (used by clickable artist names)."""
+        self._on_artist_clicked(artist_name)
+
+    def _navigate_to_album(self, album_name: str, artist: str) -> None:
+        """Navigate to album detail view (used by clickable album/title names)."""
+        self._on_album_clicked(album_name, artist)
 
     # ------------------------------------------------------------------
     # Artist detail navigation

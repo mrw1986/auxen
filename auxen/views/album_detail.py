@@ -65,10 +65,12 @@ class AlbumDetailView(Gtk.ScrolledWindow):
         self._on_play_track: Optional[Callable[[Track], None]] = None
         self._on_play_all: Optional[Callable[[list[Track]], None]] = None
         self._on_back: Optional[Callable[[], None]] = None
+        self._on_artist_navigate: Optional[Callable[[str], None]] = None
 
         # Track data
         self._tracks: list[Track] = []
         self._current_track_id: Optional[int] = None
+        self._current_artist: str = ""
 
         # Root container
         self._root = Gtk.Box(
@@ -163,6 +165,13 @@ class AlbumDetailView(Gtk.ScrolledWindow):
         self._artist_label.set_ellipsize(Pango.EllipsizeMode.END)
         self._artist_label.set_max_width_chars(40)
         self._artist_label.add_css_class("album-detail-artist")
+        self._artist_label.add_css_class("clickable-link")
+        self._artist_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+
+        artist_click = Gtk.GestureClick.new()
+        artist_click.connect("released", self._on_artist_label_clicked)
+        self._artist_label.add_controller(artist_click)
+
         info_box.append(self._artist_label)
 
         self._meta_label = Gtk.Label(label="")
@@ -248,6 +257,7 @@ class AlbumDetailView(Gtk.ScrolledWindow):
     ) -> None:
         """Populate the view with album data."""
         self._tracks = list(tracks)
+        self._current_artist = artist
 
         # Reset album art to placeholder
         self.set_album_art(None)
@@ -407,6 +417,17 @@ class AlbumDetailView(Gtk.ScrolledWindow):
         """Handle the Back button."""
         if self._on_back is not None:
             self._on_back()
+
+    def _on_artist_label_clicked(
+        self,
+        _gesture: Gtk.GestureClick,
+        _n_press: int,
+        _x: float,
+        _y: float,
+    ) -> None:
+        """Handle click on the artist label — navigate to artist detail."""
+        if self._on_artist_navigate is not None and self._current_artist:
+            self._on_artist_navigate(self._current_artist)
 
     @staticmethod
     def _clear_list_box(list_box: Gtk.ListBox) -> None:
