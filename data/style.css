@@ -246,6 +246,14 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     font-size: 0.75rem;
 }
 
+.clickable-link {
+    color: #d4a039;
+}
+
+.clickable-link:hover {
+    text-decoration: underline;
+}
+
 /* ═══════════════════════════════════════════════════════════
    HOME PAGE
    ═══════════════════════════════════════════════════════════ */

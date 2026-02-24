@@ -76,6 +76,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             on_playlist_selected=self._on_playlist_selected,
             on_smart_playlist_selected=self._on_smart_playlist_selected,
         )
+        self._sidebar.on_tidal_login = self._start_tidal_login
         sidebar_page = Adw.NavigationPage.new(self._sidebar, "Sidebar")
         split_view.set_sidebar(sidebar_page)
 

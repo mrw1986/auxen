@@ -206,6 +206,7 @@ class AuxenSidebar(Gtk.Box):
         self._on_settings = on_settings
         self._on_playlist_selected = on_playlist_selected
         self._on_smart_playlist_selected = on_smart_playlist_selected
+        self.on_tidal_login: Callable[[], None] | None = None
         self._page_names: list[str] = []
         self._db = None
         self._playlist_ids: list[int] = []
@@ -344,6 +345,13 @@ class AuxenSidebar(Gtk.Box):
         self._plan_label.set_xalign(0)
         self._plan_label.add_css_class("caption")
         self._plan_label.add_css_class("sidebar-tidal-plan")
+        self._plan_label.add_css_class("clickable-link")
+        self._plan_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+
+        plan_click = Gtk.GestureClick.new()
+        plan_click.connect("released", self._on_plan_label_clicked)
+        self._plan_label.add_controller(plan_click)
+
         account_text.append(self._plan_label)
 
         account_box.append(account_text)
@@ -565,6 +573,20 @@ class AuxenSidebar(Gtk.Box):
         self._db.delete_playlist(playlist_id)
         self.refresh_playlists()
 
+    def _on_plan_label_clicked(
+        self,
+        gesture: Gtk.GestureClick,
+        _n_press: int,
+        _x: float,
+        _y: float,
+    ) -> None:
+        """Handle click on the plan label — trigger Tidal login if not connected."""
+        if (
+            self._plan_label.get_label() == "Sign in to Tidal"
+            and self.on_tidal_login is not None
+        ):
+            self.on_tidal_login()
+
     def update_account(
         self,
         username: str | None = None,
@@ -578,10 +600,14 @@ class AuxenSidebar(Gtk.Box):
             self._avatar_label.set_label(username[0].upper())
             self._username_label.set_label(username)
             self._plan_label.set_label(plan or "Tidal")
+            self._plan_label.remove_css_class("clickable-link")
+            self._plan_label.set_cursor(None)
         else:
             self._avatar_label.set_label("?")
             self._username_label.set_label("Not connected")
             self._plan_label.set_label("Sign in to Tidal")
+            self._plan_label.add_css_class("clickable-link")
+            self._plan_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
 
     def _on_about_clicked(self, _button: Gtk.Button) -> None:
         """Open the About dialog."""
