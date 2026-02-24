@@ -455,7 +455,14 @@ class HomePage(Gtk.ScrolledWindow):
         if art_icon is None or art_image is None:
             return
 
+        expected_track_id = track.id
+        child._track_id = expected_track_id  # type: ignore[attr-defined]
+
         def _on_art_loaded(pixbuf: GdkPixbuf.Pixbuf | None) -> None:
+            # Guard: skip if the card was recycled during async fetch
+            current_id = getattr(child, "_track_id", None)
+            if current_id is not None and current_id != expected_track_id:
+                return
             if pixbuf is not None:
                 texture = Gdk.Texture.new_for_pixbuf(pixbuf)
                 art_image.set_from_paintable(texture)

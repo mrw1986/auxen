@@ -42,6 +42,7 @@ def _install_stderr_filter() -> None:
         try:
             buf = b""
             held_bug_line: bytes | None = None
+            drop_next_breakpoint = False
             with os.fdopen(os.dup(real_stderr_fd), "wb") as dst:
 
                 def _write(data: bytes) -> None:
@@ -74,6 +75,7 @@ def _install_stderr_filter() -> None:
                             if b"In pixman_region32_init_rect:" in line:
                                 # Confirmed pixman block — drop both lines
                                 held_bug_line = None
+                                drop_next_breakpoint = True
                                 continue
                             # Not pixman — flush the held line and
                             # process this line normally.
@@ -85,12 +87,14 @@ def _install_stderr_filter() -> None:
                             continue
 
                         # Drop the trailing "Set a breakpoint..." line
-                        # that follows the pixman init_rect line.
-                        if (
+                        # only when it follows a confirmed pixman block.
+                        if drop_next_breakpoint and (
                             b"Set a breakpoint on"
                             b" '_pixman_log_error'" in line
                         ):
+                            drop_next_breakpoint = False
                             continue
+                        drop_next_breakpoint = False
 
                         _write(line + b"\n")
         except Exception:

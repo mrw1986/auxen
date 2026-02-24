@@ -349,6 +349,7 @@ class AuxenSidebar(Gtk.Box):
         self._plan_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
 
         plan_click = Gtk.GestureClick.new()
+        plan_click.set_button(1)
         plan_click.connect("released", self._on_plan_label_clicked)
         self._plan_label.add_controller(plan_click)
 
@@ -576,11 +577,13 @@ class AuxenSidebar(Gtk.Box):
     def _on_plan_label_clicked(
         self,
         gesture: Gtk.GestureClick,
-        _n_press: int,
+        n_press: int,
         _x: float,
         _y: float,
     ) -> None:
         """Handle click on the plan label — trigger Tidal login if not connected."""
+        if n_press != 1:
+            return
         if (
             self._plan_label.get_label() == "Sign in to Tidal"
             and self.on_tidal_login is not None

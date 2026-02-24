@@ -686,10 +686,16 @@ class AuxenSettings(Adw.PreferencesWindow):
 
         try:
             if self._tidal_provider.is_logged_in:
-                # Log out
+                # Log out — delegate to main window so sidebar/views refresh too
                 self._tidal_provider.logout()
                 self._account_row.set_subtitle("Not connected")
                 self._login_btn.set_label("Log In")
+                parent = self.get_transient_for()
+                if parent is not None:
+                    if hasattr(parent, "_update_sidebar_account"):
+                        parent._update_sidebar_account()
+                    if hasattr(parent, "_refresh_tidal_views"):
+                        parent._refresh_tidal_views()
                 return
         except Exception:
             pass

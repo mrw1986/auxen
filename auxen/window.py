@@ -387,6 +387,11 @@ class AuxenWindow(Adw.ApplicationWindow):
 
     def _on_track_changed(self, _player, track) -> None:
         """Update the now-playing bar when the current track changes."""
+        if track is None:
+            self._current_track = None
+            self._now_playing.update_track(title="", artist="", album="")
+            self._now_playing.set_album_art(None)
+            return
         if track is not None:
             self._current_track = track
             self._now_playing.update_track(
@@ -524,13 +529,24 @@ class AuxenWindow(Adw.ApplicationWindow):
             source=source,
         )
 
-        # Load album art for the detail header (use first track)
+        # Load album art for the detail header (use first track).
+        # Guard against stale callbacks from a previous album request.
         if tracks:
+            expected_album = (album_name, artist)
             scale = self.get_scale_factor() or 1
             detail_px = 200 * scale
+
+            def _on_detail_art(pixbuf, _key=expected_album):
+                current = (
+                    self._album_detail._title_label.get_label(),
+                    self._album_detail._artist_label.get_label(),
+                )
+                if current == _key:
+                    self._album_detail.set_album_art(pixbuf)
+
             self._album_art_service.get_art_async(
                 tracks[0],
-                self._album_detail.set_album_art,
+                _on_detail_art,
                 width=detail_px,
                 height=detail_px,
             )
@@ -1242,6 +1258,8 @@ class AuxenWindow(Adw.ApplicationWindow):
         if dialog is not None:
             try:
                 dialog.update_countdown(remaining_seconds)
+                if remaining_seconds <= 0:
+                    dialog._sync_active_state()
             except Exception:
                 pass
 

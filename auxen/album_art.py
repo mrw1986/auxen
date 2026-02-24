@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import urllib.parse
 import urllib.request
 from collections import OrderedDict
 from pathlib import Path
@@ -163,13 +164,22 @@ class AlbumArtService:
 
         Returns ``None`` on any network or decoding error.
         """
+        _MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
         try:
+            parsed = urllib.parse.urlparse(url)
+            if parsed.scheme not in ("http", "https"):
+                logger.debug("Rejected non-HTTP URL scheme: %s", parsed.scheme)
+                return None
+
             req = urllib.request.Request(
                 url,
                 headers={"User-Agent": "Auxen/0.1"},
             )
             with urllib.request.urlopen(req, timeout=10) as resp:
-                data = resp.read()
+                data = resp.read(_MAX_IMAGE_BYTES + 1)
+                if len(data) > _MAX_IMAGE_BYTES:
+                    logger.debug("Image too large from %s", url)
+                    return None
 
             return AlbumArtService.load_pixbuf_from_bytes(data, width, height)
         except Exception:
