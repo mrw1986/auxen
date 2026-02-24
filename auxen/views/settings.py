@@ -44,6 +44,7 @@ class AuxenSettings(Adw.PreferencesWindow):
         page.set_icon_name("emblem-system-symbolic")
         page.set_title("Settings")
 
+        page.add(self._build_appearance_group())
         page.add(self._build_library_group())
         page.add(self._build_playback_group())
         page.add(self._build_tidal_group())
@@ -97,6 +98,26 @@ class AuxenSettings(Adw.PreferencesWindow):
 
         # Load current settings from database
         self._load_settings()
+
+    # ── Appearance ────────────────────────────────────────
+
+    def _build_appearance_group(self) -> Adw.PreferencesGroup:
+        group = Adw.PreferencesGroup(title="Appearance")
+
+        # Theme combo row: Dark, Light, System
+        self._theme_row = Adw.ComboRow(
+            title="Theme",
+            subtitle="Choose light, dark, or follow system",
+        )
+        model = Gtk.StringList.new(["Dark", "Light", "System"])
+        self._theme_row.set_model(model)
+        self._theme_row.set_selected(0)  # Default: dark
+        self._theme_row.connect(
+            "notify::selected", self._on_theme_changed
+        )
+        group.add(self._theme_row)
+
+        return group
 
     # ── Library ──────────────────────────────────────────
 
@@ -376,6 +397,17 @@ class AuxenSettings(Adw.PreferencesWindow):
             return
 
         try:
+            # Load color scheme / theme preference
+            scheme = self._db.get_setting("color_scheme", "dark")
+            scheme_to_idx = {"dark": 0, "light": 1, "system": 2}
+            idx = scheme_to_idx.get(scheme, 0)
+            self._theme_row.set_selected(idx)
+        except Exception:
+            logger.warning(
+                "Failed to load color_scheme setting", exc_info=True
+            )
+
+        try:
             # Load music directories
             raw = self._db.get_setting("music_dirs")
             if raw:
@@ -491,6 +523,30 @@ class AuxenSettings(Adw.PreferencesWindow):
                 )
 
     # ── Signal handlers ──────────────────────────────────
+
+    def _on_theme_changed(self, row: Adw.ComboRow, _pspec) -> None:
+        """Persist and apply the selected color scheme."""
+        idx = row.get_selected()
+        # 0 = Dark, 1 = Light, 2 = System
+        scheme_names = {0: "dark", 1: "light", 2: "system"}
+        scheme_name = scheme_names.get(idx, "dark")
+
+        if self._db is not None:
+            try:
+                self._db.set_setting("color_scheme", scheme_name)
+            except Exception:
+                logger.warning(
+                    "Failed to save color_scheme", exc_info=True
+                )
+
+        # Apply immediately
+        scheme_map = {
+            "light": Adw.ColorScheme.FORCE_LIGHT,
+            "dark": Adw.ColorScheme.FORCE_DARK,
+            "system": Adw.ColorScheme.DEFAULT,
+        }
+        color_scheme = scheme_map.get(scheme_name, Adw.ColorScheme.FORCE_DARK)
+        Adw.StyleManager.get_default().set_color_scheme(color_scheme)
 
     def _on_add_folder(self, _button: Gtk.Button) -> None:
         """Open a file chooser to add a music folder."""

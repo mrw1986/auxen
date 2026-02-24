@@ -77,9 +77,7 @@ class AuxenApp(Adw.Application):
             # Always restore normal Adwaita warning logging
             GLib.log_remove_handler("Adwaita", _handler)
 
-        # Use AdwStyleManager for dark theme (the proper libadwaita API)
-        style_manager = Adw.StyleManager.get_default()
-        style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+        # Color scheme is applied after DB init — see below
 
         # --- Actions ---
         quit_action = Gio.SimpleAction.new("quit", None)
@@ -224,6 +222,19 @@ class AuxenApp(Adw.Application):
             self.db = Database()
         except Exception:
             logger.warning("Failed to initialize database", exc_info=True)
+
+        # --- Color scheme (preference-driven, default: dark) ---
+        style_manager = Adw.StyleManager.get_default()
+        color_scheme = Adw.ColorScheme.FORCE_DARK
+        if self.db is not None:
+            pref = self.db.get_setting("color_scheme", "dark")
+            scheme_map = {
+                "light": Adw.ColorScheme.FORCE_LIGHT,
+                "dark": Adw.ColorScheme.FORCE_DARK,
+                "system": Adw.ColorScheme.DEFAULT,
+            }
+            color_scheme = scheme_map.get(pref, Adw.ColorScheme.FORCE_DARK)
+        style_manager.set_color_scheme(color_scheme)
 
         # --- Smart Playlist Service ---
         if self.db is not None:
