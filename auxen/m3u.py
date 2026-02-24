@@ -120,10 +120,20 @@ class M3UService:
             lines.append("#EXTM3U")
 
         def _safe(value: str | None) -> str:
-            """Strip line breaks to prevent M3U line injection."""
+            """Strip line breaks to prevent M3U line injection.
+
+            Handles \\r, \\n, and Unicode line separators (\\x85, \\u2028,
+            \\u2029) since str.splitlines() treats them all as breaks.
+            """
             if not value:
                 return ""
-            return value.replace("\r", " ").replace("\n", " ")
+            return (
+                value.replace("\r", " ")
+                .replace("\n", " ")
+                .replace("\x85", " ")
+                .replace("\u2028", " ")
+                .replace("\u2029", " ")
+            )
 
         for track in tracks:
             if extended:

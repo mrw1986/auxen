@@ -497,6 +497,7 @@ class AuxenWindow(Adw.ApplicationWindow):
                 self._stack.set_visible_child_name(page)
             finally:
                 self._nav_programmatic = False
+            self._restore_nav_entry(entry)
             return True
         return False
 
@@ -511,8 +512,85 @@ class AuxenWindow(Adw.ApplicationWindow):
                 self._stack.set_visible_child_name(page)
             finally:
                 self._nav_programmatic = False
+            self._restore_nav_entry(entry)
             return True
         return False
+
+    def _restore_nav_entry(self, entry: str) -> None:
+        """Refresh or reload the page for a history *entry*.
+
+        For top-level pages this triggers a data refresh.  For detail
+        pages the stored detail key is used to reload the correct entity.
+        """
+        page = entry.split(":")[0]
+        detail_key = entry.split(":", 1)[1] if ":" in entry else ""
+
+        # Detail pages — reload the entity from the detail key.
+        if detail_key:
+            try:
+                self._reload_detail_page(page, detail_key)
+            except Exception:
+                logger.warning(
+                    "Failed to restore detail page %s:%s",
+                    page,
+                    detail_key,
+                    exc_info=True,
+                )
+            return
+
+        # Top-level pages — refresh data.
+        self._refresh_page(page)
+
+    def _reload_detail_page(self, page: str, detail_key: str) -> None:
+        """Reload a detail page from its stored key.
+
+        Detail keys follow the pattern ``Name|ExtraInfo`` where
+        the separator and meaning depend on the page type.
+        """
+        db = self._app_ref.db if self._app_ref else None
+
+        if page == "album-detail" and db is not None:
+            parts = detail_key.split("|", 1)
+            album_name = parts[0]
+            artist = parts[1] if len(parts) > 1 else ""
+            if album_name:
+                tracks = db.get_tracks_by_album(album_name, artist=artist)
+                source = tracks[0].source.value if tracks else "local"
+                self._album_detail.show_album(
+                    album_name=album_name,
+                    artist=artist,
+                    tracks=tracks,
+                    source=source,
+                )
+
+        elif page == "artist-detail" and db is not None:
+            if detail_key:
+                albums = db.get_artist_albums(detail_key)
+                tracks = db.get_artist_tracks(detail_key)
+                source = tracks[0].source.value if tracks else "local"
+                self._artist_detail.show_artist(
+                    artist_name=detail_key,
+                    albums=albums,
+                    tracks=tracks,
+                    source=source,
+                )
+
+        elif page == "playlist-detail" and db is not None:
+            try:
+                playlist_id = int(detail_key)
+                self._playlist_view.show_playlist(playlist_id, db)
+            except (ValueError, TypeError):
+                pass
+
+        elif page == "smart-playlist-detail":
+            sps = getattr(self, "_smart_playlist_service", None)
+            if sps is not None and detail_key:
+                definition = sps.get_definition(detail_key)
+                tracks = sps.get_tracks(detail_key)
+                if definition is not None:
+                    self._smart_playlist_view.show_playlist(
+                        detail_key, tracks, definition
+                    )
 
     # ------------------------------------------------------------------
     # Player signal handlers
@@ -1300,49 +1378,36 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._stack.set_visible_child_name(page_name)
             self._push_nav(page_name)
 
-        # Refresh library when switching to that page
-        if page_name == "library" and self._app_ref and self._app_ref.db:
-            try:
+        self._refresh_page(page_name)
+
+    def _refresh_page(self, page_name: str) -> None:
+        """Refresh the data for *page_name* if it has a refresh method."""
+        refresh_map = {
+            "library": lambda: (
                 self._library_view.refresh()
-            except Exception:
-                logger.warning(
-                    "Failed to refresh library", exc_info=True
-                )
-
-        # Refresh favorites when switching to that page
-        if page_name == "favorites" and self._app_ref and self._app_ref.db:
-            try:
+                if self._app_ref and self._app_ref.db
+                else None
+            ),
+            "favorites": lambda: (
                 self._favorites_view.refresh()
-            except Exception:
-                logger.warning(
-                    "Failed to refresh favorites", exc_info=True
-                )
-
-        # Refresh explore page when switching to it
-        if page_name == "explore":
-            try:
-                self._explore_view.refresh()
-            except Exception:
-                logger.warning(
-                    "Failed to refresh explore page", exc_info=True
-                )
-
-        # Refresh mixes page when switching to it
-        if page_name == "mixes":
-            try:
-                self._mixes_view.refresh()
-            except Exception:
-                logger.warning(
-                    "Failed to refresh mixes page", exc_info=True
-                )
-
-        # Refresh stats page when switching to it
-        if page_name == "stats" and self._app_ref and self._app_ref.db:
-            try:
+                if self._app_ref and self._app_ref.db
+                else None
+            ),
+            "explore": lambda: self._explore_view.refresh(),
+            "mixes": lambda: self._mixes_view.refresh(),
+            "stats": lambda: (
                 self._stats_view.refresh()
+                if self._app_ref and self._app_ref.db
+                else None
+            ),
+        }
+        refresher = refresh_map.get(page_name)
+        if refresher is not None:
+            try:
+                refresher()
             except Exception:
                 logger.warning(
-                    "Failed to refresh stats page", exc_info=True
+                    "Failed to refresh %s page", page_name, exc_info=True
                 )
 
     # ------------------------------------------------------------------

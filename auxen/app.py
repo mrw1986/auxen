@@ -42,6 +42,9 @@ class AuxenApp(Adw.Application):
         self._current_track_start: float | None = None
         self._previous_track_id: int | None = None
 
+        # One-shot flag to prevent duplicate background tasks on re-activate
+        self._startup_tasks_scheduled: bool = False
+
         # Last.fm scrobble tracking
         self._scrobble_start_time: float | None = None
         self._scrobble_track = None
@@ -445,11 +448,12 @@ class AuxenApp(Adw.Application):
             win.wire_services(self)
         win.present()
 
-        # Trigger initial library scan in the background
-        GLib.idle_add(self._initial_scan)
-
-        # Trigger Tidal favorites sync in the background
-        GLib.idle_add(self._initial_favorites_sync)
+        if not self._startup_tasks_scheduled:
+            self._startup_tasks_scheduled = True
+            # Trigger initial library scan in the background
+            GLib.idle_add(self._initial_scan)
+            # Trigger Tidal favorites sync in the background
+            GLib.idle_add(self._initial_favorites_sync)
 
     # ------------------------------------------------------------------
     # Helpers
