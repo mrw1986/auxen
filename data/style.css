@@ -402,6 +402,15 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     letter-spacing: 0.3px;
 }
 
+/* ── Play Count Badge ─────────────────────────────────── */
+
+.play-count-badge {
+    font-size: 0.75rem;
+    color: @accent_color;
+    font-weight: 600;
+    margin-end: 8px;
+}
+
 /* ── Recently Played Rows ──────────────────────────────── */
 
 .recently-played-row {

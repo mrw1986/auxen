@@ -114,6 +114,14 @@ def _make_smart_track_row(index: int, track) -> Gtk.ListBoxRow:
 
     row_box.append(text_box)
 
+    # -- Play count badge (when available) --
+    if track.play_count and track.play_count > 0:
+        play_word = "play" if track.play_count == 1 else "plays"
+        count_label = Gtk.Label(label=f"{track.play_count} {play_word}")
+        count_label.add_css_class("play-count-badge")
+        count_label.set_valign(Gtk.Align.CENTER)
+        row_box.append(count_label)
+
     # -- Source badge --
     source_text = track.source.value.capitalize()
     if track.source.value == "tidal":

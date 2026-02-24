@@ -82,6 +82,17 @@ class TestGetMostPlayedTracks:
         tracks = db.get_most_played_tracks(limit=5)
         assert len(tracks) == 5
 
+    def test_most_played_includes_play_count(self, db: Database) -> None:
+        """Most Played tracks should have play_count populated."""
+        tid = db.insert_track(
+            _make_track(title="Counted", source_id="cnt1")
+        )
+        db.record_play_history(tid, duration_listened=60.0)
+        db.record_play_history(tid, duration_listened=60.0)
+        tracks = db.get_most_played_tracks(limit=10)
+        assert len(tracks) > 0
+        assert tracks[0].play_count == 2
+
     def test_empty_history_returns_empty(self, db: Database) -> None:
         db.insert_track(_make_track(source_id="1"))
         tracks = db.get_most_played_tracks()

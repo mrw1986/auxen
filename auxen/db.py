@@ -1000,7 +1000,9 @@ class Database:
         """Return the most-played tracks ordered by play count descending.
 
         Uses the play_history table to count actual plays (more reliable
-        than the cached play_count on the tracks table).
+        than the cached play_count on the tracks table).  The returned
+        Track objects have their ``play_count`` field set to the real
+        count from play_history.
         """
         with self._lock:
             cur = self._conn.execute(
@@ -1014,7 +1016,12 @@ class Database:
                 """,
                 (limit,),
             )
-            return [self._row_to_track(r) for r in cur.fetchall()]
+            tracks: list[Track] = []
+            for row in cur.fetchall():
+                track = self._row_to_track(row)
+                track.play_count = row["play_cnt"]
+                tracks.append(track)
+            return tracks
 
     def get_recently_added_tracks(self, limit: int = 50) -> list[Track]:
         """Return the most recently added tracks (by id desc)."""
@@ -1042,7 +1049,12 @@ class Database:
                 """,
                 (cutoff, limit),
             )
-            return [self._row_to_track(r) for r in cur.fetchall()]
+            tracks: list[Track] = []
+            for row in cur.fetchall():
+                track = self._row_to_track(row)
+                track.play_count = row["play_cnt"]
+                tracks.append(track)
+            return tracks
 
     def get_forgotten_gems(
         self,
