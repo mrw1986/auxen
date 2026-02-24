@@ -544,8 +544,9 @@ class AuxenWindow(Adw.ApplicationWindow):
     def _reload_detail_page(self, page: str, detail_key: str) -> None:
         """Reload a detail page from its stored key.
 
-        Detail keys follow the pattern ``Name|ExtraInfo`` where
-        the separator and meaning depend on the page type.
+        Album detail keys use a null-byte separator between album name
+        and artist.  Other detail keys are plain strings (artist name,
+        playlist ID, or smart playlist ID).
         """
         db = self._app_ref.db if self._app_ref else None
 
@@ -562,6 +563,23 @@ class AuxenWindow(Adw.ApplicationWindow):
                     tracks=tracks,
                     source=source,
                 )
+                # Reload album art (mirrors _on_album_clicked logic).
+                if tracks:
+                    expected = (album_name, artist)
+                    scale = self.get_scale_factor() or 1
+                    detail_px = 200 * scale
+
+                    def _on_art(pixbuf, _key=expected):
+                        current = (
+                            self._album_detail._title_label.get_label(),
+                            self._album_detail._artist_label.get_label(),
+                        )
+                        if current == _key:
+                            self._album_detail.set_album_art(pixbuf)
+
+                    self._album_art_service.get_art_async(
+                        tracks[0], _on_art, width=detail_px, height=detail_px
+                    )
 
         elif page == "artist-detail" and db is not None:
             if detail_key:
@@ -578,7 +596,10 @@ class AuxenWindow(Adw.ApplicationWindow):
         elif page == "playlist-detail" and db is not None:
             try:
                 playlist_id = int(detail_key)
-                self._playlist_view.show_playlist(playlist_id, db)
+                # Check existence first to avoid re-entrant on_back()
+                # callback if the playlist was deleted.
+                if db.get_playlist(playlist_id) is not None:
+                    self._playlist_view.show_playlist(playlist_id, db)
             except (ValueError, TypeError):
                 pass
 

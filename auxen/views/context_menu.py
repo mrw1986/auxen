@@ -95,7 +95,8 @@ class _BaseContextMenu:
     def _cleanup_popover(self, popover: Gtk.PopoverMenu) -> bool:
         """Unparent the popover on idle (only if it still has a parent)."""
         if popover is self._popover:
-            self._popover.unparent()
+            if self._popover.get_parent() is not None:
+                self._popover.unparent()
             self._popover = None
         elif popover is not None and popover.get_parent() is not None:
             popover.unparent()

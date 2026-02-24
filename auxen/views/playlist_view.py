@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import re
 from typing import Callable, Optional
 
 import gi
@@ -953,12 +954,11 @@ class PlaylistView(Gtk.ScrolledWindow):
             dialog = Gtk.FileDialog()
             dialog.set_title("Export Playlist")
 
-            # Suggest a filename based on playlist name
-            safe_name = (
-                self._playlist_data["name"]
-                .replace("/", "_")
-                .replace("\\", "_")
-            )
+            # Suggest a filename based on playlist name — strip chars
+            # that are invalid on common filesystems.
+            safe_name = re.sub(
+                r'[<>:"/\\|?*\x00-\x1f]', "_", self._playlist_data["name"]
+            ).strip(". ")
             dialog.set_initial_name(f"{safe_name}.m3u")
 
             # Add M3U file filter — both set_filters and
