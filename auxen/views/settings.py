@@ -12,7 +12,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, Gtk
 
 logger = logging.getLogger(__name__)
 
@@ -122,16 +122,10 @@ class AuxenSettings(Adw.PreferencesWindow):
     # ── Library ──────────────────────────────────────────
 
     def _build_library_group(self) -> Adw.PreferencesGroup:
-        group = Adw.PreferencesGroup(title="Library")
+        self._library_group = Adw.PreferencesGroup(title="Library")
 
-        # Current music folder display
-        music_dir = str(Path.home() / "Music")
-        self._music_dir_row = Adw.ActionRow(
-            title="Music Folder",
-            subtitle=music_dir,
-        )
-        self._music_dir_row.set_icon_name("folder-music-symbolic")
-        group.add(self._music_dir_row)
+        # Folder rows are built dynamically; placeholder list
+        self._folder_rows: list[Adw.ActionRow] = []
 
         # Add Folder button
         add_folder_row = Adw.ActionRow(title="Add Folder")
@@ -143,7 +137,9 @@ class AuxenSettings(Adw.PreferencesWindow):
         add_folder_btn.connect("clicked", self._on_add_folder)
         add_folder_row.add_suffix(add_folder_btn)
         add_folder_row.set_activatable_widget(add_folder_btn)
-        group.add(add_folder_row)
+        self._library_group.add(add_folder_row)
+
+        group = self._library_group
 
         # Rescan Library button
         rescan_row = Adw.ActionRow(title="Rescan Library")
@@ -418,10 +414,12 @@ class AuxenSettings(Adw.PreferencesWindow):
         try:
             # Load music directories
             raw = self._db.get_setting("music_dirs")
+            dirs: list[str] = []
             if raw:
-                dirs = json.loads(raw)
-                if isinstance(dirs, list) and dirs:
-                    self._music_dir_row.set_subtitle(", ".join(dirs))
+                loaded = json.loads(raw)
+                if isinstance(loaded, list):
+                    dirs = loaded
+            self._rebuild_folder_rows(dirs)
         except Exception:
             logger.warning("Failed to load music_dirs setting", exc_info=True)
 
@@ -594,15 +592,58 @@ class AuxenSettings(Adw.PreferencesWindow):
                         self._db.set_setting(
                             "music_dirs", json.dumps(current_dirs)
                         )
-                        self._music_dir_row.set_subtitle(
-                            ", ".join(current_dirs)
-                        )
+                        self._rebuild_folder_rows(current_dirs)
                         logger.info("Added music folder: %s", folder_path)
         except GLib.Error:
             # User cancelled the dialog — this is normal
             pass
         except Exception:
             logger.warning("Failed to add folder", exc_info=True)
+
+    def _rebuild_folder_rows(self, dirs: list[str]) -> None:
+        """Remove existing folder rows and rebuild one per directory."""
+        for row in self._folder_rows:
+            self._library_group.remove(row)
+        self._folder_rows.clear()
+
+        for folder_path in dirs:
+            row = Adw.ActionRow(title=folder_path)
+            row.set_icon_name("folder-symbolic")
+            remove_btn = Gtk.Button(
+                icon_name="list-remove-symbolic",
+                valign=Gtk.Align.CENTER,
+                tooltip_text="Remove folder",
+            )
+            remove_btn.add_css_class("flat")
+            remove_btn.connect(
+                "clicked", self._on_remove_folder, folder_path
+            )
+            row.add_suffix(remove_btn)
+            self._library_group.add(row)
+            self._folder_rows.append(row)
+
+    def _on_remove_folder(
+        self, _button: Gtk.Button, folder_path: str
+    ) -> None:
+        """Remove *folder_path* from the stored music directories."""
+        if self._db is None:
+            return
+        try:
+            raw = self._db.get_setting("music_dirs")
+            current_dirs: list[str] = []
+            if raw:
+                loaded = json.loads(raw)
+                if isinstance(loaded, list):
+                    current_dirs = loaded
+            if folder_path in current_dirs:
+                current_dirs.remove(folder_path)
+                self._db.set_setting(
+                    "music_dirs", json.dumps(current_dirs)
+                )
+                self._rebuild_folder_rows(current_dirs)
+                logger.info("Removed music folder: %s", folder_path)
+        except Exception:
+            logger.warning("Failed to remove folder", exc_info=True)
 
     def _on_rescan(self, _button: Gtk.Button) -> None:
         """Trigger a library rescan in a background thread."""
@@ -827,7 +868,7 @@ class AuxenSettings(Adw.PreferencesWindow):
                 "1. Authorize Auxen in the browser.\n"
                 "2. Copy the token from the URL after authorization.\n"
                 "3. Paste it below and click Connect.\n\n"
-                f"If the browser didn't open, visit:\n{url}"
+                "If the browser didn't open, click the link below:"
             ),
         )
         dialog.add_response("cancel", "Cancel")
@@ -836,11 +877,20 @@ class AuxenSettings(Adw.PreferencesWindow):
             "connect", Adw.ResponseAppearance.SUGGESTED
         )
 
-        # Add a text entry to the dialog's extra child area
+        # Clickable link + token entry stacked vertically
+        extra_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=8
+        )
+        link_btn = Gtk.LinkButton.new_with_label(url, url)
+        link_btn.set_halign(Gtk.Align.CENTER)
+        extra_box.append(link_btn)
+
         entry = Gtk.Entry()
         entry.set_placeholder_text("Paste token here")
         entry.set_hexpand(True)
-        dialog.set_extra_child(entry)
+        extra_box.append(entry)
+
+        dialog.set_extra_child(extra_box)
 
         dialog.connect(
             "response",
@@ -934,11 +984,15 @@ class AuxenSettings(Adw.PreferencesWindow):
             dialog = Gtk.FileDialog()
             dialog.set_title("Import M3U Playlist")
 
-            # Set up M3U file filter
+            # Set up M3U file filter (must use ListStore for portal dialogs)
             m3u_filter = Gtk.FileFilter()
             m3u_filter.set_name("M3U Playlists (*.m3u, *.m3u8)")
             m3u_filter.add_pattern("*.m3u")
             m3u_filter.add_pattern("*.m3u8")
+
+            filter_store = Gio.ListStore.new(Gtk.FileFilter)
+            filter_store.append(m3u_filter)
+            dialog.set_filters(filter_store)
             dialog.set_default_filter(m3u_filter)
 
             dialog.open(

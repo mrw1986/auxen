@@ -176,6 +176,8 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._playlist_view.on_play_track = self._on_playlist_play_track
         self._playlist_view.on_play_all = self._on_playlist_play_all
         self._playlist_view.on_back = self._on_playlist_back
+        self._playlist_view._on_artist_clicked = self._navigate_to_artist
+        self._playlist_view._on_album_clicked = self._navigate_to_album
         self._stack.add_named(self._playlist_view, "playlist-detail")
 
         # ---- Smart Playlist Detail Page (programmatic navigation only) ----
@@ -185,6 +187,8 @@ class AuxenWindow(Adw.ApplicationWindow):
             on_play_all=self._on_smart_playlist_play_all,
             on_back=self._on_smart_playlist_back,
             on_refresh=self._on_smart_playlist_refresh,
+            on_artist_clicked=self._navigate_to_artist,
+            on_album_clicked=self._navigate_to_album,
         )
         self._stack.add_named(
             self._smart_playlist_view, "smart-playlist-detail"
@@ -232,6 +236,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         )
         self._now_playing.on_artist_clicked = self._navigate_to_artist
         self._now_playing.on_album_clicked = self._navigate_to_album
+        self._now_playing.set_visible(False)
         content_box.append(self._now_playing)
 
         self._toast_overlay = Adw.ToastOverlay()
@@ -423,6 +428,9 @@ class AuxenWindow(Adw.ApplicationWindow):
 
         # --- Home Page -> Album Art Service ---
         self._home_page.set_album_art_service(self._album_art_service)
+
+        # --- Library View -> Album Art Service ---
+        self._library_view.set_album_art_service(self._album_art_service)
 
         # --- Smart Playlists -> Service ---
         if hasattr(app, "smart_playlist_service") and app.smart_playlist_service is not None:
@@ -625,6 +633,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         """Update the now-playing bar when the current track changes."""
         if track is None:
             self._current_track = None
+            self._now_playing.set_visible(False)
             self._now_playing.update_track(title="", artist="", album="")
             self._now_playing.set_album_art(None)
             self._now_playing.set_favorite_active(False)
@@ -634,6 +643,7 @@ class AuxenWindow(Adw.ApplicationWindow):
                 self._mini_player.set_album_art(None)
             return
         if track is not None:
+            self._now_playing.set_visible(True)
             self._current_track = track
             self._now_playing.update_track(
                 title=track.title,
@@ -1052,8 +1062,11 @@ class AuxenWindow(Adw.ApplicationWindow):
                 dialog.set_body(
                     "A browser window has been opened.\n"
                     "Complete the login there, then return here.\n\n"
-                    f"If the browser didn't open, visit:\n{url}"
+                    "If the browser didn't open, click the link below:"
                 )
+                link_btn = Gtk.LinkButton.new_with_label(url, url)
+                link_btn.set_halign(Gtk.Align.CENTER)
+                dialog.set_extra_child(link_btn)
                 # Open URL in the default browser
                 launcher = Gtk.UriLauncher.new(url)
                 launcher.launch(self, None, None, None)

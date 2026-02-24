@@ -343,7 +343,7 @@ class NowPlayingBar(Gtk.Box):
         # Lyrics toggle button
         self._lyrics_btn = Gtk.ToggleButton()
         self._lyrics_btn.set_icon_name(
-            "accessories-text-editor-symbolic"
+            "format-justify-left-symbolic"
         )
         self._lyrics_btn.add_css_class("flat")
         self._lyrics_btn.add_css_class("now-playing-control-btn")

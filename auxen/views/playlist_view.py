@@ -63,6 +63,8 @@ def _make_track_row(
     is_first: bool = False,
     is_last: bool = False,
     drag_handlers: dict | None = None,
+    on_artist_clicked=None,
+    on_album_clicked=None,
 ) -> Gtk.ListBoxRow:
     """Build a single row for the playlist track list.
 
@@ -150,18 +152,41 @@ def _make_track_row(
     )
     text_box.append(title_label)
 
-    subtitle_parts = [track.artist]
-    if track.album:
-        subtitle_parts.append(track.album)
-    subtitle_text = " \u2014 ".join(subtitle_parts)
+    subtitle_box = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL, spacing=0
+    )
 
-    subtitle_label = Gtk.Label(label=subtitle_text)
-    subtitle_label.set_xalign(0)
-    subtitle_label.set_ellipsize(Pango.EllipsizeMode.END)
-    subtitle_label.set_max_width_chars(50)
-    subtitle_label.add_css_class("caption")
-    subtitle_label.add_css_class("dim-label")
-    text_box.append(subtitle_label)
+    def _make_nav_label(text: str, callback, *cb_args) -> Gtk.Label:
+        lbl = Gtk.Label(label=text)
+        lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        lbl.set_max_width_chars(25)
+        lbl.add_css_class("track-row-subtitle")
+        if callback is not None:
+            lbl.add_css_class("track-nav-link")
+            g = Gtk.GestureClick.new()
+            g.set_button(1)
+            def _on_click(gest, n_press, _x, _y, _cb=callback, _args=cb_args):
+                if n_press != 1:
+                    return
+                gest.set_state(Gtk.EventSequenceState.CLAIMED)
+                _cb(*_args)
+            g.connect("released", _on_click)
+            lbl.add_controller(g)
+        return lbl
+
+    subtitle_box.append(
+        _make_nav_label(track.artist, on_artist_clicked, track.artist)
+    )
+    if track.album:
+        sep = Gtk.Label(label=" \u2014 ")
+        sep.add_css_class("track-row-subtitle")
+        subtitle_box.append(sep)
+        subtitle_box.append(
+            _make_nav_label(
+                track.album, on_album_clicked, track.album, track.artist
+            )
+        )
+    text_box.append(subtitle_box)
 
     row_box.append(text_box)
 
@@ -280,6 +305,8 @@ class PlaylistView(Gtk.ScrolledWindow):
         self.on_play_track: Callable | None = None
         self.on_play_all: Callable | None = None
         self.on_back: Callable | None = None
+        self._on_artist_clicked: Callable | None = None
+        self._on_album_clicked: Callable | None = None
 
         # Context menu callbacks
         self._context_callbacks: Optional[dict] = None
@@ -595,6 +622,8 @@ class PlaylistView(Gtk.ScrolledWindow):
                 is_first=(idx == 0),
                 is_last=(idx == len(self._tracks) - 1),
                 drag_handlers=drag_handlers,
+                on_artist_clicked=self._on_artist_clicked,
+                on_album_clicked=self._on_album_clicked,
             )
             self._attach_context_gesture(row, track)
             self._track_list.append(row)

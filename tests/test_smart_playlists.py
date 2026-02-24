@@ -350,8 +350,8 @@ class TestSmartPlaylistServiceDefinitions:
             "recently_played",
             "heavy_rotation",
             "forgotten_gems",
-            "long_tracks",
-            "short_tracks",
+            "loved_tracks",
+            "never_played",
         }
 
     def test_definitions_have_required_keys(
@@ -403,41 +403,35 @@ class TestSmartPlaylistServiceGetTracks:
         assert len(tracks) == 1
         assert tracks[0].title == "New Song"
 
-    def test_dispatches_long_tracks(
+    def test_dispatches_loved_tracks(
         self, db: Database, service: SmartPlaylistService
     ) -> None:
-        db.insert_track(
-            _make_track(
-                title="Epic", source_id="1", duration=420.0
-            )
+        tid = db.insert_track(
+            _make_track(title="Loved Song", source_id="1")
         )
+        db.set_favorite(tid, True)
         db.insert_track(
-            _make_track(
-                title="Short", source_id="2", duration=120.0
-            )
+            _make_track(title="Other Song", source_id="2")
         )
 
-        tracks = service.get_tracks("long_tracks")
+        tracks = service.get_tracks("loved_tracks")
         assert len(tracks) == 1
-        assert tracks[0].title == "Epic"
+        assert tracks[0].title == "Loved Song"
 
-    def test_dispatches_short_tracks(
+    def test_dispatches_never_played(
         self, db: Database, service: SmartPlaylistService
     ) -> None:
-        db.insert_track(
-            _make_track(
-                title="Long", source_id="1", duration=400.0
-            )
+        tid_played = db.insert_track(
+            _make_track(title="Played", source_id="1")
         )
+        db.record_play_history(tid_played, duration_listened=60.0)
         db.insert_track(
-            _make_track(
-                title="Quick", source_id="2", duration=120.0
-            )
+            _make_track(title="Unplayed", source_id="2")
         )
 
-        tracks = service.get_tracks("short_tracks")
+        tracks = service.get_tracks("never_played")
         assert len(tracks) == 1
-        assert tracks[0].title == "Quick"
+        assert tracks[0].title == "Unplayed"
 
     def test_unknown_playlist_returns_empty(
         self, service: SmartPlaylistService
@@ -452,5 +446,5 @@ class TestSmartPlaylistServiceGetTracks:
         assert SmartPlaylistType.RECENTLY_PLAYED.value == "recently_played"
         assert SmartPlaylistType.HEAVY_ROTATION.value == "heavy_rotation"
         assert SmartPlaylistType.FORGOTTEN_GEMS.value == "forgotten_gems"
-        assert SmartPlaylistType.LONG_TRACKS.value == "long_tracks"
-        assert SmartPlaylistType.SHORT_TRACKS.value == "short_tracks"
+        assert SmartPlaylistType.LOVED_TRACKS.value == "loved_tracks"
+        assert SmartPlaylistType.NEVER_PLAYED.value == "never_played"

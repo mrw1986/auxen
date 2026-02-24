@@ -18,8 +18,8 @@ class SmartPlaylistType(Enum):
     RECENTLY_PLAYED = "recently_played"
     HEAVY_ROTATION = "heavy_rotation"
     FORGOTTEN_GEMS = "forgotten_gems"
-    LONG_TRACKS = "long_tracks"
-    SHORT_TRACKS = "short_tracks"
+    LOVED_TRACKS = "loved_tracks"
+    NEVER_PLAYED = "never_played"
 
 
 # Each definition carries the metadata shown in the sidebar and view header.
@@ -58,16 +58,16 @@ _DEFINITIONS: list[dict] = [
         ),
     },
     {
-        "id": SmartPlaylistType.LONG_TRACKS.value,
-        "name": "Long Tracks",
-        "icon": "media-seek-forward-symbolic",
-        "description": "Tracks longer than 6 minutes.",
+        "id": SmartPlaylistType.LOVED_TRACKS.value,
+        "name": "Loved Tracks",
+        "icon": "heart-filled-symbolic",
+        "description": "All tracks you've marked as favorites.",
     },
     {
-        "id": SmartPlaylistType.SHORT_TRACKS.value,
-        "name": "Short Tracks",
-        "icon": "media-skip-forward-symbolic",
-        "description": "Tracks shorter than 3 minutes.",
+        "id": SmartPlaylistType.NEVER_PLAYED.value,
+        "name": "Never Played",
+        "icon": "media-playback-start-symbolic",
+        "description": "Tracks added to your library but never played.",
     },
 ]
 
@@ -100,8 +100,8 @@ class SmartPlaylistService:
             SmartPlaylistType.RECENTLY_PLAYED.value: self._recently_played,
             SmartPlaylistType.HEAVY_ROTATION.value: self._heavy_rotation,
             SmartPlaylistType.FORGOTTEN_GEMS.value: self._forgotten_gems,
-            SmartPlaylistType.LONG_TRACKS.value: self._long_tracks,
-            SmartPlaylistType.SHORT_TRACKS.value: self._short_tracks,
+            SmartPlaylistType.LOVED_TRACKS.value: self._loved_tracks,
+            SmartPlaylistType.NEVER_PLAYED.value: self._never_played,
         }
         handler = dispatch.get(playlist_id)
         if handler is None:
@@ -127,12 +127,8 @@ class SmartPlaylistService:
             min_plays=5, inactive_days=30, limit=30
         )
 
-    def _long_tracks(self) -> list[Track]:
-        return self._db.get_tracks_by_duration(
-            min_seconds=360.0, limit=50
-        )
+    def _loved_tracks(self) -> list[Track]:
+        return self._db.get_favorites()
 
-    def _short_tracks(self) -> list[Track]:
-        return self._db.get_tracks_by_duration(
-            max_seconds=180.0, limit=50
-        )
+    def _never_played(self) -> list[Track]:
+        return self._db.get_never_played_tracks(limit=50)

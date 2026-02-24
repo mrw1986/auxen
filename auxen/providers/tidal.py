@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -53,12 +54,15 @@ class TidalProvider(ContentProvider):
 
         try:
             data = json.loads(SESSION_FILE.read_text())
+            expiry_time = data["expiry_time"]
+            if isinstance(expiry_time, str):
+                expiry_time = datetime.fromisoformat(expiry_time)
             with self._session_lock:
                 self._session.load_oauth_session(
                     token_type=data["token_type"],
                     access_token=data["access_token"],
                     refresh_token=data["refresh_token"],
-                    expiry_time=data["expiry_time"],
+                    expiry_time=expiry_time,
                 )
             return True
         except Exception:
@@ -514,7 +518,11 @@ class TidalProvider(ContentProvider):
     @staticmethod
     def _write_session_file(data: dict) -> None:
         """Write *data* as JSON to the session file with 0o600 permissions."""
-        content = json.dumps(data)
+        serializable = dict(data)
+        expiry = serializable.get("expiry_time")
+        if isinstance(expiry, datetime):
+            serializable["expiry_time"] = expiry.isoformat()
+        content = json.dumps(serializable)
         fd = os.open(str(SESSION_FILE), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
             os.fchmod(fd, 0o600)

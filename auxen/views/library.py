@@ -9,8 +9,9 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
+gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import GLib, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango
 
 from auxen.models import Source
 from auxen.views.context_menu import (
@@ -98,6 +99,15 @@ def _make_album_card(
     art_icon.set_vexpand(True)
     art_box.append(art_icon)
 
+    # Album art image (hidden until loaded).
+    art_image = Gtk.Image()
+    art_image.set_pixel_size(160)
+    art_image.set_halign(Gtk.Align.CENTER)
+    art_image.set_valign(Gtk.Align.CENTER)
+    art_image.add_css_class("album-card-art-image")
+    art_image.set_visible(False)
+    art_box.append(art_image)
+
     overlay.set_child(art_box)
 
     if source == "tidal":
@@ -143,6 +153,9 @@ def _make_album_card(
     # Store album/artist data for click handling
     child._album_title = album  # type: ignore[attr-defined]
     child._album_artist = artist  # type: ignore[attr-defined]
+    # Store references to art widgets for async loading
+    child._art_icon = art_icon  # type: ignore[attr-defined]
+    child._art_image = art_image  # type: ignore[attr-defined]
     return child
 
 
@@ -257,8 +270,7 @@ def _make_track_row(track) -> Gtk.ListBoxRow:
     subtitle_label.set_xalign(0)
     subtitle_label.set_ellipsize(Pango.EllipsizeMode.END)
     subtitle_label.set_max_width_chars(50)
-    subtitle_label.add_css_class("caption")
-    subtitle_label.add_css_class("dim-label")
+    subtitle_label.add_css_class("track-row-subtitle")
     text_box.append(subtitle_label)
 
     row_box.append(text_box)
@@ -308,6 +320,9 @@ class LibraryView(Gtk.Box):
         self._active_view: str = "albums"
         self._active_sort: str = "Recently Added"
 
+        # Album art service for loading cover images
+        self._album_art_service = None
+
         # Callbacks
         self._on_album_clicked: Optional[
             Callable[[str, str], None]
@@ -327,6 +342,11 @@ class LibraryView(Gtk.Box):
 
         # Artist context menu callbacks
         self._artist_context_callbacks: Optional[dict] = None
+
+        # Keep a reference to the last-shown context menu so the Python
+        # wrapper (and its action group callbacks) is not garbage-collected
+        # while the popover is still visible.
+        self._current_menu = None
 
         # Track data caches
         self._all_tracks: list = []
@@ -565,6 +585,45 @@ class LibraryView(Gtk.Box):
     # Public API
     # ------------------------------------------------------------------
 
+    def set_album_art_service(self, art_service) -> None:
+        """Set the AlbumArtService instance for loading album art."""
+        self._album_art_service = art_service
+
+    def load_album_art_for_card(
+        self, child: Gtk.FlowBoxChild, track
+    ) -> None:
+        """Load album art asynchronously for an album card.
+
+        *child* is a FlowBoxChild created by ``_make_album_card`` and
+        *track* is a Track object whose art should be loaded.
+        """
+        art_service = self._album_art_service
+        if art_service is None or track is None:
+            return
+
+        art_icon = getattr(child, "_art_icon", None)
+        art_image = getattr(child, "_art_image", None)
+        if art_icon is None or art_image is None:
+            return
+
+        request_token = object()
+        child._art_request_token = request_token  # type: ignore[attr-defined]
+
+        def _on_art_loaded(pixbuf: GdkPixbuf.Pixbuf | None) -> None:
+            # Guard: skip if the card was recycled during async fetch
+            if getattr(child, "_art_request_token", None) is not request_token:
+                return
+            if pixbuf is not None:
+                texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                art_image.set_from_paintable(texture)
+                art_image.set_visible(True)
+                art_icon.set_visible(False)
+
+        # Fetch at logical_size * scale_factor for crisp rendering on HiDPI.
+        scale = child.get_scale_factor() or 1
+        art_px = 160 * scale
+        art_service.get_art_async(track, _on_art_loaded, width=art_px, height=art_px)
+
     def set_database(self, db) -> None:
         """Wire the library view to a database."""
         self._db = db
@@ -685,12 +744,12 @@ class LibraryView(Gtk.Box):
             "is_favorite": False,
         }
 
-        menu = TrackContextMenu(
+        self._current_menu = TrackContextMenu(
             track_data=track_data,
             callbacks=callbacks,
             playlists=playlists,
         )
-        menu.show(widget, x, y)
+        self._current_menu.show(widget, x, y)
 
     # ------------------------------------------------------------------
     # Album context menu helpers
@@ -755,12 +814,12 @@ class LibraryView(Gtk.Box):
             "artist": artist,
         }
 
-        menu = AlbumContextMenu(
+        self._current_menu = AlbumContextMenu(
             album_data=album_data,
             callbacks=callbacks,
             playlists=playlists,
         )
-        menu.show(widget, x, y)
+        self._current_menu.show(widget, x, y)
 
     # ------------------------------------------------------------------
     # Artist context menu helpers
@@ -811,11 +870,11 @@ class LibraryView(Gtk.Box):
 
         artist_data = {"artist": artist_name}
 
-        menu = ArtistContextMenu(
+        self._current_menu = ArtistContextMenu(
             artist_data=artist_data,
             callbacks=callbacks,
         )
-        menu.show(widget, x, y)
+        self._current_menu.show(widget, x, y)
 
     # ------------------------------------------------------------------
     # View mode switching
@@ -1019,6 +1078,13 @@ class LibraryView(Gtk.Box):
         else:
             self._refresh_tracks()
 
+    def _find_album_track(self, album: str, artist: str):
+        """Return the first track matching album+artist from the cache, or None."""
+        for track in self._all_tracks:
+            if getattr(track, "album", None) == album and getattr(track, "artist", None) == artist:
+                return track
+        return None
+
     def _refresh_albums(self) -> None:
         """Rebuild the albums grid."""
         self._clear_flow_box(self._album_grid)
@@ -1038,6 +1104,11 @@ class LibraryView(Gtk.Box):
             )
             self._attach_album_context_gesture(card)
             self._album_grid.append(card)
+            # Load album art asynchronously using the first track of this album
+            representative_track = self._find_album_track(
+                album_data["album"], album_data["artist"]
+            )
+            self.load_album_art_for_card(card, representative_track)
         self._content_stack.set_visible_child_name("albums")
 
     def _refresh_artists(self) -> None:

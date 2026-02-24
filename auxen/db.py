@@ -1115,6 +1115,20 @@ class Database:
             )
             return [self._row_to_track(r) for r in cur.fetchall()]
 
+    def get_never_played_tracks(self, limit: int = 50) -> list[Track]:
+        """Return tracks that have never been played, newest first."""
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT t.* FROM tracks t
+                WHERE t.id NOT IN (SELECT DISTINCT track_id FROM play_history)
+                ORDER BY t.added_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            return [self._row_to_track(r) for r in cur.fetchall()]
+
     def get_recently_played_history(self, limit: int = 20) -> list[Track]:
         """Return most recently played tracks, deduplicated.
 

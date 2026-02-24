@@ -41,7 +41,12 @@ def _format_total_duration(seconds: float) -> str:
     return f"{minutes}m"
 
 
-def _make_smart_track_row(index: int, track) -> Gtk.ListBoxRow:
+def _make_smart_track_row(
+    index: int,
+    track,
+    on_artist_clicked=None,
+    on_album_clicked=None,
+) -> Gtk.ListBoxRow:
     """Build a single row for the smart-playlist track list."""
     row_box = Gtk.Box(
         orientation=Gtk.Orientation.HORIZONTAL,
@@ -99,18 +104,44 @@ def _make_smart_track_row(index: int, track) -> Gtk.ListBoxRow:
     )
     text_box.append(title_label)
 
-    subtitle_parts = [track.artist]
-    if track.album:
-        subtitle_parts.append(track.album)
-    subtitle_text = " \u2014 ".join(subtitle_parts)
+    subtitle_box = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL, spacing=0
+    )
+    subtitle_box.set_xalign(0) if hasattr(subtitle_box, "set_xalign") else None
 
-    subtitle_label = Gtk.Label(label=subtitle_text)
-    subtitle_label.set_xalign(0)
-    subtitle_label.set_ellipsize(Pango.EllipsizeMode.END)
-    subtitle_label.set_max_width_chars(50)
-    subtitle_label.add_css_class("caption")
-    subtitle_label.add_css_class("dim-label")
-    text_box.append(subtitle_label)
+    def _make_nav_label(text: str, callback, *cb_args) -> Gtk.Label:
+        lbl = Gtk.Label(label=text)
+        lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        lbl.set_max_width_chars(25)
+        lbl.add_css_class("track-row-subtitle")
+        if callback is not None:
+            lbl.add_css_class("track-nav-link")
+            g = Gtk.GestureClick.new()
+            g.set_button(1)
+            def _on_click(gest, n_press, _x, _y, _cb=callback, _args=cb_args):
+                if n_press != 1:
+                    return
+                gest.set_state(Gtk.EventSequenceState.CLAIMED)
+                _cb(*_args)
+            g.connect("released", _on_click)
+            lbl.add_controller(g)
+        return lbl
+
+    subtitle_box.append(
+        _make_nav_label(
+            track.artist, on_artist_clicked, track.artist
+        )
+    )
+    if track.album:
+        sep = Gtk.Label(label=" \u2014 ")
+        sep.add_css_class("track-row-subtitle")
+        subtitle_box.append(sep)
+        subtitle_box.append(
+            _make_nav_label(
+                track.album, on_album_clicked, track.album, track.artist
+            )
+        )
+    text_box.append(subtitle_box)
 
     row_box.append(text_box)
 
@@ -387,12 +418,16 @@ class SmartPlaylistView(Gtk.ScrolledWindow):
         on_play_all: Callable | None = None,
         on_back: Callable | None = None,
         on_refresh: Callable | None = None,
+        on_artist_clicked: Callable | None = None,
+        on_album_clicked: Callable | None = None,
     ) -> None:
         """Wire up all callbacks at once."""
         self.on_play_track = on_play_track
         self.on_play_all = on_play_all
         self.on_back = on_back
         self.on_refresh = on_refresh
+        self._on_artist_clicked = on_artist_clicked
+        self._on_album_clicked = on_album_clicked
 
     def set_context_callbacks(
         self,
@@ -418,7 +453,16 @@ class SmartPlaylistView(Gtk.ScrolledWindow):
             return
 
         for idx, track in enumerate(self._tracks):
-            row = _make_smart_track_row(index=idx, track=track)
+            row = _make_smart_track_row(
+                index=idx,
+                track=track,
+                on_artist_clicked=getattr(
+                    self, "_on_artist_clicked", None
+                ),
+                on_album_clicked=getattr(
+                    self, "_on_album_clicked", None
+                ),
+            )
             self._attach_context_gesture(row, track)
             self._track_list.append(row)
 

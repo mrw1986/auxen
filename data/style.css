@@ -110,8 +110,8 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 .sidebar-brand-subtitle {
     font-variant: all-small-caps;
     letter-spacing: 2px;
-    color: alpha(@theme_fg_color, 0.4);
-    font-size: 0.65rem;
+    color: alpha(@theme_fg_color, 0.55);
+    font-size: 0.75rem;
 }
 
 /* ── Section Labels ────────────────────────────────────── */
@@ -120,8 +120,8 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     font-variant: all-small-caps;
     letter-spacing: 1.5px;
     font-weight: 700;
-    color: alpha(@theme_fg_color, 0.7);
-    font-size: 0.8rem;
+    color: alpha(@theme_fg_color, 0.8);
+    font-size: 0.9rem;
 }
 
 /* ── Navigation Sidebar — amber highlight on selection ── */
@@ -848,6 +848,23 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 
 .caption.dim-label {
     color: alpha(@theme_fg_color, 0.5);
+}
+
+/* Track row subtitle — slightly larger than default caption */
+.track-row-subtitle {
+    font-size: 0.85rem;
+    color: alpha(@theme_fg_color, 0.6);
+}
+
+/* Clickable artist/album links in track rows */
+.track-nav-link {
+    color: alpha(@theme_fg_color, 0.6);
+    transition: color 150ms ease;
+}
+
+.track-nav-link:hover {
+    color: @accent_color;
+    text-decoration: underline;
 }
 
 /* ═══════════════════════════════════════════════════════════
