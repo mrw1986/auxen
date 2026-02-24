@@ -24,6 +24,16 @@
 @define-color dialog_bg_color #1c1b22;
 @define-color dialog_fg_color #f0ece4;
 
+/* ── Global Slider Safety — prevent negative dimensions ──── */
+
+scale slider,
+scrollbar slider,
+slider {
+    margin: 0;
+    min-width: 2px;
+    min-height: 2px;
+}
+
 /* ── Global Transitions ───────────────────────────────────── */
 
 row,
@@ -39,28 +49,51 @@ scrollbar {
     background-color: transparent;
 }
 
+scrollbar trough {
+    padding: 0;
+    margin: 0;
+    border: none;
+    background-color: transparent;
+}
+
 scrollbar slider {
-    min-width: 6px;
-    min-height: 6px;
-    border-radius: 9999px;
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 4px;
     background-color: rgba(163, 158, 147, 0.25);
     border: none;
+    padding: 0;
+    margin: 2px;
 }
 
 scrollbar slider:hover {
-    min-width: 8px;
-    min-height: 8px;
+    min-width: 10px;
+    min-height: 10px;
     background-color: rgba(212, 160, 57, 0.5);
+    border: none;
+    padding: 0;
 }
 
 scrollbar slider:active {
     background-color: rgba(212, 160, 57, 0.7);
+    border: none;
+    padding: 0;
+}
+
+scrollbar.overlay-indicator slider {
+    border: none;
+    padding: 0;
+    margin: 2px;
 }
 
 scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     min-width: 6px;
     min-height: 6px;
+    border-radius: 3px;
     background-color: rgba(163, 158, 147, 0.2);
+    border: none;
+    padding: 0;
+    margin: 2px;
 }
 
 /* ── Focus Ring — amber glow ──────────────────────────────── */
@@ -100,7 +133,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     font-variant: all-small-caps;
     letter-spacing: 1.5px;
     font-weight: 600;
-    color: #6b6860;
+    color: #9e9a91;
     font-size: 0.7rem;
 }
 
@@ -424,7 +457,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 }
 
 .now-playing-track-artist {
-    color: #a39e93;
+    color: #c0bcb3;
     font-size: 0.8rem;
 }
 
@@ -507,7 +540,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     min-height: 12px;
     border-radius: 9999px;
     background-color: #f0ece4;
-    margin: -2px 0;
+    margin: 0;
 }
 
 .now-playing-progress:hover trough {
@@ -517,7 +550,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 .now-playing-progress:hover slider {
     min-width: 14px;
     min-height: 14px;
-    margin: -2px 0;
+    margin: 0;
 }
 
 .now-playing-time {
@@ -569,7 +602,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     min-height: 10px;
     border-radius: 9999px;
     background-color: #f0ece4;
-    margin: -1px 0;
+    margin: 0;
 }
 
 .now-playing-volume:hover trough highlight {
@@ -792,11 +825,11 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
    ═══════════════════════════════════════════════════════════ */
 
 .dim-label {
-    color: #a39e93;
+    color: #c0bcb3;
 }
 
 .caption.dim-label {
-    color: #6b6860;
+    color: #9e9a91;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -1103,7 +1136,7 @@ button.flat:hover {
 /* -- "New Playlist" row with + icon -- */
 
 .playlist-add-row {
-    opacity: 0.7;
+    opacity: 0.85;
     transition: opacity 200ms ease;
 }
 
@@ -1636,14 +1669,14 @@ button.flat:hover {
     border-radius: 9999px;
     background-color: #d4a039;
     border: 2px solid #f0ece4;
-    margin: -2px 0;
+    margin: 0;
 }
 
 .equalizer-band-slider:hover slider {
     background-color: #e0b04a;
     min-width: 16px;
     min-height: 16px;
-    margin: -2px 0;
+    margin: 0;
 }
 
 /* -- Mark at 0 dB (center reference line) -- */
@@ -1877,7 +1910,7 @@ button.flat:hover {
 
 .mini-player-artist {
     font-size: 12px;
-    color: #a39e93;
+    color: #c0bcb3;
 }
 
 /* -- Album art container -- */
@@ -1953,7 +1986,7 @@ button.flat:hover {
     min-height: 10px;
     border-radius: 9999px;
     background-color: #f0ece4;
-    margin: -1px 0;
+    margin: 0;
 }
 
 .mini-player-progress:hover trough {
@@ -1963,7 +1996,7 @@ button.flat:hover {
 .mini-player-progress:hover slider {
     min-width: 12px;
     min-height: 12px;
-    margin: -1px 0;
+    margin: 0;
 }
 
 /* -- Time labels -- */

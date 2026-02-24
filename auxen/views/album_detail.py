@@ -11,7 +11,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import GdkPixbuf, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, Gtk, Pango
 
 from auxen.models import Track
 
@@ -128,9 +128,12 @@ class AlbumDetailView(Gtk.ScrolledWindow):
         self._art_placeholder.set_valign(Gtk.Align.CENTER)
         self._art_placeholder.set_vexpand(True)
 
-        # Actual album art image (hidden until art is loaded)
+        # Album art image (hidden until loaded).
+        # Use Gtk.Image + set_pixel_size + set_from_paintable (texture)
+        # so the image renders at 200 CSS pixels (2x asset fetched for
+        # HiDPI). Gtk.Picture was avoided due to pixman errors.
         self._art_image = Gtk.Image()
-        self._art_image.set_size_request(200, 200)
+        self._art_image.set_pixel_size(200)
         self._art_image.set_halign(Gtk.Align.CENTER)
         self._art_image.set_valign(Gtk.Align.CENTER)
         self._art_image.add_css_class("album-detail-art-image")
@@ -286,7 +289,8 @@ class AlbumDetailView(Gtk.ScrolledWindow):
     def set_album_art(self, pixbuf: GdkPixbuf.Pixbuf | None) -> None:
         """Set the album header art, or fall back to placeholder if None."""
         if pixbuf is not None:
-            self._art_image.set_from_pixbuf(pixbuf)
+            texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+            self._art_image.set_from_paintable(texture)
             self._art_image.set_visible(True)
             self._art_placeholder.set_visible(False)
         else:

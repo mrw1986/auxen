@@ -141,7 +141,7 @@ def _make_add_playlist_row() -> Gtk.ListBoxRow:
 
     icon = Gtk.Image.new_from_icon_name("list-add-symbolic")
     icon.set_pixel_size(16)
-    icon.set_opacity(0.5)
+    icon.set_opacity(0.7)
     row_box.append(icon)
 
     label = Gtk.Label(label="New Playlist")
@@ -325,9 +325,9 @@ class AuxenSidebar(Gtk.Box):
         )
         account_box.add_css_class("sidebar-account")
 
-        avatar = Gtk.Label(label="M")
-        avatar.add_css_class("sidebar-avatar")
-        account_box.append(avatar)
+        self._avatar_label = Gtk.Label(label="?")
+        self._avatar_label.add_css_class("sidebar-avatar")
+        account_box.append(self._avatar_label)
 
         account_text = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -335,16 +335,16 @@ class AuxenSidebar(Gtk.Box):
         )
         account_text.set_hexpand(True)
 
-        username = Gtk.Label(label="mrw1986")
-        username.set_xalign(0)
-        username.add_css_class("body")
-        account_text.append(username)
+        self._username_label = Gtk.Label(label="Not connected")
+        self._username_label.set_xalign(0)
+        self._username_label.add_css_class("body")
+        account_text.append(self._username_label)
 
-        plan_label = Gtk.Label(label="Tidal HiFi Plus")
-        plan_label.set_xalign(0)
-        plan_label.add_css_class("caption")
-        plan_label.add_css_class("sidebar-tidal-plan")
-        account_text.append(plan_label)
+        self._plan_label = Gtk.Label(label="Sign in to Tidal")
+        self._plan_label.set_xalign(0)
+        self._plan_label.add_css_class("caption")
+        self._plan_label.add_css_class("sidebar-tidal-plan")
+        account_text.append(self._plan_label)
 
         account_box.append(account_text)
 
@@ -564,6 +564,24 @@ class AuxenSidebar(Gtk.Box):
             return
         self._db.delete_playlist(playlist_id)
         self.refresh_playlists()
+
+    def update_account(
+        self,
+        username: str | None = None,
+        plan: str | None = None,
+    ) -> None:
+        """Update the account section with Tidal user info.
+
+        Pass *None* for both to reset to the "not connected" state.
+        """
+        if username:
+            self._avatar_label.set_label(username[0].upper())
+            self._username_label.set_label(username)
+            self._plan_label.set_label(plan or "Tidal")
+        else:
+            self._avatar_label.set_label("?")
+            self._username_label.set_label("Not connected")
+            self._plan_label.set_label("Sign in to Tidal")
 
     def _on_about_clicked(self, _button: Gtk.Button) -> None:
         """Open the About dialog."""

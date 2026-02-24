@@ -357,6 +357,9 @@ class AuxenWindow(Adw.ApplicationWindow):
                 app.smart_playlist_service
             )
 
+        # --- Sidebar account info from Tidal ---
+        self._update_sidebar_account()
+
         # --- Home Page initial refresh ---
         if app.db is not None:
             try:
@@ -395,11 +398,14 @@ class AuxenWindow(Adw.ApplicationWindow):
                 if self._current_track is _track:
                     self._now_playing.set_album_art(pixbuf)
 
+            # Fetch at logical_size * scale_factor for HiDPI crispness
+            scale = self.get_scale_factor() or 1
+            art_48 = 48 * scale
             self._album_art_service.get_art_async(
                 track,
                 _on_art,
-                width=48,
-                height=48,
+                width=art_48,
+                height=art_48,
             )
             # Highlight the current track in album detail if visible
             self._album_detail.set_current_track(track.id)
@@ -427,8 +433,8 @@ class AuxenWindow(Adw.ApplicationWindow):
                 self._album_art_service.get_art_async(
                     track,
                     _on_mini_art,
-                    width=48,
-                    height=48,
+                    width=art_48,
+                    height=art_48,
                 )
 
     def _on_position_updated(self, _player, position, duration) -> None:
@@ -514,11 +520,13 @@ class AuxenWindow(Adw.ApplicationWindow):
 
         # Load album art for the detail header (use first track)
         if tracks:
+            scale = self.get_scale_factor() or 1
+            detail_px = 200 * scale
             self._album_art_service.get_art_async(
                 tracks[0],
                 self._album_detail.set_album_art,
-                width=200,
-                height=200,
+                width=detail_px,
+                height=detail_px,
             )
 
         self._stack.set_visible_child_name("album-detail")
@@ -719,6 +727,8 @@ class AuxenWindow(Adw.ApplicationWindow):
                         toast = Adw.Toast.new("Logged in to Tidal")
                         toast.set_timeout(3)
                         self._show_toast(toast)
+                        # Update sidebar account info
+                        self._update_sidebar_account()
                         # Refresh the current view
                         self._refresh_tidal_views()
                     else:
@@ -751,6 +761,31 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._toast_overlay.add_toast(toast)
         else:
             logger.info("Toast: %s", toast.get_title())
+
+    def _update_sidebar_account(self) -> None:
+        """Update sidebar account info from Tidal provider state."""
+        if self._app_ref is None or self._app_ref.tidal_provider is None:
+            self._sidebar.update_account()
+            return
+
+        provider = self._app_ref.tidal_provider
+        if not provider.is_logged_in:
+            self._sidebar.update_account()
+            return
+
+        try:
+            session = provider._session
+            user = session.user
+            username = getattr(user, "name", None) or str(getattr(user, "id", "User"))
+            sub = getattr(session, "subscription", None)
+            plan = getattr(sub, "subscription", {}).get("type", "Tidal") if sub and hasattr(sub, "subscription") else "Tidal"
+            if plan == "Tidal":
+                # Try alternate attribute path
+                plan = getattr(sub, "type", "Tidal") if sub else "Tidal"
+            self._sidebar.update_account(username=username, plan=plan)
+        except Exception:
+            logger.warning("Failed to fetch Tidal account info", exc_info=True)
+            self._sidebar.update_account(username="Tidal User", plan="Connected")
 
     def _refresh_tidal_views(self) -> None:
         """Refresh Explore, Mixes, and Favorites views after login."""
@@ -1128,11 +1163,13 @@ class AuxenWindow(Adw.ApplicationWindow):
                 if self._current_track is _t:
                     self._mini_player.set_album_art(pixbuf)
 
+            scale = self.get_scale_factor() or 1
+            art_48 = 48 * scale
             self._album_art_service.get_art_async(
                 self._current_track,
                 _on_mini_entry_art,
-                width=48,
-                height=48,
+                width=art_48,
+                height=art_48,
             )
 
         # Sync play state

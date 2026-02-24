@@ -51,7 +51,35 @@ class AuxenApp(Adw.Application):
     # ------------------------------------------------------------------
 
     def do_startup(self) -> None:
-        Adw.Application.do_startup(self)
+        # Temporarily suppress the specific Adwaita warning about
+        # gtk-application-prefer-dark-theme (user's settings.ini may
+        # enable it; we use AdwStyleManager instead).  Only the known
+        # warning is suppressed — other Adwaita warnings pass through.
+        def _suppress_dark_theme_warning(
+            _domain: str,
+            _level: GLib.LogLevelFlags,
+            message: str,
+            *_args,
+        ) -> None:
+            if "prefer-dark-theme" not in (message or ""):
+                GLib.log_default_handler("Adwaita", _level, message)
+
+        _handler = GLib.log_set_handler(
+            "Adwaita",
+            GLib.LogLevelFlags.LEVEL_WARNING,
+            _suppress_dark_theme_warning,
+            None,
+        )
+
+        try:
+            Adw.Application.do_startup(self)
+        finally:
+            # Always restore normal Adwaita warning logging
+            GLib.log_remove_handler("Adwaita", _handler)
+
+        # Use AdwStyleManager for dark theme (the proper libadwaita API)
+        style_manager = Adw.StyleManager.get_default()
+        style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
 
         # --- Actions ---
         quit_action = Gio.SimpleAction.new("quit", None)
@@ -186,7 +214,7 @@ class AuxenApp(Adw.Application):
             Gtk.StyleContext.add_provider_for_display(
                 display,
                 css_provider,
-                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
             )
 
         # --- Database ---

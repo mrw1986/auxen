@@ -234,16 +234,25 @@ class TestCacheBehavior:
         assert service._cache[(99, 48, 48)] is None
 
     def test_cache_eviction_when_full(self) -> None:
-        """Oldest entries are evicted when cache exceeds max size."""
+        """Oldest entries are evicted when cache exceeds byte budget."""
+        import auxen.album_art as _art_mod
+
         service = AlbumArtService()
 
-        # Fill cache beyond limit (use tuple keys matching new format)
-        for i in range(105):
-            service._cache[(i, 48, 48)] = f"pixbuf_{i}"
+        # Create a mock pixbuf with a known byte size
+        class FakePixbuf:
+            def __init__(self, size: int) -> None:
+                self._size = size
 
-        # Cache should not exceed 100 after a get_art_for_track call
-        # that adds a new entry.  But the direct dict manipulation
-        # above doesn't trigger eviction.  Let's trigger it properly.
+            def get_byte_length(self) -> int:
+                return self._size
+
+        # Each entry ~10 MB, so 6 entries = 60 MB > 50 MB budget
+        for i in range(6):
+            service._cache[(i, 48, 48)] = FakePixbuf(10 * 1024 * 1024)
+            service._cache_bytes += 10 * 1024 * 1024
+
+        # Trigger eviction via a get_art_for_track call
         track = _make_track(
             track_id=200,
             source=Source.TIDAL,
@@ -252,7 +261,8 @@ class TestCacheBehavior:
         )
         service.get_art_for_track(track)
 
-        assert len(service._cache) <= 101  # 105 + 1 - evictions
+        # Eviction should have kicked in — total should be <= budget
+        assert service._cache_bytes <= _art_mod._MAX_CACHE_BYTES
 
     def test_track_without_id_skips_cache(self) -> None:
         """A track with id=None should not be cached."""

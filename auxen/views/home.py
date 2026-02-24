@@ -12,7 +12,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import GdkPixbuf, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, Gtk, Pango
 
 from auxen.views.context_menu import TrackContextMenu
 
@@ -99,9 +99,11 @@ def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
     art_icon.set_vexpand(True)
     art_box.append(art_icon)
 
-    # Album art image (hidden until loaded)
+    # Album art image (hidden until loaded).
+    # Use Gtk.Image + set_pixel_size + set_from_paintable (texture) so
+    # the image renders at 160 CSS pixels (2x asset fetched for HiDPI).
     art_image = Gtk.Image()
-    art_image.set_size_request(120, 120)
+    art_image.set_pixel_size(160)
     art_image.set_halign(Gtk.Align.CENTER)
     art_image.set_valign(Gtk.Align.CENTER)
     art_image.add_css_class("album-card-art-image")
@@ -444,11 +446,15 @@ class HomePage(Gtk.ScrolledWindow):
 
         def _on_art_loaded(pixbuf: GdkPixbuf.Pixbuf | None) -> None:
             if pixbuf is not None:
-                art_image.set_from_pixbuf(pixbuf)
+                texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                art_image.set_from_paintable(texture)
                 art_image.set_visible(True)
                 art_icon.set_visible(False)
 
-        art_service.get_art_async(track, _on_art_loaded, width=120, height=120)
+        # Fetch at logical_size * scale_factor for crisp rendering on HiDPI.
+        scale = child.get_scale_factor() or 1
+        art_px = 160 * scale
+        art_service.get_art_async(track, _on_art_loaded, width=art_px, height=art_px)
 
     # ---- Internal helpers ----
 

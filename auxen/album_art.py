@@ -19,15 +19,25 @@ from auxen.models import Source, Track
 
 logger = logging.getLogger(__name__)
 
-# Maximum number of cached pixbufs (each ~48x48 to ~200x200 RGBA).
-_MAX_CACHE_SIZE = 100
+# Maximum total bytes of cached pixbufs before LRU eviction (~50 MB).
+_MAX_CACHE_BYTES = 50 * 1024 * 1024
+
+
+def _pixbuf_bytes(pixbuf: Any) -> int:
+    """Return the approximate byte size of a GdkPixbuf, or 0 for None."""
+    if pixbuf is None:
+        return 0
+    try:
+        return pixbuf.get_byte_length()
+    except Exception:
+        return 0
 
 
 class AlbumArtService:
     """Load album art from embedded metadata or remote URLs.
 
     Lookup order for local tracks:
-        1. In-memory cache (keyed by track.id)
+        1. In-memory cache (keyed by track.id + requested size)
         2. Embedded art in the audio file (APIC for MP3, pictures for
            FLAC/OGG, covr for M4A/AAC)
 
@@ -36,11 +46,14 @@ class AlbumArtService:
         2. Download from ``track.album_art_url``
 
     Results (including ``None`` for missing art) are cached so
-    subsequent lookups are free.
+    subsequent lookups are free.  The cache is capped by total byte
+    usage (default ~50 MB) rather than entry count, so a mix of small
+    thumbnails and large detail images is handled efficiently.
     """
 
     def __init__(self) -> None:
         self._cache: OrderedDict[tuple[int, int, int], Any] = OrderedDict()
+        self._cache_bytes: int = 0
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -69,9 +82,11 @@ class AlbumArtService:
         with self._lock:
             self._cache[cache_key] = pixbuf
             self._cache.move_to_end(cache_key)
-            # Evict oldest entries if over capacity
-            while len(self._cache) > _MAX_CACHE_SIZE:
-                self._cache.popitem(last=False)
+            self._cache_bytes += _pixbuf_bytes(pixbuf)
+            # Evict oldest entries if over byte budget
+            while self._cache_bytes > _MAX_CACHE_BYTES and self._cache:
+                _, evicted = self._cache.popitem(last=False)
+                self._cache_bytes -= _pixbuf_bytes(evicted)
 
         return pixbuf
 
@@ -105,6 +120,7 @@ class AlbumArtService:
         """Remove all cached pixbufs."""
         with self._lock:
             self._cache.clear()
+            self._cache_bytes = 0
 
     # ------------------------------------------------------------------
     # Pixbuf helpers (public for direct use)
