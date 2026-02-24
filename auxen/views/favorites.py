@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Callable
 
 import gi
 
@@ -185,6 +186,8 @@ class FavoritesView(Gtk.ScrolledWindow):
         self._get_playlists = None
         # Track objects keyed by track_id for context menu use
         self._track_objects: dict[int, object] = {}
+        # Callback: on_favorite_changed(track_id: int, is_favorite: bool)
+        self.on_favorite_changed: Callable[[int, bool], None] | None = None
 
         # Root container
         root = Gtk.Box(
@@ -304,13 +307,15 @@ class FavoritesView(Gtk.ScrolledWindow):
         empty_icon.set_pixel_size(64)
         empty_box.append(empty_icon)
 
-        empty_title = Gtk.Label(label="No favorites yet")
-        empty_title.add_css_class("title-3")
-        empty_box.append(empty_title)
+        self._empty_title = Gtk.Label(label="No favorites yet")
+        self._empty_title.add_css_class("title-3")
+        empty_box.append(self._empty_title)
 
-        empty_subtitle = Gtk.Label(label="Heart any track to add it here")
-        empty_subtitle.add_css_class("caption")
-        empty_box.append(empty_subtitle)
+        self._empty_subtitle = Gtk.Label(
+            label="Heart any track to add it here"
+        )
+        self._empty_subtitle.add_css_class("caption")
+        empty_box.append(self._empty_subtitle)
 
         self._content_stack.add_named(empty_box, "empty")
 
@@ -436,6 +441,8 @@ class FavoritesView(Gtk.ScrolledWindow):
                     self._track_objects[track.id] = track
         except Exception:
             logger.warning("Failed to load favorites from database", exc_info=True)
+            self._all_favorites = []
+            self._track_objects = {}
 
     def _on_unfavorite(self, track_id: int) -> None:
         """Remove a track from favorites via the database.
@@ -476,6 +483,8 @@ class FavoritesView(Gtk.ScrolledWindow):
 
                 self._load_from_db()
                 self._refresh_list()
+                if self.on_favorite_changed is not None:
+                    self.on_favorite_changed(track_id, False)
             except Exception:
                 logger.warning("Failed to unfavorite track", exc_info=True)
 
@@ -522,6 +531,19 @@ class FavoritesView(Gtk.ScrolledWindow):
         self._count_label.set_label(f"{count} {track_word}")
 
         if not sorted_tracks:
+            if self._all_favorites:
+                # Have favorites but none match the current filter
+                self._empty_title.set_label(
+                    f"No {self._active_filter} favorites"
+                )
+                self._empty_subtitle.set_label(
+                    "Try a different source filter"
+                )
+            else:
+                self._empty_title.set_label("No favorites yet")
+                self._empty_subtitle.set_label(
+                    "Heart any track to add it here"
+                )
             self._content_stack.set_visible_child_name("empty")
             return
 

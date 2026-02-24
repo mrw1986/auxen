@@ -385,6 +385,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._favorites_view.set_database(app.db)
         if app.tidal_provider is not None:
             self._favorites_view.set_tidal_provider(app.tidal_provider)
+        self._favorites_view.on_favorite_changed = self._on_favorites_view_changed
 
         # --- Library View -> Database + callbacks ---
         if app.db is not None:
@@ -673,6 +674,16 @@ class AuxenWindow(Adw.ApplicationWindow):
                 "Failed to toggle favorite from now-playing bar",
                 exc_info=True,
             )
+
+    def _on_favorites_view_changed(
+        self, track_id: int, is_favorite: bool
+    ) -> None:
+        """Sync now-playing heart when favorites view unfavorites a track."""
+        if (
+            self._current_track is not None
+            and self._current_track.id == track_id
+        ):
+            self._now_playing.set_favorite_active(is_favorite)
 
     def _on_spectrum_data(self, _player, levels) -> None:
         """Forward spectrum data to the now-playing visualizer."""
