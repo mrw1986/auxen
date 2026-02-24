@@ -556,8 +556,11 @@ class ArtistDetailView(Gtk.ScrolledWindow):
 
         gesture = Gtk.GestureClick(button=3)
 
-        def _on_right_click(_gesture, _n_press, x, y, trk=track):
+        def _on_right_click(g, n_press, x, y, trk=track):
+            if n_press != 1:
+                return
             self._show_track_context_menu(row, x, y, trk)
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
 
         gesture.connect("pressed", _on_right_click)
         row.add_controller(gesture)
@@ -573,15 +576,16 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         if self._get_playlists is not None:
             playlists = self._get_playlists()
 
+        _noop = lambda *_args: None
         callbacks = {
-            "on_play": lambda t=track: self._context_callbacks["on_play"](t),
-            "on_play_next": lambda t=track: self._context_callbacks["on_play_next"](t),
-            "on_add_to_queue": lambda t=track: self._context_callbacks["on_add_to_queue"](t),
-            "on_add_to_playlist": lambda pid, t=track: self._context_callbacks["on_add_to_playlist"](t, pid),
-            "on_new_playlist": lambda t=track: self._context_callbacks["on_new_playlist"](t),
-            "on_toggle_favorite": lambda t=track: self._context_callbacks["on_toggle_favorite"](t),
-            "on_go_to_album": lambda t=track: self._context_callbacks["on_go_to_album"](t),
-            "on_go_to_artist": lambda t=track: self._context_callbacks["on_go_to_artist"](t),
+            "on_play": lambda t=track: self._context_callbacks.get("on_play", _noop)(t),
+            "on_play_next": lambda t=track: self._context_callbacks.get("on_play_next", _noop)(t),
+            "on_add_to_queue": lambda t=track: self._context_callbacks.get("on_add_to_queue", _noop)(t),
+            "on_add_to_playlist": lambda pid, t=track: self._context_callbacks.get("on_add_to_playlist", _noop)(t, pid),
+            "on_new_playlist": lambda t=track: self._context_callbacks.get("on_new_playlist", _noop)(t),
+            "on_toggle_favorite": lambda t=track: self._context_callbacks.get("on_toggle_favorite", _noop)(t),
+            "on_go_to_album": lambda t=track: self._context_callbacks.get("on_go_to_album", _noop)(t),
+            "on_go_to_artist": lambda t=track: self._context_callbacks.get("on_go_to_artist", _noop)(t),
         }
 
         track_data = {

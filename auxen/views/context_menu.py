@@ -42,6 +42,8 @@ class _BaseContextMenu:
     def __init__(self) -> None:
         self._popover: Optional[Gtk.PopoverMenu] = None
         self._action_group: Optional[Gio.SimpleActionGroup] = None
+        self._popover_parent: Optional[Gtk.Widget] = None
+        self._popover_prefix: str = "ctx"
 
     def _show_popover(
         self,
@@ -54,6 +56,11 @@ class _BaseContextMenu:
     ) -> None:
         """Create and display a PopoverMenu at the click coordinates."""
         if self._popover is not None:
+            # Remove old action group before unparenting
+            if self._popover_parent is not None:
+                self._popover_parent.insert_action_group(
+                    self._popover_prefix, None
+                )
             self._popover.unparent()
             self._popover = None
 
@@ -66,6 +73,8 @@ class _BaseContextMenu:
         self._popover.set_pointing_to(rect)
 
         self._action_group = action_group
+        self._popover_parent = widget
+        self._popover_prefix = prefix
         widget.insert_action_group(prefix, self._action_group)
 
         self._popover.connect(
@@ -179,7 +188,7 @@ class TrackContextMenu(_BaseContextMenu):
 
         # Section 3: Navigation
         nav_section = Gio.Menu()
-        if self._track_data.get("album"):
+        if self._track_data.get("album") and self._track_data.get("artist"):
             nav_section.append("Go to Album", "ctx.go-to-album")
         if self._track_data.get("artist"):
             nav_section.append("Go to Artist", "ctx.go-to-artist")

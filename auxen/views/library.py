@@ -635,8 +635,11 @@ class LibraryView(Gtk.Box):
 
         gesture = Gtk.GestureClick(button=3)
 
-        def _on_right_click(_gesture, _n_press, x, y, trk=track):
+        def _on_right_click(g, n_press, x, y, trk=track):
+            if n_press != 1:
+                return
             self._show_track_context_menu(row, x, y, trk)
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
 
         gesture.connect("pressed", _on_right_click)
         row.add_controller(gesture)
@@ -652,15 +655,16 @@ class LibraryView(Gtk.Box):
         if self._get_playlists is not None:
             playlists = self._get_playlists()
 
+        _noop = lambda *_args: None
         callbacks = {
-            "on_play": lambda t=track: self._context_callbacks["on_play"](t),
-            "on_play_next": lambda t=track: self._context_callbacks["on_play_next"](t),
-            "on_add_to_queue": lambda t=track: self._context_callbacks["on_add_to_queue"](t),
-            "on_add_to_playlist": lambda pid, t=track: self._context_callbacks["on_add_to_playlist"](t, pid),
-            "on_new_playlist": lambda t=track: self._context_callbacks["on_new_playlist"](t),
-            "on_toggle_favorite": lambda t=track: self._context_callbacks["on_toggle_favorite"](t),
-            "on_go_to_album": lambda t=track: self._context_callbacks["on_go_to_album"](t),
-            "on_go_to_artist": lambda t=track: self._context_callbacks["on_go_to_artist"](t),
+            "on_play": lambda t=track: self._context_callbacks.get("on_play", _noop)(t),
+            "on_play_next": lambda t=track: self._context_callbacks.get("on_play_next", _noop)(t),
+            "on_add_to_queue": lambda t=track: self._context_callbacks.get("on_add_to_queue", _noop)(t),
+            "on_add_to_playlist": lambda pid, t=track: self._context_callbacks.get("on_add_to_playlist", _noop)(t, pid),
+            "on_new_playlist": lambda t=track: self._context_callbacks.get("on_new_playlist", _noop)(t),
+            "on_toggle_favorite": lambda t=track: self._context_callbacks.get("on_toggle_favorite", _noop)(t),
+            "on_go_to_album": lambda t=track: self._context_callbacks.get("on_go_to_album", _noop)(t),
+            "on_go_to_artist": lambda t=track: self._context_callbacks.get("on_go_to_artist", _noop)(t),
         }
 
         track_data = {
@@ -698,10 +702,13 @@ class LibraryView(Gtk.Box):
         gesture = Gtk.GestureClick(button=3)
 
         def _on_right_click(
-            _gesture, _n_press, x, y,
+            g, n_press, x, y,
             a=album_title, ar=album_artist
         ):
+            if n_press != 1:
+                return
             self._show_album_context_menu(child, x, y, a, ar)
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
 
         gesture.connect("pressed", _on_right_click)
         child.add_controller(gesture)
@@ -723,14 +730,15 @@ class LibraryView(Gtk.Box):
             playlists = self._get_album_playlists()
 
         cbs = self._album_context_callbacks
+        _noop = lambda *_args: None
         callbacks = {
-            "on_play_album": lambda a=album_name, ar=artist: cbs["on_play_album"](a, ar),
-            "on_play_album_next": lambda a=album_name, ar=artist: cbs["on_play_album_next"](a, ar),
-            "on_add_album_to_queue": lambda a=album_name, ar=artist: cbs["on_add_album_to_queue"](a, ar),
-            "on_add_to_playlist": lambda pid, a=album_name, ar=artist: cbs["on_add_to_playlist"](a, ar, pid),
-            "on_new_playlist": lambda a=album_name, ar=artist: cbs["on_new_playlist"](a, ar),
-            "on_add_to_favorites": lambda a=album_name, ar=artist: cbs["on_add_to_favorites"](a, ar),
-            "on_go_to_artist": lambda a=album_name, ar=artist: cbs["on_go_to_artist"](a, ar),
+            "on_play_album": lambda a=album_name, ar=artist: cbs.get("on_play_album", _noop)(a, ar),
+            "on_play_album_next": lambda a=album_name, ar=artist: cbs.get("on_play_album_next", _noop)(a, ar),
+            "on_add_album_to_queue": lambda a=album_name, ar=artist: cbs.get("on_add_album_to_queue", _noop)(a, ar),
+            "on_add_to_playlist": lambda pid, a=album_name, ar=artist: cbs.get("on_add_to_playlist", _noop)(a, ar, pid),
+            "on_new_playlist": lambda a=album_name, ar=artist: cbs.get("on_new_playlist", _noop)(a, ar),
+            "on_add_to_favorites": lambda a=album_name, ar=artist: cbs.get("on_add_to_favorites", _noop)(a, ar),
+            "on_go_to_artist": lambda a=album_name, ar=artist: cbs.get("on_go_to_artist", _noop)(a, ar),
         }
 
         album_data = {
@@ -763,9 +771,12 @@ class LibraryView(Gtk.Box):
         gesture = Gtk.GestureClick(button=3)
 
         def _on_right_click(
-            _gesture, _n_press, x, y, name=artist_name
+            g, n_press, x, y, name=artist_name
         ):
+            if n_press != 1:
+                return
             self._show_artist_context_menu(row, x, y, name)
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
 
         gesture.connect("pressed", _on_right_click)
         row.add_controller(gesture)
@@ -782,10 +793,11 @@ class LibraryView(Gtk.Box):
             return
 
         cbs = self._artist_context_callbacks
+        _noop = lambda *_args: None
         callbacks = {
-            "on_play_all": lambda name=artist_name: cbs["on_play_all"](name),
-            "on_add_all_to_queue": lambda name=artist_name: cbs["on_add_all_to_queue"](name),
-            "on_view_artist": lambda name=artist_name: cbs["on_view_artist"](name),
+            "on_play_all": lambda name=artist_name: cbs.get("on_play_all", _noop)(name),
+            "on_add_all_to_queue": lambda name=artist_name: cbs.get("on_add_all_to_queue", _noop)(name),
+            "on_view_artist": lambda name=artist_name: cbs.get("on_view_artist", _noop)(name),
         }
 
         artist_data = {"artist": artist_name}
