@@ -227,13 +227,16 @@ class AuxenApp(Adw.Application):
         style_manager = Adw.StyleManager.get_default()
         color_scheme = Adw.ColorScheme.FORCE_DARK
         if self.db is not None:
-            pref = self.db.get_setting("color_scheme", "dark")
-            scheme_map = {
-                "light": Adw.ColorScheme.FORCE_LIGHT,
-                "dark": Adw.ColorScheme.FORCE_DARK,
-                "system": Adw.ColorScheme.DEFAULT,
-            }
-            color_scheme = scheme_map.get(pref, Adw.ColorScheme.FORCE_DARK)
+            try:
+                pref = self.db.get_setting("color_scheme", "dark")
+                scheme_map = {
+                    "light": Adw.ColorScheme.FORCE_LIGHT,
+                    "dark": Adw.ColorScheme.FORCE_DARK,
+                    "system": Adw.ColorScheme.DEFAULT,
+                }
+                color_scheme = scheme_map.get(pref, Adw.ColorScheme.FORCE_DARK)
+            except Exception:
+                logger.warning("Failed to load color scheme preference", exc_info=True)
         style_manager.set_color_scheme(color_scheme)
 
         # --- Smart Playlist Service ---

@@ -396,6 +396,14 @@ class AuxenSettings(Adw.PreferencesWindow):
         if self._db is None:
             return
 
+        self._loading_settings = True
+        try:
+            self._load_settings_inner()
+        finally:
+            self._loading_settings = False
+
+    def _load_settings_inner(self) -> None:
+        """Internal settings loader (guarded by _loading_settings flag)."""
         try:
             # Load color scheme / theme preference
             scheme = self._db.get_setting("color_scheme", "dark")
@@ -526,6 +534,8 @@ class AuxenSettings(Adw.PreferencesWindow):
 
     def _on_theme_changed(self, row: Adw.ComboRow, _pspec) -> None:
         """Persist and apply the selected color scheme."""
+        if getattr(self, "_loading_settings", False):
+            return
         idx = row.get_selected()
         # 0 = Dark, 1 = Light, 2 = System
         scheme_names = {0: "dark", 1: "light", 2: "system"}
