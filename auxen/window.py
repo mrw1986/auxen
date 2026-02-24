@@ -65,6 +65,11 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._equalizer: Equalizer | None = None
         self._mini_player: MiniPlayerWindow | None = None
 
+        # Navigation history stack for back/forward mouse buttons
+        self._nav_history: list[str] = ["home"]
+        self._nav_index: int = 0
+        self._nav_programmatic: bool = False
+
         split_view = Adw.NavigationSplitView()
 
         self._smart_playlist_service = None
@@ -299,6 +304,25 @@ class AuxenWindow(Adw.ApplicationWindow):
             artist_context_callbacks
         )
 
+        # ---- Mouse back/forward button controller ----
+        mouse_click = Gtk.GestureClick.new()
+        mouse_click.set_button(0)  # Listen to ALL buttons
+        mouse_click.connect("pressed", self._on_mouse_button)
+        self.add_controller(mouse_click)
+
+        # ---- Keyboard shortcuts: Alt+Left/Right for back/forward ----
+        back_shortcut = Gtk.Shortcut.new(
+            Gtk.ShortcutTrigger.parse_string("<Alt>Left"),
+            Gtk.CallbackAction.new(lambda w, d: self._nav_back()),
+        )
+        self.add_shortcut(back_shortcut)
+
+        forward_shortcut = Gtk.Shortcut.new(
+            Gtk.ShortcutTrigger.parse_string("<Alt>Right"),
+            Gtk.CallbackAction.new(lambda w, d: self._nav_forward()),
+        )
+        self.add_shortcut(forward_shortcut)
+
         # Show home by default
         self._stack.set_visible_child_name("home")
 
@@ -420,6 +444,55 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._home_page.refresh(db)
         except Exception:
             logger.warning("Failed to refresh home page", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Navigation history
+    # ------------------------------------------------------------------
+
+    def _push_nav(self, page_name: str) -> None:
+        """Push a page onto the navigation history."""
+        if self._nav_programmatic:
+            return  # Don't push during back/forward navigation
+        # Don't push duplicates
+        if (
+            self._nav_history
+            and self._nav_history[self._nav_index] == page_name
+        ):
+            return
+        # Trim forward history
+        self._nav_history = self._nav_history[: self._nav_index + 1]
+        self._nav_history.append(page_name)
+        self._nav_index = len(self._nav_history) - 1
+
+    def _on_mouse_button(self, gesture, n_press, x, y) -> None:
+        """Handle mouse back/forward buttons for navigation."""
+        if n_press != 1:
+            return
+        button = gesture.get_current_button()
+        if button == 8:  # Back button
+            self._nav_back()
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        elif button == 9:  # Forward button
+            self._nav_forward()
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+
+    def _nav_back(self) -> None:
+        """Navigate back in the history stack."""
+        if self._nav_index > 0:
+            self._nav_index -= 1
+            page = self._nav_history[self._nav_index]
+            self._nav_programmatic = True
+            self._stack.set_visible_child_name(page)
+            self._nav_programmatic = False
+
+    def _nav_forward(self) -> None:
+        """Navigate forward in the history stack."""
+        if self._nav_index < len(self._nav_history) - 1:
+            self._nav_index += 1
+            page = self._nav_history[self._nav_index]
+            self._nav_programmatic = True
+            self._stack.set_visible_child_name(page)
+            self._nav_programmatic = False
 
     # ------------------------------------------------------------------
     # Player signal handlers
@@ -596,6 +669,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             )
 
         self._stack.set_visible_child_name("album-detail")
+        self._push_nav("album-detail")
 
     def _on_album_play_track(self, track) -> None:
         """Play a single track from the album detail view."""
@@ -620,7 +694,7 @@ class AuxenWindow(Adw.ApplicationWindow):
 
     def _on_album_back(self) -> None:
         """Navigate back from the album detail view."""
-        self._stack.set_visible_child_name(self._previous_page)
+        self._nav_back()
 
     # ------------------------------------------------------------------
     # Clickable name navigation helpers
@@ -668,6 +742,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             source=source,
         )
         self._stack.set_visible_child_name("artist-detail")
+        self._push_nav("artist-detail")
 
     def _on_artist_play_track(self, track) -> None:
         """Play a single track from the artist detail view."""
@@ -687,7 +762,7 @@ class AuxenWindow(Adw.ApplicationWindow):
 
     def _on_artist_back(self) -> None:
         """Navigate back from the artist detail view."""
-        self._stack.set_visible_child_name(self._previous_page)
+        self._nav_back()
 
     # ------------------------------------------------------------------
     # Explore page callbacks
@@ -901,6 +976,7 @@ class AuxenWindow(Adw.ApplicationWindow):
                 playlist_id, self._app_ref.db
             )
         self._stack.set_visible_child_name("playlist-detail")
+        self._push_nav("playlist-detail")
 
     def _on_playlist_play_track(self, track) -> None:
         """Play a single track from the playlist detail view."""
@@ -926,7 +1002,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         # Refresh sidebar playlists in case anything changed
         if self._app_ref and self._app_ref.db is not None:
             self._sidebar.refresh_playlists()
-        self._stack.set_visible_child_name(self._previous_page)
+        self._nav_back()
 
     # ------------------------------------------------------------------
     # Smart playlist detail navigation
@@ -957,6 +1033,7 @@ class AuxenWindow(Adw.ApplicationWindow):
                     exc_info=True,
                 )
         self._stack.set_visible_child_name("smart-playlist-detail")
+        self._push_nav("smart-playlist-detail")
 
     def _on_smart_playlist_play_track(self, track) -> None:
         """Play a single track from the smart playlist view."""
@@ -979,7 +1056,7 @@ class AuxenWindow(Adw.ApplicationWindow):
 
     def _on_smart_playlist_back(self) -> None:
         """Navigate back from the smart playlist detail view."""
-        self._stack.set_visible_child_name(self._previous_page)
+        self._nav_back()
 
     def _on_smart_playlist_refresh(self, smart_id: str) -> None:
         """Re-generate the smart playlist tracks and redisplay."""
@@ -1131,6 +1208,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         child = self._stack.get_child_by_name(page_name)
         if child:
             self._stack.set_visible_child_name(page_name)
+            self._push_nav(page_name)
 
         # Refresh library when switching to that page
         if page_name == "library" and self._app_ref and self._app_ref.db:
