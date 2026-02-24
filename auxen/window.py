@@ -600,6 +600,10 @@ class AuxenWindow(Adw.ApplicationWindow):
                 # callback if the playlist was deleted.
                 if db.get_playlist(playlist_id) is not None:
                     self._playlist_view.show_playlist(playlist_id, db)
+                else:
+                    # Playlist was deleted — fall back to library.
+                    self._stack.set_visible_child_name("library")
+                    self._refresh_page("library")
             except (ValueError, TypeError):
                 pass
 

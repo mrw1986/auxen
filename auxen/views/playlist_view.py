@@ -959,6 +959,9 @@ class PlaylistView(Gtk.ScrolledWindow):
             safe_name = re.sub(
                 r'[<>:"/\\|?*\x00-\x1f]', "_", self._playlist_data["name"]
             ).strip(". ")
+            # Strip existing M3U extension to prevent double-extension.
+            safe_name = re.sub(r"\.m3u8?$", "", safe_name, flags=re.I)
+            safe_name = safe_name or "playlist"
             dialog.set_initial_name(f"{safe_name}.m3u")
 
             # Add M3U file filter — both set_filters and
