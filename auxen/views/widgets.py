@@ -33,9 +33,11 @@ def make_tidal_source_badge(
 
     icon = Gtk.Image.new_from_icon_name("tidal-symbolic")
     icon.set_pixel_size(icon_size)
+    icon.set_valign(Gtk.Align.CENTER)
     box.append(icon)
 
     label = Gtk.Label(label=label_text)
+    label.set_valign(Gtk.Align.CENTER)
     box.append(label)
 
     return box

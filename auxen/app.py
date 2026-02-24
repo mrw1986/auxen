@@ -438,6 +438,7 @@ class AuxenApp(Adw.Application):
     # ------------------------------------------------------------------
 
     def do_activate(self) -> None:
+        self._ensure_icon_theme()
         win = self.get_active_window()
         if not win:
             win = AuxenWindow(application=self)
@@ -453,6 +454,19 @@ class AuxenApp(Adw.Application):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _ensure_icon_theme(self) -> None:
+        """Ensure custom icon search path is registered (fallback for do_activate)."""
+        display = Gdk.Display.get_default()
+        if display is None:
+            return
+        icon_theme = Gtk.IconTheme.get_for_display(display)
+        icon_dir = str(
+            Path(__file__).resolve().parent.parent / "data" / "icons"
+        )
+        paths = icon_theme.get_search_path() or []
+        if icon_dir not in paths:
+            icon_theme.add_search_path(icon_dir)
 
     def _get_music_dirs(self) -> list[str]:
         """Read music directories from the database, with a sensible default."""
