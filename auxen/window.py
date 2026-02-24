@@ -550,7 +550,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         db = self._app_ref.db if self._app_ref else None
 
         if page == "album-detail" and db is not None:
-            parts = detail_key.split("|", 1)
+            parts = detail_key.split("\x00", 1)
             album_name = parts[0]
             artist = parts[1] if len(parts) > 1 else ""
             if album_name:
@@ -837,7 +837,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             )
 
         self._stack.set_visible_child_name("album-detail")
-        self._push_nav("album-detail", f"{album_name}|{artist}")
+        self._push_nav("album-detail", f"{album_name}\x00{artist}")
 
     def _on_album_play_track(self, track) -> None:
         """Play a single track from the album detail view."""
@@ -1382,23 +1382,21 @@ class AuxenWindow(Adw.ApplicationWindow):
 
     def _refresh_page(self, page_name: str) -> None:
         """Refresh the data for *page_name* if it has a refresh method."""
+        db = self._app_ref.db if self._app_ref else None
         refresh_map = {
+            "home": lambda: (
+                self._home_page.refresh(db) if db is not None else None
+            ),
             "library": lambda: (
-                self._library_view.refresh()
-                if self._app_ref and self._app_ref.db
-                else None
+                self._library_view.refresh() if db is not None else None
             ),
             "favorites": lambda: (
-                self._favorites_view.refresh()
-                if self._app_ref and self._app_ref.db
-                else None
+                self._favorites_view.refresh() if db is not None else None
             ),
             "explore": lambda: self._explore_view.refresh(),
             "mixes": lambda: self._mixes_view.refresh(),
             "stats": lambda: (
-                self._stats_view.refresh()
-                if self._app_ref and self._app_ref.db
-                else None
+                self._stats_view.refresh() if db is not None else None
             ),
         }
         refresher = refresh_map.get(page_name)

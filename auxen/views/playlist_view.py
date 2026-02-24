@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 from typing import Callable, Optional
 
@@ -985,16 +986,27 @@ class PlaylistView(Gtk.ScrolledWindow):
                     break
                 parent = parent.get_parent()
 
+            # Capture current state before async dialog to avoid race
+            # if the user switches playlists while the dialog is open.
+            tracks_snapshot = list(self._tracks)
+            db_ref = self._db
+
             dialog.save(
                 parent,
                 None,
-                self._on_export_save_response,
+                functools.partial(
+                    self._on_export_save_response,
+                    tracks_snapshot=tracks_snapshot,
+                    db_ref=db_ref,
+                ),
             )
         except Exception:
             logger.warning("Failed to open export dialog", exc_info=True)
             self._show_toast("Failed to open export dialog", timeout=5)
 
-    def _on_export_save_response(self, dialog, result) -> None:
+    def _on_export_save_response(
+        self, dialog, result, *, tracks_snapshot, db_ref
+    ) -> None:
         """Handle the file dialog save result for M3U export."""
         try:
             dest = dialog.save_finish(result)
@@ -1013,7 +1025,7 @@ class PlaylistView(Gtk.ScrolledWindow):
 
                 svc = M3UService()
                 svc.export_playlist(
-                    self._tracks, filepath, db=self._db
+                    tracks_snapshot, filepath, db=db_ref
                 )
                 logger.info("Exported playlist to %s", filepath)
                 self._show_toast("Playlist exported successfully")

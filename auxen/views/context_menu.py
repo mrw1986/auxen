@@ -86,16 +86,18 @@ class _BaseContextMenu:
         self, popover, widget: Gtk.Widget, prefix: str
     ) -> None:
         """Clean up the action group and popover when the menu closes."""
-        widget.insert_action_group(prefix, None)
+        # Only remove the action group if this closing popover is still
+        # the active one; otherwise a newer popover owns the group.
+        if popover is self._popover:
+            widget.insert_action_group(prefix, None)
         GLib.idle_add(self._cleanup_popover, popover)
 
     def _cleanup_popover(self, popover: Gtk.PopoverMenu) -> bool:
-        """Unparent the popover on idle (only if it is still the current one)."""
+        """Unparent the popover on idle (only if it still has a parent)."""
         if popover is self._popover:
             self._popover.unparent()
             self._popover = None
-        elif popover is not None:
-            # A newer popover replaced this one — still unparent the old.
+        elif popover is not None and popover.get_parent() is not None:
             popover.unparent()
         return GLib.SOURCE_REMOVE
 
