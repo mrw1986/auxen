@@ -228,6 +228,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._now_playing = NowPlayingBar(
             on_lyrics_toggle=self._on_lyrics_toggle,
             on_queue_toggle=self._on_queue_toggle,
+            on_favorite=self._on_now_playing_favorite_toggled,
         )
         self._now_playing.on_artist_clicked = self._navigate_to_artist
         self._now_playing.on_album_clicked = self._navigate_to_album
@@ -522,6 +523,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._current_track = None
             self._now_playing.update_track(title="", artist="", album="")
             self._now_playing.set_album_art(None)
+            self._now_playing.set_favorite_active(False)
             self._album_detail.set_current_track(None)
             if self._mini_player is not None:
                 self._mini_player.update_track(title="", artist="")
@@ -553,6 +555,18 @@ class AuxenWindow(Adw.ApplicationWindow):
                 width=art_48,
                 height=art_48,
             )
+            # Update the favorite button state for the new track
+            if self._app_ref and self._app_ref.db is not None and track.id is not None:
+                try:
+                    is_fav = self._app_ref.db.is_favorite(track.id)
+                    self._now_playing.set_favorite_active(is_fav)
+                except Exception:
+                    logger.warning(
+                        "Failed to check favorite state for track",
+                        exc_info=True,
+                    )
+            else:
+                self._now_playing.set_favorite_active(False)
             # Highlight the current track in album detail if visible
             self._album_detail.set_current_track(track.id)
             # Update lyrics panel if it is visible
@@ -612,6 +626,53 @@ class AuxenWindow(Adw.ApplicationWindow):
             and self._mini_player.get_visible()
         ):
             self._mini_player.set_playing(state == "playing")
+
+    def _on_now_playing_favorite_toggled(self, is_favorite: bool) -> None:
+        """Handle favorite toggle from the now-playing bar heart button."""
+        track = self._current_track
+        if track is None or track.id is None:
+            return
+        if self._app_ref is None or self._app_ref.db is None:
+            return
+
+        try:
+            self._app_ref.db.set_favorite(track.id, is_favorite)
+
+            # Sync to Tidal in a background thread if applicable
+            if (
+                getattr(track, "is_tidal", False)
+                and self._app_ref.tidal_provider is not None
+            ):
+                import threading
+
+                tidal = self._app_ref.tidal_provider
+                sid = track.source_id
+
+                def _sync_tidal():
+                    try:
+                        if is_favorite:
+                            tidal.add_favorite(sid)
+                        else:
+                            tidal.remove_favorite(sid)
+                    except Exception:
+                        logger.warning(
+                            "Failed to sync favorite to Tidal",
+                            exc_info=True,
+                        )
+
+                threading.Thread(
+                    target=_sync_tidal, daemon=True
+                ).start()
+
+            # Refresh the favorites view if it is currently visible
+            visible = self._stack.get_visible_child_name()
+            if visible == "favorites":
+                self._favorites_view.refresh()
+        except Exception:
+            logger.warning(
+                "Failed to toggle favorite from now-playing bar",
+                exc_info=True,
+            )
 
     def _on_spectrum_data(self, _player, levels) -> None:
         """Forward spectrum data to the now-playing visualizer."""
@@ -1502,7 +1563,20 @@ class AuxenWindow(Adw.ApplicationWindow):
             try:
                 if track.id is not None:
                     is_fav = self._app_ref.db.is_favorite(track.id)
-                    self._app_ref.db.set_favorite(track.id, not is_fav)
+                    new_state = not is_fav
+                    self._app_ref.db.set_favorite(track.id, new_state)
+
+                    # Update the now-playing bar heart if this is the current track
+                    if (
+                        self._current_track is not None
+                        and self._current_track.id == track.id
+                    ):
+                        self._now_playing.set_favorite_active(new_state)
+
+                    # Refresh the favorites view if visible
+                    visible = self._stack.get_visible_child_name()
+                    if visible == "favorites":
+                        self._favorites_view.refresh()
 
                     # Sync the toggle to Tidal in a background thread
                     if (
@@ -1648,6 +1722,19 @@ class AuxenWindow(Adw.ApplicationWindow):
                             self._app_ref.db.set_favorite(
                                 track.id, True
                             )
+                # Update now-playing heart if current track is in this album
+                if (
+                    self._current_track is not None
+                    and self._current_track.id is not None
+                ):
+                    is_fav = self._app_ref.db.is_favorite(
+                        self._current_track.id
+                    )
+                    self._now_playing.set_favorite_active(is_fav)
+                # Refresh favorites view if visible
+                visible = self._stack.get_visible_child_name()
+                if visible == "favorites":
+                    self._favorites_view.refresh()
             except Exception:
                 logger.warning(
                     "Failed to add album to favorites", exc_info=True

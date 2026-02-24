@@ -37,6 +37,7 @@ class NowPlayingBar(Gtk.Box):
         on_repeat: Callable[[bool], None] | None = None,
         on_lyrics_toggle: Callable[[bool], None] | None = None,
         on_queue_toggle: Callable[[bool], None] | None = None,
+        on_favorite: Callable[[bool], None] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(
@@ -51,6 +52,7 @@ class NowPlayingBar(Gtk.Box):
         self._on_repeat = on_repeat
         self._on_lyrics_toggle = on_lyrics_toggle
         self._on_queue_toggle = on_queue_toggle
+        self._on_favorite = on_favorite
 
         self._is_playing = False
         self._shuffle_active = False
@@ -522,9 +524,9 @@ class NowPlayingBar(Gtk.Box):
             btn.add_css_class("active")
         else:
             btn.remove_css_class("active")
-        print(  # noqa: T201
-            f"[NowPlaying] favorite -> {self._favorite_active}"
-        )
+
+        if self._on_favorite:
+            self._on_favorite(self._favorite_active)
 
     def _on_lyrics_toggled(self, btn: Gtk.ToggleButton) -> None:
         self._lyrics_active = btn.get_active()
@@ -539,6 +541,17 @@ class NowPlayingBar(Gtk.Box):
             print(  # noqa: T201
                 f"[NowPlaying] lyrics -> {self._lyrics_active}"
             )
+
+    def set_favorite_active(self, active: bool) -> None:
+        """Programmatically set the favorite toggle state without triggering callback."""
+        self._favorite_active = active
+        self._fav_btn.handler_block_by_func(self._on_favorite_toggled)
+        self._fav_btn.set_active(active)
+        if active:
+            self._fav_btn.add_css_class("active")
+        else:
+            self._fav_btn.remove_css_class("active")
+        self._fav_btn.handler_unblock_by_func(self._on_favorite_toggled)
 
     def set_lyrics_active(self, active: bool) -> None:
         """Programmatically set the lyrics toggle state without triggering callback."""

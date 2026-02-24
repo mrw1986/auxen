@@ -180,6 +180,41 @@ class TestFavorites:
         fav_titles = {f.title for f in favs}
         assert fav_titles == {"Fav1", "Fav2"}
 
+    def test_favorite_full_lifecycle(self, db: Database) -> None:
+        """Add a track to favorites, verify it appears, remove it, verify it's gone."""
+        track_id = db.insert_track(
+            _make_track(title="Lifecycle Track", source_id="lifecycle-1")
+        )
+
+        # Initially not a favorite and not in get_favorites
+        assert db.is_favorite(track_id) is False
+        assert all(f.id != track_id for f in db.get_favorites())
+
+        # Add to favorites
+        db.set_favorite(track_id, True)
+        assert db.is_favorite(track_id) is True
+        favs = db.get_favorites()
+        assert any(f.id == track_id and f.title == "Lifecycle Track" for f in favs)
+
+        # Remove from favorites
+        db.set_favorite(track_id, False)
+        assert db.is_favorite(track_id) is False
+        assert all(f.id != track_id for f in db.get_favorites())
+
+    def test_get_favorites_empty_db(self, db: Database) -> None:
+        """get_favorites returns an empty list when no tracks are favorited."""
+        assert db.get_favorites() == []
+
+    def test_set_favorite_idempotent(self, db: Database) -> None:
+        """Setting a track as favorite twice does not cause errors."""
+        track_id = db.insert_track(
+            _make_track(title="Idempotent", source_id="idem-1")
+        )
+        db.set_favorite(track_id, True)
+        db.set_favorite(track_id, True)  # Should not raise
+        assert db.is_favorite(track_id) is True
+        assert len([f for f in db.get_favorites() if f.id == track_id]) == 1
+
 
 class TestSearchTracks:
     def test_search_by_title(self, db: Database) -> None:

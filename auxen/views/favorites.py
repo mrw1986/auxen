@@ -16,82 +16,6 @@ from auxen.views.widgets import make_tidal_source_badge
 
 logger = logging.getLogger(__name__)
 
-# Placeholder favorite tracks: (title, artist, album, source, quality, duration, date_added_sort_key)
-_SAMPLE_FAVORITES: list[dict[str, str | int]] = [
-    {
-        "title": "Teardrop",
-        "artist": "Massive Attack",
-        "album": "Mezzanine",
-        "source": "tidal",
-        "quality": "Hi-Res",
-        "duration": "5:29",
-        "date_added": 8,
-    },
-    {
-        "title": "Glory Box",
-        "artist": "Portishead",
-        "album": "Dummy",
-        "source": "local",
-        "quality": "FLAC",
-        "duration": "5:01",
-        "date_added": 7,
-    },
-    {
-        "title": "Xtal",
-        "artist": "Aphex Twin",
-        "album": "Selected Ambient Works 85-92",
-        "source": "tidal",
-        "quality": "Hi-Res",
-        "duration": "4:54",
-        "date_added": 6,
-    },
-    {
-        "title": "Hunter",
-        "artist": "Bjork",
-        "album": "Homogenic",
-        "source": "local",
-        "quality": "MP3",
-        "duration": "4:12",
-        "date_added": 5,
-    },
-    {
-        "title": "Closer",
-        "artist": "Nine Inch Nails",
-        "album": "The Downward Spiral",
-        "source": "tidal",
-        "quality": "FLAC",
-        "duration": "6:13",
-        "date_added": 4,
-    },
-    {
-        "title": "Lovesong",
-        "artist": "The Cure",
-        "album": "Disintegration",
-        "source": "local",
-        "quality": "FLAC",
-        "duration": "3:29",
-        "date_added": 3,
-    },
-    {
-        "title": "Everything In Its Right Place",
-        "artist": "Radiohead",
-        "album": "Kid A",
-        "source": "tidal",
-        "quality": "Hi-Res",
-        "duration": "4:11",
-        "date_added": 2,
-    },
-    {
-        "title": "Roygbiv",
-        "artist": "Boards of Canada",
-        "album": "Music Has the Right to Children",
-        "source": "local",
-        "quality": "MP3",
-        "duration": "2:32",
-        "date_added": 1,
-    },
-]
-
 # Sort key functions keyed by dropdown label.
 _SORT_KEYS: dict[str, str] = {
     "Date Added": "date_added",
@@ -252,9 +176,7 @@ class FavoritesView(Gtk.ScrolledWindow):
 
         self._db = None
         self._tidal_provider = None
-        self._all_favorites: list[dict[str, str | int]] = list(
-            _SAMPLE_FAVORITES
-        )
+        self._all_favorites: list[dict[str, str | int]] = []
         self._active_filter: str = "All"
         self._active_sort: str = "Date Added"
 
@@ -497,23 +419,21 @@ class FavoritesView(Gtk.ScrolledWindow):
 
         try:
             tracks = self._db.get_favorites()
-            if tracks:
-                self._all_favorites = []
-                self._track_objects = {}
-                for track in tracks:
-                    self._all_favorites.append({
-                        "title": track.title,
-                        "artist": track.artist,
-                        "album": track.album or "",
-                        "source": track.source.value,
-                        "quality": track.quality_label,
-                        "duration": _format_duration(track.duration),
-                        "date_added": track.added_at or "",
-                        "track_id": track.id,
-                    })
-                    if track.id is not None:
-                        self._track_objects[track.id] = track
-            # If tracks is empty, keep existing placeholder data
+            self._all_favorites = []
+            self._track_objects = {}
+            for track in tracks:
+                self._all_favorites.append({
+                    "title": track.title,
+                    "artist": track.artist,
+                    "album": track.album or "",
+                    "source": track.source.value,
+                    "quality": track.quality_label,
+                    "duration": _format_duration(track.duration),
+                    "date_added": track.added_at or "",
+                    "track_id": track.id,
+                })
+                if track.id is not None:
+                    self._track_objects[track.id] = track
         except Exception:
             logger.warning("Failed to load favorites from database", exc_info=True)
 
