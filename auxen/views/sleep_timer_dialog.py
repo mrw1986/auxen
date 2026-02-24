@@ -187,7 +187,7 @@ class SleepTimerDialog(Adw.Window):
         self.set_content(toolbar_view)
 
         # Sync display if timer is already running.
-        self._sync_active_state()
+        self.sync_active_state()
 
     # ------------------------------------------------------------------
     # Public API for external tick updates
@@ -202,7 +202,7 @@ class SleepTimerDialog(Adw.Window):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _sync_active_state(self) -> None:
+    def sync_active_state(self) -> None:
         """Sync visibility based on whether the timer is active."""
         active = self._timer.is_active
         self._countdown_label.set_visible(active)
@@ -216,7 +216,7 @@ class SleepTimerDialog(Adw.Window):
     def _start_timer(self, minutes: int) -> None:
         """Start the timer and update the UI."""
         self._timer.start(minutes)
-        self._sync_active_state()
+        self.sync_active_state()
 
     # ------------------------------------------------------------------
     # Signal handlers
@@ -239,8 +239,8 @@ class SleepTimerDialog(Adw.Window):
 
     def _on_end_of_track(self, _btn: Gtk.Button) -> None:
         self._timer.start_end_of_track()
-        self._sync_active_state()
+        self.sync_active_state()
 
     def _on_cancel(self, _btn: Gtk.Button) -> None:
         self._timer.cancel()
-        self._sync_active_state()
+        self.sync_active_state()

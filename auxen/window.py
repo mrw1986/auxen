@@ -391,6 +391,13 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._current_track = None
             self._now_playing.update_track(title="", artist="", album="")
             self._now_playing.set_album_art(None)
+            self._album_detail.set_current_track(None)
+            if (
+                self._mini_player is not None
+                and self._mini_player.get_visible()
+            ):
+                self._mini_player.update_track(title="", artist="")
+                self._mini_player.set_album_art(None)
             return
         if track is not None:
             self._current_track = track
@@ -1259,7 +1266,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             try:
                 dialog.update_countdown(remaining_seconds)
                 if remaining_seconds <= 0:
-                    dialog._sync_active_state()
+                    dialog.sync_active_state()
             except Exception:
                 pass
 
