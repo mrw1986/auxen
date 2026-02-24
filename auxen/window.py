@@ -149,8 +149,8 @@ class AuxenWindow(Adw.ApplicationWindow):
             on_play_track=self._on_album_play_track,
             on_play_all=self._on_album_play_all,
             on_back=self._on_album_back,
+            on_artist_navigate=self._navigate_to_artist,
         )
-        self._album_detail._on_artist_navigate = self._navigate_to_artist
         self._stack.add_named(self._album_detail, "album-detail")
 
         # ---- Artist Detail Page (programmatic navigation only) ----

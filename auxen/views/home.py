@@ -585,10 +585,16 @@ class HomePage(Gtk.ScrolledWindow):
             return
 
         gesture = Gtk.GestureClick.new()
+        gesture.set_button(1)  # primary button only
 
         def _on_artist_clicked(
-            _gesture, _n_press, _x, _y, artist=album_artist
+            g, n_press, _x, _y, artist=album_artist
         ):
+            if n_press != 1:
+                return
+            # Claim the gesture so the FlowBox child-activated signal
+            # doesn't also fire (prevents double-navigation).
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
             if self._on_artist_clicked is not None:
                 self._on_artist_clicked(artist)
 

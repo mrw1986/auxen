@@ -169,6 +169,7 @@ class AlbumDetailView(Gtk.ScrolledWindow):
         self._artist_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
 
         artist_click = Gtk.GestureClick.new()
+        artist_click.set_button(1)
         artist_click.connect("released", self._on_artist_label_clicked)
         self._artist_label.add_controller(artist_click)
 
@@ -242,11 +243,13 @@ class AlbumDetailView(Gtk.ScrolledWindow):
         on_play_track: Callable[[Track], None] | None = None,
         on_play_all: Callable[[list[Track]], None] | None = None,
         on_back: Callable[[], None] | None = None,
+        on_artist_navigate: Callable[[str], None] | None = None,
     ) -> None:
         """Set callback functions for user actions."""
         self._on_play_track = on_play_track
         self._on_play_all = on_play_all
         self._on_back = on_back
+        self._on_artist_navigate = on_artist_navigate
 
     def show_album(
         self,
@@ -421,11 +424,13 @@ class AlbumDetailView(Gtk.ScrolledWindow):
     def _on_artist_label_clicked(
         self,
         _gesture: Gtk.GestureClick,
-        _n_press: int,
+        n_press: int,
         _x: float,
         _y: float,
     ) -> None:
-        """Handle click on the artist label — navigate to artist detail."""
+        """Handle single click on the artist label — navigate to artist detail."""
+        if n_press != 1:
+            return
         if self._on_artist_navigate is not None and self._current_artist:
             self._on_artist_navigate(self._current_artist)
 

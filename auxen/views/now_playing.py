@@ -140,6 +140,7 @@ class NowPlayingBar(Gtk.Box):
         self._title_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
 
         title_click = Gtk.GestureClick.new()
+        title_click.set_button(1)
         title_click.connect("released", self._on_title_label_clicked)
         self._title_label.add_controller(title_click)
 
@@ -154,6 +155,7 @@ class NowPlayingBar(Gtk.Box):
         self._artist_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
 
         artist_click = Gtk.GestureClick.new()
+        artist_click.set_button(1)
         artist_click.connect("released", self._on_artist_label_clicked)
         self._artist_label.add_controller(artist_click)
 
@@ -437,22 +439,26 @@ class NowPlayingBar(Gtk.Box):
     def _on_artist_label_clicked(
         self,
         _gesture: Gtk.GestureClick,
-        _n_press: int,
+        n_press: int,
         _x: float,
         _y: float,
     ) -> None:
-        """Handle click on the artist label — navigate to artist detail."""
+        """Handle single click on the artist label — navigate to artist detail."""
+        if n_press != 1:
+            return
         if self.on_artist_clicked is not None and self._current_artist:
             self.on_artist_clicked(self._current_artist)
 
     def _on_title_label_clicked(
         self,
         _gesture: Gtk.GestureClick,
-        _n_press: int,
+        n_press: int,
         _x: float,
         _y: float,
     ) -> None:
-        """Handle click on the title label — navigate to album detail."""
+        """Handle single click on the title label — navigate to album detail."""
+        if n_press != 1:
+            return
         if (
             self.on_album_clicked is not None
             and self._current_album
