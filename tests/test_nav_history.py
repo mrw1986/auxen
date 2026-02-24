@@ -43,42 +43,54 @@ class NavHost:
         self._nav_index: int = 0
         self._nav_programmatic: bool = False
 
-    # ---- Core nav methods (copied from window.py logic) ----
+    # ---- Core nav methods (mirrors window.py logic) ----
 
-    def _push_nav(self, page_name: str) -> None:
+    def _push_nav(self, page_name: str, detail_key: str = "") -> None:
         if self._nav_programmatic:
             return
+        entry = f"{page_name}:{detail_key}" if detail_key else page_name
         if (
             self._nav_history
-            and self._nav_history[self._nav_index] == page_name
+            and self._nav_history[self._nav_index] == entry
         ):
             return
         self._nav_history = self._nav_history[: self._nav_index + 1]
-        self._nav_history.append(page_name)
+        self._nav_history.append(entry)
         self._nav_index = len(self._nav_history) - 1
 
-    def _nav_back(self) -> None:
+    def _nav_back(self) -> bool:
         if self._nav_index > 0:
             self._nav_index -= 1
-            page = self._nav_history[self._nav_index]
+            entry = self._nav_history[self._nav_index]
+            page = entry.split(":")[0]
             self._nav_programmatic = True
-            self._stack.set_visible_child_name(page)
-            self._nav_programmatic = False
+            try:
+                self._stack.set_visible_child_name(page)
+            finally:
+                self._nav_programmatic = False
+            return True
+        return False
 
-    def _nav_forward(self) -> None:
+    def _nav_forward(self) -> bool:
         if self._nav_index < len(self._nav_history) - 1:
             self._nav_index += 1
-            page = self._nav_history[self._nav_index]
+            entry = self._nav_history[self._nav_index]
+            page = entry.split(":")[0]
             self._nav_programmatic = True
-            self._stack.set_visible_child_name(page)
-            self._nav_programmatic = False
+            try:
+                self._stack.set_visible_child_name(page)
+            finally:
+                self._nav_programmatic = False
+            return True
+        return False
 
     # ---- Helpers to simulate user navigation ----
 
-    def navigate_to(self, page_name: str) -> None:
+    def navigate_to(self, page_name: str, detail_key: str = "") -> None:
         """Simulate a sidebar click or similar navigation."""
-        self._stack.set_visible_child_name(page_name)
-        self._push_nav(page_name)
+        page = page_name.split(":")[0] if ":" in page_name else page_name
+        self._stack.set_visible_child_name(page)
+        self._push_nav(page_name, detail_key)
 
 
 @pytest.fixture

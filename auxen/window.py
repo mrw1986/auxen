@@ -65,7 +65,10 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._equalizer: Equalizer | None = None
         self._mini_player: MiniPlayerWindow | None = None
 
-        # Navigation history stack for back/forward mouse buttons
+        # Navigation history stack for back/forward mouse buttons.
+        # Each entry is a page name string. Detail pages include a suffix
+        # (e.g. "album-detail:AlbumName|Artist") to distinguish different
+        # entities on the same view type.
         self._nav_history: list[str] = ["home"]
         self._nav_index: int = 0
         self._nav_programmatic: bool = False
@@ -313,13 +316,13 @@ class AuxenWindow(Adw.ApplicationWindow):
         # ---- Keyboard shortcuts: Alt+Left/Right for back/forward ----
         back_shortcut = Gtk.Shortcut.new(
             Gtk.ShortcutTrigger.parse_string("<Alt>Left"),
-            Gtk.CallbackAction.new(lambda w, d: self._nav_back()),
+            Gtk.CallbackAction.new(lambda _w, _d: self._nav_back()),
         )
         self.add_shortcut(back_shortcut)
 
         forward_shortcut = Gtk.Shortcut.new(
             Gtk.ShortcutTrigger.parse_string("<Alt>Right"),
-            Gtk.CallbackAction.new(lambda w, d: self._nav_forward()),
+            Gtk.CallbackAction.new(lambda _w, _d: self._nav_forward()),
         )
         self.add_shortcut(forward_shortcut)
 
@@ -449,19 +452,24 @@ class AuxenWindow(Adw.ApplicationWindow):
     # Navigation history
     # ------------------------------------------------------------------
 
-    def _push_nav(self, page_name: str) -> None:
-        """Push a page onto the navigation history."""
+    def _push_nav(self, page_name: str, detail_key: str = "") -> None:
+        """Push a page onto the navigation history.
+
+        *detail_key* distinguishes different entities on the same view type
+        (e.g. different album names on the album-detail page).
+        """
         if self._nav_programmatic:
             return  # Don't push during back/forward navigation
+        entry = f"{page_name}:{detail_key}" if detail_key else page_name
         # Don't push duplicates
         if (
             self._nav_history
-            and self._nav_history[self._nav_index] == page_name
+            and self._nav_history[self._nav_index] == entry
         ):
             return
         # Trim forward history
         self._nav_history = self._nav_history[: self._nav_index + 1]
-        self._nav_history.append(page_name)
+        self._nav_history.append(entry)
         self._nav_index = len(self._nav_history) - 1
 
     def _on_mouse_button(self, gesture, n_press, x, y) -> None:
@@ -470,29 +478,39 @@ class AuxenWindow(Adw.ApplicationWindow):
             return
         button = gesture.get_current_button()
         if button == 8:  # Back button
-            self._nav_back()
-            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            if self._nav_back():
+                gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         elif button == 9:  # Forward button
-            self._nav_forward()
-            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            if self._nav_forward():
+                gesture.set_state(Gtk.EventSequenceState.CLAIMED)
 
-    def _nav_back(self) -> None:
-        """Navigate back in the history stack."""
+    def _nav_back(self) -> bool:
+        """Navigate back in the history stack. Returns True if navigated."""
         if self._nav_index > 0:
             self._nav_index -= 1
-            page = self._nav_history[self._nav_index]
+            entry = self._nav_history[self._nav_index]
+            page = entry.split(":")[0]
             self._nav_programmatic = True
-            self._stack.set_visible_child_name(page)
-            self._nav_programmatic = False
+            try:
+                self._stack.set_visible_child_name(page)
+            finally:
+                self._nav_programmatic = False
+            return True
+        return False
 
-    def _nav_forward(self) -> None:
-        """Navigate forward in the history stack."""
+    def _nav_forward(self) -> bool:
+        """Navigate forward in the history stack. Returns True if navigated."""
         if self._nav_index < len(self._nav_history) - 1:
             self._nav_index += 1
-            page = self._nav_history[self._nav_index]
+            entry = self._nav_history[self._nav_index]
+            page = entry.split(":")[0]
             self._nav_programmatic = True
-            self._stack.set_visible_child_name(page)
-            self._nav_programmatic = False
+            try:
+                self._stack.set_visible_child_name(page)
+            finally:
+                self._nav_programmatic = False
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Player signal handlers
@@ -669,7 +687,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             )
 
         self._stack.set_visible_child_name("album-detail")
-        self._push_nav("album-detail")
+        self._push_nav("album-detail", f"{album_name}|{artist}")
 
     def _on_album_play_track(self, track) -> None:
         """Play a single track from the album detail view."""
@@ -742,7 +760,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             source=source,
         )
         self._stack.set_visible_child_name("artist-detail")
-        self._push_nav("artist-detail")
+        self._push_nav("artist-detail", artist_name)
 
     def _on_artist_play_track(self, track) -> None:
         """Play a single track from the artist detail view."""
@@ -976,7 +994,7 @@ class AuxenWindow(Adw.ApplicationWindow):
                 playlist_id, self._app_ref.db
             )
         self._stack.set_visible_child_name("playlist-detail")
-        self._push_nav("playlist-detail")
+        self._push_nav("playlist-detail", str(playlist_id))
 
     def _on_playlist_play_track(self, track) -> None:
         """Play a single track from the playlist detail view."""
@@ -1033,7 +1051,7 @@ class AuxenWindow(Adw.ApplicationWindow):
                     exc_info=True,
                 )
         self._stack.set_visible_child_name("smart-playlist-detail")
-        self._push_nav("smart-playlist-detail")
+        self._push_nav("smart-playlist-detail", str(smart_id))
 
     def _on_smart_playlist_play_track(self, track) -> None:
         """Play a single track from the smart playlist view."""
