@@ -1000,22 +1000,32 @@ class PlaylistView(Gtk.ScrolledWindow):
             dest = dialog.save_finish(result)
             if dest is not None:
                 filepath = dest.get_path()
-                if filepath:
-                    from auxen.m3u import M3UService
-
-                    svc = M3UService()
-                    svc.export_playlist(
-                        self._tracks, filepath, db=self._db
+                if filepath is None:
+                    logger.warning(
+                        "Cannot export: chosen location is not a local file"
                     )
-                    logger.info("Exported playlist to %s", filepath)
-                    self._show_toast("Playlist exported successfully")
-        except GLib.Error as err:
-            # Code 2 = user dismissed the dialog — not an error.
-            if err.code != 2:
-                logger.warning(
-                    "Export dialog error: %s", err.message
+                    self._show_toast(
+                        "Export failed: location is not a local file",
+                        timeout=5,
+                    )
+                    return
+                from auxen.m3u import M3UService
+
+                svc = M3UService()
+                svc.export_playlist(
+                    self._tracks, filepath, db=self._db
                 )
-                self._show_toast("Export failed", timeout=5)
+                logger.info("Exported playlist to %s", filepath)
+                self._show_toast("Playlist exported successfully")
+        except GLib.Error as err:
+            if err.matches(
+                Gtk.dialog_error_quark(), Gtk.DialogError.DISMISSED
+            ):
+                return
+            logger.warning(
+                "Export dialog error: %s", err.message
+            )
+            self._show_toast("Export failed", timeout=5)
         except Exception:
             logger.warning("Failed to export playlist", exc_info=True)
             self._show_toast("Failed to export playlist", timeout=5)

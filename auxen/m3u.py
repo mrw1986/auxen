@@ -119,16 +119,24 @@ class M3UService:
         if extended:
             lines.append("#EXTM3U")
 
+        def _safe(value: str | None) -> str:
+            """Strip line breaks to prevent M3U line injection."""
+            if not value:
+                return ""
+            return value.replace("\r", " ").replace("\n", " ")
+
         for track in tracks:
             if extended:
                 duration = int(track.duration) if track.duration else -1
-                extinf = f"#EXTINF:{duration},{track.artist} - {track.title}"
+                artist = _safe(track.artist)
+                title = _safe(track.title)
+                extinf = f"#EXTINF:{duration},{artist} - {title}"
                 lines.append(extinf)
 
             if track.source == Source.TIDAL:
                 # Tidal tracks get a comment marker so generic players
                 # ignore them but Auxen can re-import them.
-                lines.append(f"{_TIDAL_URI_PREFIX}{track.source_id}")
+                lines.append(f"{_TIDAL_URI_PREFIX}{_safe(track.source_id)}")
             else:
                 # Local track — use the actual file path if available.
                 file_path = None
@@ -137,7 +145,7 @@ class M3UService:
                 if file_path is None:
                     # Fall back to source_id which is typically the path.
                     file_path = track.source_id
-                lines.append(file_path)
+                lines.append(_safe(file_path))
 
         # Trailing newline for POSIX compliance.
         return "\n".join(lines) + "\n" if lines else ""
