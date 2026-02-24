@@ -12,6 +12,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gdk, GObject, Gtk, Pango
 
+from auxen.views.widgets import make_tidal_source_badge
+
 
 def _format_duration(seconds: Optional[float]) -> str:
     """Format seconds as M:SS (e.g. 3:45), or '--:--' when unknown."""
@@ -321,11 +323,15 @@ class QueuePanel(Gtk.Box):
         source_val = (
             track.source.value if hasattr(track.source, "value") else str(track.source)
         )
-        badge = Gtk.Label(label=source_val.upper())
-        badge_class = (
-            "source-badge-tidal" if source_val == "tidal" else "source-badge-local"
-        )
-        badge.add_css_class(badge_class)
+        if source_val == "tidal":
+            badge = make_tidal_source_badge(
+                label_text=source_val.upper(),
+                css_class="source-badge-tidal",
+                icon_size=10,
+            )
+        else:
+            badge = Gtk.Label(label=source_val.upper())
+            badge.add_css_class("source-badge-local")
         badge.set_valign(Gtk.Align.CENTER)
         row.append(badge)
 

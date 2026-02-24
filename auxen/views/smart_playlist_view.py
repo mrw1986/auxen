@@ -14,6 +14,7 @@ gi.require_version("Adw", "1")
 from gi.repository import GLib, Gtk, Pango
 
 from auxen.views.context_menu import TrackContextMenu
+from auxen.views.widgets import make_tidal_source_badge
 
 logger = logging.getLogger(__name__)
 
@@ -115,13 +116,15 @@ def _make_smart_track_row(index: int, track) -> Gtk.ListBoxRow:
 
     # -- Source badge --
     source_text = track.source.value.capitalize()
-    source_badge = Gtk.Label(label=source_text)
-    css_class = (
-        "source-badge-tidal"
-        if track.source.value == "tidal"
-        else "source-badge-local"
-    )
-    source_badge.add_css_class(css_class)
+    if track.source.value == "tidal":
+        source_badge = make_tidal_source_badge(
+            label_text=source_text,
+            css_class="source-badge-tidal",
+            icon_size=10,
+        )
+    else:
+        source_badge = Gtk.Label(label=source_text)
+        source_badge.add_css_class("source-badge-local")
     source_badge.set_valign(Gtk.Align.CENTER)
     row_box.append(source_badge)
 

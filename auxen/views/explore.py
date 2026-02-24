@@ -13,6 +13,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import GLib, Gtk, Pango
 
+from auxen.views.widgets import make_tidal_source_badge
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,8 +65,11 @@ class ExploreView(Gtk.ScrolledWindow):
         title_label.add_css_class("greeting-label")
         header_box.append(title_label)
 
-        tidal_badge = Gtk.Label(label="TIDAL")
-        tidal_badge.add_css_class("nav-badge-tidal")
+        tidal_badge = make_tidal_source_badge(
+            label_text="TIDAL",
+            css_class="nav-badge-tidal",
+            icon_size=12,
+        )
         tidal_badge.set_valign(Gtk.Align.CENTER)
         header_box.append(tidal_badge)
 
@@ -276,8 +281,11 @@ class ExploreView(Gtk.ScrolledWindow):
 
         overlay.set_child(art_box)
 
-        badge = Gtk.Label(label="Tidal")
-        badge.add_css_class("source-badge-tidal")
+        badge = make_tidal_source_badge(
+            label_text="Tidal",
+            css_class="source-badge-tidal",
+            icon_size=10,
+        )
         badge.set_halign(Gtk.Align.START)
         badge.set_valign(Gtk.Align.START)
         badge.set_margin_top(8)

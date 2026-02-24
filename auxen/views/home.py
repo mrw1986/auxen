@@ -15,6 +15,7 @@ gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Gdk, GdkPixbuf, Gtk, Pango
 
 from auxen.views.context_menu import AlbumContextMenu, TrackContextMenu
+from auxen.views.widgets import make_tidal_source_badge
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +48,17 @@ def _get_greeting() -> str:
     return "Good Evening"
 
 
-def _make_source_badge(source: str) -> Gtk.Label:
+def _make_source_badge(source: str) -> Gtk.Widget:
     """Create a small pill badge indicating the track source."""
-    badge = Gtk.Label(label=source.capitalize())
-    css_class = (
-        "source-badge-tidal" if source == "tidal" else "source-badge-local"
-    )
-    badge.add_css_class(css_class)
+    if source == "tidal":
+        badge = make_tidal_source_badge(
+            label_text=source.capitalize(),
+            css_class="source-badge-tidal",
+            icon_size=10,
+        )
+    else:
+        badge = Gtk.Label(label=source.capitalize())
+        badge.add_css_class("source-badge-local")
     badge.set_halign(Gtk.Align.START)
     badge.set_valign(Gtk.Align.START)
     badge.set_margin_top(8)
@@ -217,11 +222,15 @@ def _make_recently_played_row(
     row_box.append(dur_label)
 
     # -- Source badge --
-    badge = Gtk.Label(label=source.capitalize())
-    css_class = (
-        "source-badge-tidal" if source == "tidal" else "source-badge-local"
-    )
-    badge.add_css_class(css_class)
+    if source == "tidal":
+        badge = make_tidal_source_badge(
+            label_text=source.capitalize(),
+            css_class="source-badge-tidal",
+            icon_size=10,
+        )
+    else:
+        badge = Gtk.Label(label=source.capitalize())
+        badge.add_css_class("source-badge-local")
     badge.set_valign(Gtk.Align.CENTER)
     row_box.append(badge)
 
@@ -316,7 +325,7 @@ class HomePage(Gtk.ScrolledWindow):
         stats_box.append(total_card)
 
         tidal_card, self._tidal_value_label = self._make_stat_card(
-            icon_name="network-wireless-symbolic",
+            icon_name="tidal-symbolic",
             value="0",
             label="Tidal Tracks",
             accent_class="stat-accent-tidal",

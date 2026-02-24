@@ -18,6 +18,7 @@ from auxen.views.context_menu import (
     ArtistContextMenu,
     TrackContextMenu,
 )
+from auxen.views.widgets import make_tidal_source_badge
 
 logger = logging.getLogger(__name__)
 
@@ -53,13 +54,17 @@ def _format_duration(seconds: float | None) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-def _make_source_badge(source: str) -> Gtk.Label:
+def _make_source_badge(source: str) -> Gtk.Widget:
     """Create a small pill badge indicating the track source."""
-    badge = Gtk.Label(label=source.capitalize())
-    css_class = (
-        "source-badge-tidal" if source == "tidal" else "source-badge-local"
-    )
-    badge.add_css_class(css_class)
+    if source == "tidal":
+        badge = make_tidal_source_badge(
+            label_text=source.capitalize(),
+            css_class="source-badge-tidal",
+            icon_size=10,
+        )
+    else:
+        badge = Gtk.Label(label=source.capitalize())
+        badge.add_css_class("source-badge-local")
     badge.set_valign(Gtk.Align.CENTER)
     return badge
 
@@ -95,11 +100,15 @@ def _make_album_card(
 
     overlay.set_child(art_box)
 
-    badge = Gtk.Label(label=source.capitalize())
-    badge_css = (
-        "source-badge-tidal" if source == "tidal" else "source-badge-local"
-    )
-    badge.add_css_class(badge_css)
+    if source == "tidal":
+        badge = make_tidal_source_badge(
+            label_text=source.capitalize(),
+            css_class="source-badge-tidal",
+            icon_size=10,
+        )
+    else:
+        badge = Gtk.Label(label=source.capitalize())
+        badge.add_css_class("source-badge-local")
     badge.set_halign(Gtk.Align.START)
     badge.set_valign(Gtk.Align.START)
     badge.set_margin_top(8)

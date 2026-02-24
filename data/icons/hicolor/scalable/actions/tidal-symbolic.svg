@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Tidal waveform mark: four diamonds arranged in a T pattern.
+       Top row: left, center, right.  Bottom row: center only. -->
+  <!-- Each diamond is a 45-degree rotated square, side ~3.2, centered with ~1.4 gap -->
+  <g fill="currentColor">
+    <!-- Top-left diamond -->
+    <polygon points="3,2 5.4,4.4 3,6.8 0.6,4.4"/>
+    <!-- Top-center diamond -->
+    <polygon points="8,2 10.4,4.4 8,6.8 5.6,4.4"/>
+    <!-- Top-right diamond -->
+    <polygon points="13,2 15.4,4.4 13,6.8 10.6,4.4"/>
+    <!-- Bottom-center diamond -->
+    <polygon points="8,7.2 10.4,9.6 8,12 5.6,9.6"/>
+  </g>
+</svg>

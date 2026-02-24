@@ -215,6 +215,13 @@ class AuxenApp(Adw.Application):
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
             )
 
+            # Register custom icon search path so tidal-symbolic is found
+            icon_theme = Gtk.IconTheme.get_for_display(display)
+            icon_dir = str(
+                Path(__file__).resolve().parent.parent / "data" / "icons"
+            )
+            icon_theme.add_search_path(icon_dir)
+
         # --- Database ---
         try:
             from auxen.db import Database

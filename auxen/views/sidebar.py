@@ -13,6 +13,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GObject, Gtk
 
 from auxen.views.playlist_view import PLAYLIST_COLORS
+from auxen.views.widgets import make_tidal_source_badge
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +67,15 @@ def _make_nav_row(
     row_box.append(label)
 
     if badge_text and badge_class:
-        badge = Gtk.Label(label=badge_text)
-        badge.add_css_class(badge_class)
+        if badge_class == "nav-badge-tidal":
+            badge = make_tidal_source_badge(
+                label_text=badge_text,
+                css_class=badge_class,
+                icon_size=10,
+            )
+        else:
+            badge = Gtk.Label(label=badge_text)
+            badge.add_css_class(badge_class)
         row_box.append(badge)
 
     row = Gtk.ListBoxRow()
@@ -269,7 +277,31 @@ class AuxenSidebar(Gtk.Box):
         middle_box.append(self._browse_list)
 
         # ---- Tidal section ----
-        middle_box.append(_make_section_label("TIDAL"))
+        tidal_section_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=6,
+        )
+        tidal_section_box.set_margin_start(16)
+        tidal_section_box.set_margin_end(16)
+        tidal_section_box.set_margin_top(16)
+        tidal_section_box.set_margin_bottom(4)
+
+        tidal_section_icon = Gtk.Image.new_from_icon_name(
+            "tidal-symbolic"
+        )
+        tidal_section_icon.set_pixel_size(12)
+        tidal_section_icon.add_css_class("caption")
+        tidal_section_icon.add_css_class("dim-label")
+        tidal_section_box.append(tidal_section_icon)
+
+        tidal_section_label = Gtk.Label(label="TIDAL")
+        tidal_section_label.set_xalign(0)
+        tidal_section_label.add_css_class("caption")
+        tidal_section_label.add_css_class("dim-label")
+        tidal_section_label.add_css_class("sidebar-section-label")
+        tidal_section_box.append(tidal_section_label)
+
+        middle_box.append(tidal_section_box)
 
         self._tidal_list = Gtk.ListBox()
         self._tidal_list.add_css_class("navigation-sidebar")

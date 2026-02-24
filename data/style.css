@@ -203,6 +203,13 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     letter-spacing: 0.3px;
 }
 
+/* Ensure label children inside badge boxes inherit font styling */
+.nav-badge-tidal label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
 /* ── Playlist Dot ──────────────────────────────────────── */
 
 .playlist-dot {
@@ -373,6 +380,13 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     color: #0c0b0f;
     border-radius: 9999px;
     padding: 2px 8px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
+/* Ensure label children inside badge boxes inherit font styling */
+.source-badge-tidal label {
     font-size: 0.65rem;
     font-weight: 700;
     letter-spacing: 0.3px;
