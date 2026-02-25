@@ -162,6 +162,7 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         # Context menu callbacks
         self._context_callbacks: Optional[dict] = None
         self._get_playlists: Optional[Callable] = None
+        self._current_menu: object = None
 
         # Data
         self._tracks: list[Track] = []
@@ -606,12 +607,12 @@ class ArtistDetailView(Gtk.ScrolledWindow):
             "is_favorite": False,
         }
 
-        menu = TrackContextMenu(
+        self._current_menu = TrackContextMenu(
             track_data=track_data,
             callbacks=callbacks,
             playlists=playlists,
         )
-        menu.show(widget, x, y)
+        self._current_menu.show(widget, x, y)
 
     @staticmethod
     def _clear_list_box(list_box: Gtk.ListBox) -> None:

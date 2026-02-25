@@ -184,10 +184,13 @@ class FavoritesView(Gtk.ScrolledWindow):
         # Context menu callbacks
         self._context_callbacks: dict | None = None
         self._get_playlists = None
+        self._current_menu: object = None
         # Track objects keyed by track_id for context menu use
         self._track_objects: dict[int, object] = {}
         # Callback: on_favorite_changed(track_id: int, is_favorite: bool)
         self.on_favorite_changed: Callable[[int, bool], None] | None = None
+        # Callback: triggered when user clicks "Log In to Tidal" in filter empty state
+        self.on_tidal_login: Callable | None = None
 
         # Root container
         root = Gtk.Box(
@@ -319,6 +322,44 @@ class FavoritesView(Gtk.ScrolledWindow):
 
         self._content_stack.add_named(empty_box, "empty")
 
+        # -- Tidal not-connected state (shown for Tidal filter when not logged in) --
+        tidal_connect_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=16,
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER,
+        )
+        tidal_connect_box.add_css_class("explore-login-prompt")
+        tidal_connect_box.set_vexpand(True)
+        tidal_connect_box.set_margin_top(48)
+        tidal_connect_box.set_margin_bottom(48)
+
+        tc_icon = Gtk.Image.new_from_icon_name("starred-symbolic")
+        tc_icon.set_pixel_size(64)
+        tc_icon.set_opacity(0.4)
+        tidal_connect_box.append(tc_icon)
+
+        tc_heading = Gtk.Label(label="Connect to Tidal")
+        tc_heading.add_css_class("title-1")
+        tidal_connect_box.append(tc_heading)
+
+        tc_desc = Gtk.Label(
+            label="Log in to your Tidal account to see\nyour Tidal favorites here."
+        )
+        tc_desc.add_css_class("caption")
+        tc_desc.add_css_class("dim-label")
+        tc_desc.set_justify(Gtk.Justification.CENTER)
+        tidal_connect_box.append(tc_desc)
+
+        tc_login_btn = Gtk.Button(label="Log In to Tidal")
+        tc_login_btn.add_css_class("suggested-action")
+        tc_login_btn.add_css_class("pill")
+        tc_login_btn.set_halign(Gtk.Align.CENTER)
+        tc_login_btn.connect("clicked", self._on_tidal_login_clicked)
+        tidal_connect_box.append(tc_login_btn)
+
+        self._content_stack.add_named(tidal_connect_box, "tidal-connect")
+
         root.append(self._content_stack)
 
         self.set_child(root)
@@ -408,12 +449,12 @@ class FavoritesView(Gtk.ScrolledWindow):
             "is_favorite": True,  # We're in the favorites view
         }
 
-        menu = TrackContextMenu(
+        self._current_menu = TrackContextMenu(
             track_data=track_data,
             callbacks=callbacks,
             playlists=playlists,
         )
-        menu.show(widget, x, y)
+        self._current_menu.show(widget, x, y)
 
     # ---- Internal helpers ----
 
@@ -488,6 +529,10 @@ class FavoritesView(Gtk.ScrolledWindow):
             except Exception:
                 logger.warning("Failed to unfavorite track", exc_info=True)
 
+    def _on_tidal_login_clicked(self, _btn) -> None:
+        if self.on_tidal_login is not None:
+            self.on_tidal_login()
+
     def _get_filtered_tracks(self) -> list[dict[str, str | int]]:
         """Return favorites filtered by the active source filter."""
         if self._active_filter == "All":
@@ -521,6 +566,19 @@ class FavoritesView(Gtk.ScrolledWindow):
             if row is None:
                 break
             self._favorites_list.remove(row)
+
+        # Show the Tidal connect card when filtering by Tidal and not logged in
+        tidal_not_connected = (
+            self._active_filter == "Tidal"
+            and (
+                self._tidal_provider is None
+                or not getattr(self._tidal_provider, "is_authenticated", lambda: False)()
+            )
+        )
+        if tidal_not_connected:
+            self._count_label.set_label("0 tracks")
+            self._content_stack.set_visible_child_name("tidal-connect")
+            return
 
         filtered = self._get_filtered_tracks()
         sorted_tracks = self._get_sorted_tracks(filtered)

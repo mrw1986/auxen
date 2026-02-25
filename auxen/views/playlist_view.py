@@ -311,6 +311,7 @@ class PlaylistView(Gtk.ScrolledWindow):
         # Context menu callbacks
         self._context_callbacks: Optional[dict] = None
         self._get_playlists: Optional[Callable] = None
+        self._current_menu: object = None
 
         # Root container
         self._root = Gtk.Box(
@@ -682,12 +683,12 @@ class PlaylistView(Gtk.ScrolledWindow):
             "is_favorite": False,
         }
 
-        menu = TrackContextMenu(
+        self._current_menu = TrackContextMenu(
             track_data=track_data,
             callbacks=callbacks,
             playlists=playlists,
         )
-        menu.show(widget, x, y)
+        self._current_menu.show(widget, x, y)
 
     # ---- Drag-and-drop handlers ----
 

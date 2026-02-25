@@ -186,6 +186,7 @@ class SearchView(Gtk.Box):
         # Context menu callbacks
         self._context_callbacks: dict | None = None
         self._get_playlists: object = None
+        self._current_menu: object = None
 
         # ---- Search entry ----
         entry_box = Gtk.Box(
@@ -348,12 +349,12 @@ class SearchView(Gtk.Box):
             "is_favorite": False,
         }
 
-        menu = TrackContextMenu(
+        self._current_menu = TrackContextMenu(
             track_data=track_data,
             callbacks=callbacks,
             playlists=playlists,
         )
-        menu.show(widget, x, y)
+        self._current_menu.show(widget, x, y)
 
     # ---- Empty state builder ----
 

@@ -18,7 +18,6 @@ class SmartPlaylistType(Enum):
     RECENTLY_PLAYED = "recently_played"
     HEAVY_ROTATION = "heavy_rotation"
     FORGOTTEN_GEMS = "forgotten_gems"
-    LOVED_TRACKS = "loved_tracks"
     NEVER_PLAYED = "never_played"
 
 
@@ -58,12 +57,6 @@ _DEFINITIONS: list[dict] = [
         ),
     },
     {
-        "id": SmartPlaylistType.LOVED_TRACKS.value,
-        "name": "Loved Tracks",
-        "icon": "heart-filled-symbolic",
-        "description": "All tracks you've marked as favorites.",
-    },
-    {
         "id": SmartPlaylistType.NEVER_PLAYED.value,
         "name": "Never Played",
         "icon": "media-playback-start-symbolic",
@@ -100,7 +93,6 @@ class SmartPlaylistService:
             SmartPlaylistType.RECENTLY_PLAYED.value: self._recently_played,
             SmartPlaylistType.HEAVY_ROTATION.value: self._heavy_rotation,
             SmartPlaylistType.FORGOTTEN_GEMS.value: self._forgotten_gems,
-            SmartPlaylistType.LOVED_TRACKS.value: self._loved_tracks,
             SmartPlaylistType.NEVER_PLAYED.value: self._never_played,
         }
         handler = dispatch.get(playlist_id)
@@ -126,9 +118,6 @@ class SmartPlaylistService:
         return self._db.get_forgotten_gems(
             min_plays=5, inactive_days=30, limit=30
         )
-
-    def _loved_tracks(self) -> list[Track]:
-        return self._db.get_favorites()
 
     def _never_played(self) -> list[Track]:
         return self._db.get_never_played_tracks(limit=50)

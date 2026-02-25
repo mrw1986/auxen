@@ -124,7 +124,23 @@ class NowPlayingBar(Gtk.Box):
 
         self._art_box.append(self._art_placeholder)
         self._art_box.append(self._art_image)
-        left.append(self._art_box)
+
+        # Spectrum visualizer overlaid at the bottom of the album art
+        self._visualizer = SpectrumVisualizer(
+            bar_count=8,
+            bar_width=4,
+            bar_gap=1,
+            bar_color="#d4a039",
+            max_height=14,
+        )
+        self._visualizer.set_visible(False)
+        self._visualizer.set_halign(Gtk.Align.FILL)
+        self._visualizer.set_valign(Gtk.Align.END)
+
+        art_overlay = Gtk.Overlay()
+        art_overlay.set_child(self._art_box)
+        art_overlay.add_overlay(self._visualizer)
+        left.append(art_overlay)
 
         # Title + Artist
         text_box = Gtk.Box(
@@ -242,17 +258,6 @@ class NowPlayingBar(Gtk.Box):
         transport.append(self._repeat_btn)
 
         center.append(transport)
-
-        # Spectrum visualizer (between transport and progress)
-        self._visualizer = SpectrumVisualizer(
-            bar_count=16,
-            bar_width=4,
-            bar_gap=2,
-            bar_color="#d4a039",
-            max_height=24,
-        )
-        self._visualizer.set_opacity(0.0)
-        center.append(self._visualizer)
 
         # Progress row
         progress_row = Gtk.Box(
@@ -433,7 +438,7 @@ class NowPlayingBar(Gtk.Box):
 
     def set_visualizer_active(self, active: bool) -> None:
         """Show/hide the spectrum visualizer and toggle its animation."""
-        self._visualizer.set_opacity(1.0 if active else 0.0)
+        self._visualizer.set_visible(active)
         self._visualizer.set_active(active)
 
     # ── Internal handlers ─────────────────────────────────

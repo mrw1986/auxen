@@ -391,6 +391,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         if app.tidal_provider is not None:
             self._favorites_view.set_tidal_provider(app.tidal_provider)
         self._favorites_view.on_favorite_changed = self._on_favorites_view_changed
+        self._favorites_view.on_tidal_login = self._start_tidal_login
 
         # --- Library View -> Database + callbacks ---
         if app.db is not None:

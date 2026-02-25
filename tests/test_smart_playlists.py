@@ -342,7 +342,7 @@ class TestSmartPlaylistServiceDefinitions:
         self, service: SmartPlaylistService
     ) -> None:
         definitions = service.get_definitions()
-        assert len(definitions) == 7
+        assert len(definitions) == 6
         ids = {d["id"] for d in definitions}
         assert ids == {
             "most_played",
@@ -350,7 +350,6 @@ class TestSmartPlaylistServiceDefinitions:
             "recently_played",
             "heavy_rotation",
             "forgotten_gems",
-            "loved_tracks",
             "never_played",
         }
 
@@ -403,21 +402,6 @@ class TestSmartPlaylistServiceGetTracks:
         assert len(tracks) == 1
         assert tracks[0].title == "New Song"
 
-    def test_dispatches_loved_tracks(
-        self, db: Database, service: SmartPlaylistService
-    ) -> None:
-        tid = db.insert_track(
-            _make_track(title="Loved Song", source_id="1")
-        )
-        db.set_favorite(tid, True)
-        db.insert_track(
-            _make_track(title="Other Song", source_id="2")
-        )
-
-        tracks = service.get_tracks("loved_tracks")
-        assert len(tracks) == 1
-        assert tracks[0].title == "Loved Song"
-
     def test_dispatches_never_played(
         self, db: Database, service: SmartPlaylistService
     ) -> None:
@@ -446,5 +430,4 @@ class TestSmartPlaylistServiceGetTracks:
         assert SmartPlaylistType.RECENTLY_PLAYED.value == "recently_played"
         assert SmartPlaylistType.HEAVY_ROTATION.value == "heavy_rotation"
         assert SmartPlaylistType.FORGOTTEN_GEMS.value == "forgotten_gems"
-        assert SmartPlaylistType.LOVED_TRACKS.value == "loved_tracks"
         assert SmartPlaylistType.NEVER_PLAYED.value == "never_played"

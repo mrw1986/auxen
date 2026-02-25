@@ -268,6 +268,7 @@ class HomePage(Gtk.ScrolledWindow):
         # Album context menu callbacks
         self._album_context_callbacks: Optional[dict] = None
         self._get_album_playlists: Optional[Callable] = None
+        self._current_menu: object = None
 
         # Root container
         root = Gtk.Box(
@@ -714,12 +715,12 @@ class HomePage(Gtk.ScrolledWindow):
             "is_favorite": is_favorite,
         }
 
-        menu = TrackContextMenu(
+        self._current_menu = TrackContextMenu(
             track_data=track_data,
             callbacks=callbacks,
             playlists=playlists,
         )
-        menu.show(widget, x, y)
+        self._current_menu.show(widget, x, y)
 
     # ------------------------------------------------------------------
     # Album context menu helpers
@@ -784,12 +785,12 @@ class HomePage(Gtk.ScrolledWindow):
             "artist": artist,
         }
 
-        menu = AlbumContextMenu(
+        self._current_menu = AlbumContextMenu(
             album_data=album_data,
             callbacks=callbacks,
             playlists=playlists,
         )
-        menu.show(widget, x, y)
+        self._current_menu.show(widget, x, y)
 
     def _on_filter_toggled(self, toggled_btn: Gtk.ToggleButton) -> None:
         """Enforce radio-button behavior: only one filter active at a time."""

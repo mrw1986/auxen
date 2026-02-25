@@ -23,13 +23,13 @@ _BROWSE_ITEMS: list[tuple[str, str, str, str | None, str | None]] = [
     ("home", "go-home-symbolic", "Home", None, None),
     ("search", "system-search-symbolic", "Search", None, None),
     ("library", "folder-music-symbolic", "Library", "Local", "nav-badge-local"),
+    ("favorites", "starred-symbolic", "Favorites", None, None),
     ("stats", "utilities-system-monitor-symbolic", "Stats", None, None),
 ]
 
 _TIDAL_ITEMS: list[tuple[str, str, str, str | None, str | None]] = [
     ("explore", "compass-symbolic", "Explore", "Tidal", "nav-badge-tidal"),
     ("mixes", "media-playlist-shuffle-symbolic", "Mixes", None, None),
-    ("favorites", "starred-symbolic", "Favorites", None, None),
 ]
 
 # Fallback playlists shown when no database is connected
