@@ -406,11 +406,22 @@ class HomePage(Gtk.ScrolledWindow):
 
             self.update_stats(total, tidal_count, local_count)
 
-            # Recently added — update the grid if we have data
-            recently_added = db.get_recently_added(limit=12)
+            # Recently added — update the grid if we have data.
+            # Fetch more tracks than needed so deduplication still fills 12.
+            recently_added = db.get_recently_added(limit=120)
             if recently_added:
-                self._clear_flow_box(self._album_grid)
+                seen: set[tuple[str, str]] = set()
+                deduped = []
                 for track in recently_added:
+                    key = (track.album or track.title, track.artist)
+                    if key not in seen:
+                        seen.add(key)
+                        deduped.append(track)
+                    if len(deduped) == 12:
+                        break
+
+                self._clear_flow_box(self._album_grid)
+                for track in deduped:
                     card = _make_album_card(
                         title=track.album or track.title,
                         artist=track.artist,

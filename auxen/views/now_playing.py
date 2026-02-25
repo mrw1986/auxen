@@ -251,7 +251,7 @@ class NowPlayingBar(Gtk.Box):
             bar_color="#d4a039",
             max_height=24,
         )
-        self._visualizer.set_visible(False)
+        self._visualizer.set_opacity(0.0)
         center.append(self._visualizer)
 
         # Progress row
@@ -433,7 +433,7 @@ class NowPlayingBar(Gtk.Box):
 
     def set_visualizer_active(self, active: bool) -> None:
         """Show/hide the spectrum visualizer and toggle its animation."""
-        self._visualizer.set_visible(active)
+        self._visualizer.set_opacity(1.0 if active else 0.0)
         self._visualizer.set_active(active)
 
     # ── Internal handlers ─────────────────────────────────
