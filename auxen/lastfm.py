@@ -31,10 +31,9 @@ logger = logging.getLogger(__name__)
 _API_ROOT = "https://ws.audioscrobbler.com/2.0/"
 _AUTH_URL = "https://www.last.fm/api/auth/"
 
-# Placeholder API credentials -- users should replace these with their
-# own values obtained from https://www.last.fm/api/account/create
-_DEFAULT_API_KEY = "AUXEN_LASTFM_KEY"
-_DEFAULT_API_SECRET = "AUXEN_LASTFM_SECRET"
+# App-level Last.fm API credentials (registered for Auxen).
+_DEFAULT_API_KEY = "2fe383e0bc788ccf2646b48b2a1e3d3d"
+_DEFAULT_API_SECRET = "6f9dc31b30ffeed6f7208c271dcc3303"
 
 # Minimum play thresholds for a valid scrobble.
 _MIN_PLAY_SECONDS = 30
