@@ -56,6 +56,9 @@ class AlbumArtService:
         self._cache: OrderedDict[tuple[int, int, int], Any] = OrderedDict()
         self._cache_bytes: int = 0
         self._lock = threading.Lock()
+        # Texture cache: reuse Gdk.Texture objects across widget rebuilds
+        self._texture_cache: OrderedDict[tuple[int, int, int], Any] = OrderedDict()
+        self._max_texture_entries = 500
 
     # ------------------------------------------------------------------
     # Public API
@@ -91,6 +94,39 @@ class AlbumArtService:
 
         return pixbuf
 
+    def get_texture_for_track(
+        self, track: Track, width: int = 48, height: int = 48
+    ) -> Any:
+        """Return a cached ``Gdk.Texture`` for *track*, or ``None``.
+
+        This is a synchronous, main-thread-safe check that returns
+        immediately if a texture is already cached.  Returns ``None``
+        if the texture hasn't been created yet (caller should fall
+        back to ``get_art_async``).
+        """
+        if track.id is None:
+            return None
+        cache_key = (track.id, width, height)
+        with self._lock:
+            texture = self._texture_cache.get(cache_key)
+            if texture is not None:
+                self._texture_cache.move_to_end(cache_key)
+                return texture
+        return None
+
+    def cache_texture(
+        self, track: Track, texture: Any, width: int = 48, height: int = 48
+    ) -> None:
+        """Store a ``Gdk.Texture`` in the texture cache."""
+        if track.id is None or texture is None:
+            return
+        cache_key = (track.id, width, height)
+        with self._lock:
+            self._texture_cache[cache_key] = texture
+            self._texture_cache.move_to_end(cache_key)
+            while len(self._texture_cache) > self._max_texture_entries:
+                self._texture_cache.popitem(last=False)
+
     def get_art_async(
         self,
         track: Track,
@@ -117,11 +153,65 @@ class AlbumArtService:
         thread = threading.Thread(target=_worker, daemon=True)
         thread.start()
 
+    def get_art_by_url_async(
+        self,
+        url: str,
+        callback: Callable[[Any], None],
+        width: int = 48,
+        height: int = 48,
+    ) -> None:
+        """Fetch album art from a URL in a background thread.
+
+        Unlike ``get_art_async`` this does not require a ``Track`` object --
+        it takes a raw image URL (e.g. the ``cover_url`` returned by
+        Tidal explore endpoints).
+
+        *callback* is scheduled on the GLib main loop so it is safe to
+        update GTK widgets from it.
+        """
+
+        def _worker() -> None:
+            result = self.load_pixbuf_from_url(url, width, height)
+            try:
+                from gi.repository import GLib
+
+                GLib.idle_add(callback, result)
+            except Exception:
+                callback(result)
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+
     def clear_cache(self) -> None:
-        """Remove all cached pixbufs."""
+        """Remove all cached pixbufs and textures."""
         with self._lock:
             self._cache.clear()
             self._cache_bytes = 0
+            self._texture_cache.clear()
+
+    def get_or_create_texture(
+        self, track: Track, pixbuf: Any, width: int = 48, height: int = 48
+    ) -> Any:
+        """Return a ``Gdk.Texture`` for *track*, creating and caching if needed.
+
+        Call this from the main thread with a pixbuf from ``get_art_for_track``
+        or from an async callback.  The texture is cached so subsequent calls
+        (e.g. after widget rebuild on sort change) return the same object instantly.
+        """
+        if pixbuf is None:
+            return None
+        if track is not None and track.id is not None:
+            cached = self.get_texture_for_track(track, width, height)
+            if cached is not None:
+                return cached
+        try:
+            from gi.repository import Gdk
+            texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+        except Exception:
+            return None
+        if track is not None:
+            self.cache_texture(track, texture, width, height)
+        return texture
 
     # ------------------------------------------------------------------
     # Pixbuf helpers (public for direct use)

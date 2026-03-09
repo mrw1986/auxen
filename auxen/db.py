@@ -599,10 +599,12 @@ class Database:
 
     def add_track_to_playlist(
         self, playlist_id: int, track_id: int
-    ) -> None:
+    ) -> bool:
         """Add a track to a playlist at the end.
 
         If the track is already in the playlist, this is a no-op.
+
+        Returns True if the track was inserted, False if it was already present.
         """
         with self._lock:
             cur = self._conn.execute(
@@ -611,7 +613,7 @@ class Database:
                 (playlist_id, track_id),
             )
             if cur.fetchone() is not None:
-                return
+                return False
 
             cur = self._conn.execute(
                 "SELECT COALESCE(MAX(position), -1) + 1 "
@@ -626,6 +628,7 @@ class Database:
                 (playlist_id, track_id, next_pos),
             )
             self._commit()
+            return True
 
     def remove_track_from_playlist(
         self, playlist_id: int, track_id: int
@@ -749,14 +752,15 @@ class Database:
 
         Returns
         -------
-        list of dicts with keys: artist, track_count, sources
+        list of dicts with keys: artist, track_count, sources, latest_added
         """
         with self._lock:
             if source is not None:
                 cur = self._conn.execute(
                     """
                     SELECT artist, COUNT(*) AS track_count,
-                           GROUP_CONCAT(DISTINCT source) AS sources
+                           GROUP_CONCAT(DISTINCT source) AS sources,
+                           MAX(added_at) AS latest_added
                     FROM tracks
                     WHERE source = ?
                     GROUP BY artist
@@ -768,7 +772,8 @@ class Database:
                 cur = self._conn.execute(
                     """
                     SELECT artist, COUNT(*) AS track_count,
-                           GROUP_CONCAT(DISTINCT source) AS sources
+                           GROUP_CONCAT(DISTINCT source) AS sources,
+                           MAX(added_at) AS latest_added
                     FROM tracks
                     GROUP BY artist
                     ORDER BY artist COLLATE NOCASE ASC
@@ -779,6 +784,7 @@ class Database:
                     "artist": row["artist"],
                     "track_count": row["track_count"],
                     "sources": row["sources"].split(",") if row["sources"] else [],
+                    "latest_added": row["latest_added"],
                 }
                 for row in cur.fetchall()
             ]
@@ -903,7 +909,7 @@ class Database:
         Returns a dict with:
             total_tracks_played, total_listen_time_hours,
             top_artists (list of (artist, play_count) top 10),
-            top_tracks (list of (title, artist, play_count) top 10),
+            top_tracks (list of (track_id, title, artist, play_count) top 10),
             most_active_hour (0-23 or None),
             avg_tracks_per_day (over last 30 days).
         """
@@ -940,7 +946,7 @@ class Database:
             # Top tracks (top 10 by play count)
             cur = self._conn.execute(
                 """
-                SELECT t.title, t.artist, COUNT(*) AS play_count
+                SELECT t.id, t.title, t.artist, COUNT(*) AS play_count
                 FROM play_history ph
                 JOIN tracks t ON t.id = ph.track_id
                 GROUP BY ph.track_id
@@ -949,7 +955,7 @@ class Database:
                 """
             )
             top_tracks = [
-                (row["title"], row["artist"], row["play_count"])
+                (row["id"], row["title"], row["artist"], row["play_count"])
                 for row in cur.fetchall()
             ]
 
@@ -981,7 +987,77 @@ class Database:
             )
             recent_count = cur.fetchone()["cnt"]
 
+            # Unique artists played
+            cur = self._conn.execute(
+                """
+                SELECT COUNT(DISTINCT t.artist) AS cnt
+                FROM play_history ph
+                JOIN tracks t ON t.id = ph.track_id
+                """
+            )
+            unique_artists = cur.fetchone()["cnt"]
+
+            # Unique albums played
+            cur = self._conn.execute(
+                """
+                SELECT COUNT(DISTINCT t.album) AS cnt
+                FROM play_history ph
+                JOIN tracks t ON t.id = ph.track_id
+                WHERE t.album IS NOT NULL AND t.album != ''
+                """
+            )
+            unique_albums = cur.fetchone()["cnt"]
+
         avg_tracks_per_day = round(recent_count / 30, 1)
+
+        # Average track duration in seconds
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT AVG(duration_listened) AS avg_dur
+                FROM play_history
+                WHERE duration_listened > 0
+                """
+            )
+            row = cur.fetchone()
+            avg_track_seconds = round(row["avg_dur"]) if row and row["avg_dur"] else 0
+
+            # Listening streak: consecutive days with at least one play
+            cur = self._conn.execute(
+                """
+                SELECT DISTINCT date(played_at) AS play_date
+                FROM play_history
+                ORDER BY play_date DESC
+                """
+            )
+            dates = [row["play_date"] for row in cur.fetchall()]
+            current_streak = 0
+            if dates:
+                from datetime import date as _date
+
+                today = _date.today().isoformat()
+                yesterday = (_date.today() - timedelta(days=1)).isoformat()
+                # Streak counts from today or yesterday backwards
+                if dates[0] in (today, yesterday):
+                    current_streak = 1
+                    for i in range(1, len(dates)):
+                        prev = _date.fromisoformat(dates[i - 1])
+                        curr = _date.fromisoformat(dates[i])
+                        if (prev - curr).days == 1:
+                            current_streak += 1
+                        else:
+                            break
+
+            # Tidal vs Local play counts
+            cur = self._conn.execute(
+                """
+                SELECT t.source, COUNT(*) AS cnt
+                FROM play_history ph
+                JOIN tracks t ON t.id = ph.track_id
+                GROUP BY t.source
+                """
+            )
+            source_counts = {row["source"]: row["cnt"] for row in cur.fetchall()}
 
         return {
             "total_tracks_played": total_tracks_played,
@@ -990,7 +1066,46 @@ class Database:
             "top_tracks": top_tracks,
             "most_active_hour": most_active_hour,
             "avg_tracks_per_day": avg_tracks_per_day,
+            "unique_artists": unique_artists,
+            "unique_albums": unique_albums,
+            "avg_track_seconds": avg_track_seconds,
+            "current_streak": current_streak,
+            "source_counts": source_counts,
         }
+
+    def get_daily_listening_stats(
+        self, days: int = 7
+    ) -> list[tuple[str, int]]:
+        """Return play counts grouped by day for the last *days* days.
+
+        Returns a list of (date_str, play_count) tuples sorted by date
+        ascending.  Days with zero plays are included so the chart has
+        a consistent number of bars.
+        """
+        today = datetime.now(UTC).date()
+        start_date = today - timedelta(days=days - 1)
+
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT DATE(played_at) AS day, COUNT(*) AS cnt
+                FROM play_history
+                WHERE DATE(played_at) >= ?
+                GROUP BY day
+                ORDER BY day ASC
+                """,
+                (start_date.isoformat(),),
+            )
+            rows = {row["day"]: row["cnt"] for row in cur.fetchall()}
+
+        # Fill in missing days with zero
+        result: list[tuple[str, int]] = []
+        for offset in range(days):
+            d = start_date + timedelta(days=offset)
+            d_str = d.isoformat()
+            result.append((d_str, rows.get(d_str, 0)))
+
+        return result
 
     # ------------------------------------------------------------------
     # Smart playlist queries

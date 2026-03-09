@@ -85,12 +85,37 @@ class _BaseContextMenu:
     def _on_popover_closed(
         self, popover, widget: Gtk.Widget, prefix: str
     ) -> None:
-        """Clean up the action group and popover when the menu closes."""
-        # Only remove the action group if this closing popover is still
-        # the active one; otherwise a newer popover owns the group.
+        """Clean up the action group and popover when the menu closes.
+
+        The action group removal is deferred to an idle callback so that
+        any action triggered by a menu-item click has a chance to fire
+        before the group is removed.  In GTK4 PopoverMenu, the "closed"
+        signal is emitted *before* the action's "activate" signal, so
+        removing the group synchronously here would silently prevent the
+        action from ever executing.
+        """
         if popover is self._popover:
-            widget.insert_action_group(prefix, None)
+            GLib.idle_add(
+                self._deferred_remove_action_group, widget, prefix, popover
+            )
         GLib.idle_add(self._cleanup_popover, popover)
+
+    def _deferred_remove_action_group(
+        self, widget: Gtk.Widget, prefix: str, expected_popover
+    ) -> bool:
+        """Remove the action group on idle, after actions have fired.
+
+        Only removes if the popover that triggered this is still the
+        current one (prevents removing a newer menu's action group).
+        """
+        # A newer popover may have been opened; don't touch its group.
+        if expected_popover is not self._popover and self._popover is not None:
+            return GLib.SOURCE_REMOVE
+        try:
+            widget.insert_action_group(prefix, None)
+        except Exception:
+            pass
+        return GLib.SOURCE_REMOVE
 
     def _cleanup_popover(self, popover: Gtk.PopoverMenu) -> bool:
         """Unparent the popover on idle (only if it still has a parent)."""
@@ -125,12 +150,14 @@ class TrackContextMenu(_BaseContextMenu):
     Parameters
     ----------
     track_data:
-        Dict with keys: id, title, artist, album, source, is_favorite.
+        Dict with keys: id, title, artist, album, source, is_favorite,
+        source_id (optional — needed for Track Radio / Credits).
     callbacks:
         Dict with keys:
             on_play, on_play_next, on_add_to_queue,
             on_add_to_playlist(playlist_id), on_new_playlist,
-            on_toggle_favorite, on_go_to_album, on_go_to_artist.
+            on_toggle_favorite, on_go_to_album, on_go_to_artist,
+            on_track_radio, on_credits.
     playlists:
         List of dicts with keys: id, name (user playlists for the submenu).
     """
@@ -159,6 +186,10 @@ class TrackContextMenu(_BaseContextMenu):
     def _build_menu_model(self) -> Gio.Menu:
         """Construct the full Gio.Menu model for the context menu."""
         menu = Gio.Menu()
+        src = self._track_data.get("source", "")
+        # Source may be a Source enum or a string
+        src_val = getattr(src, "value", src) if src else ""
+        is_tidal = str(src_val).lower() == "tidal"
 
         # Section 1: Playback actions
         playback_section = Gio.Menu()
@@ -187,7 +218,7 @@ class TrackContextMenu(_BaseContextMenu):
         # Favorite toggle
         is_fav = self._track_data.get("is_favorite", False)
         fav_label = (
-            "Remove from Favorites" if is_fav else "Add to Favorites"
+            "Remove from Collection" if is_fav else "Add to Collection"
         )
         organize_section.append(fav_label, "ctx.toggle-favorite")
         menu.append_section(None, organize_section)
@@ -198,7 +229,19 @@ class TrackContextMenu(_BaseContextMenu):
             nav_section.append("Go to Album", "ctx.go-to-album")
         if self._track_data.get("artist"):
             nav_section.append("Go to Artist", "ctx.go-to-artist")
+        # Track Radio (Tidal only)
+        if is_tidal and self._callbacks.get("on_track_radio"):
+            nav_section.append("Go to Track Radio", "ctx.track-radio")
         menu.append_section(None, nav_section)
+
+        # Section 4: View Lyrics + Tidal extras (Credits)
+        extras_section = Gio.Menu()
+        if self._callbacks.get("on_view_lyrics"):
+            extras_section.append("View Lyrics", "ctx.view-lyrics")
+        if is_tidal and self._callbacks.get("on_credits"):
+            extras_section.append("Credits", "ctx.credits")
+        if extras_section.get_n_items() > 0:
+            menu.append_section(None, extras_section)
 
         return menu
 
@@ -219,6 +262,9 @@ class TrackContextMenu(_BaseContextMenu):
         self._add_action(group, "go-to-album", self._on_go_to_album)
         self._add_action(group, "go-to-artist", self._on_go_to_artist)
         self._add_action(group, "new-playlist", self._on_new_playlist)
+        self._add_action(group, "track-radio", self._on_track_radio)
+        self._add_action(group, "view-lyrics", self._on_view_lyrics)
+        self._add_action(group, "credits", self._on_credits)
 
         # Per-playlist actions
         for playlist in self._playlists:
@@ -278,6 +324,21 @@ class TrackContextMenu(_BaseContextMenu):
         if cb is not None:
             cb()
 
+    def _on_track_radio(self, _action, _param) -> None:
+        cb = self._callbacks.get("on_track_radio")
+        if cb is not None:
+            cb()
+
+    def _on_view_lyrics(self, _action, _param) -> None:
+        cb = self._callbacks.get("on_view_lyrics")
+        if cb is not None:
+            cb()
+
+    def _on_credits(self, _action, _param) -> None:
+        cb = self._callbacks.get("on_credits")
+        if cb is not None:
+            cb()
+
 
 # ------------------------------------------------------------------
 # Album context menu
@@ -295,7 +356,7 @@ class AlbumContextMenu(_BaseContextMenu):
         Dict with keys:
             on_play_album, on_play_album_next, on_add_album_to_queue,
             on_add_to_playlist(playlist_id), on_new_playlist,
-            on_add_to_favorites, on_go_to_artist.
+            on_add_to_favorites, on_go_to_artist, on_shuffle_album.
     playlists:
         List of dicts with keys: id, name (user playlists for the submenu).
     """
@@ -324,6 +385,7 @@ class AlbumContextMenu(_BaseContextMenu):
         # Section 1: Playback actions
         playback_section = Gio.Menu()
         playback_section.append("Play Album", "ctx.play-album")
+        playback_section.append("Shuffle Album", "ctx.shuffle-album")
         playback_section.append("Play Album Next", "ctx.play-album-next")
         playback_section.append(
             "Add Album to Queue", "ctx.add-album-to-queue"
@@ -346,7 +408,7 @@ class AlbumContextMenu(_BaseContextMenu):
         )
 
         organize_section.append(
-            "Add to Favorites", "ctx.add-to-favorites"
+            "Add to Collection", "ctx.add-to-favorites"
         )
         menu.append_section(None, organize_section)
 
@@ -363,6 +425,7 @@ class AlbumContextMenu(_BaseContextMenu):
         group = Gio.SimpleActionGroup()
 
         self._add_action(group, "play-album", self._on_play_album)
+        self._add_action(group, "shuffle-album", self._on_shuffle_album)
         self._add_action(
             group, "play-album-next", self._on_play_album_next
         )
@@ -396,6 +459,11 @@ class AlbumContextMenu(_BaseContextMenu):
 
     def _on_play_album(self, _action, _param) -> None:
         cb = self._callbacks.get("on_play_album")
+        if cb is not None:
+            cb()
+
+    def _on_shuffle_album(self, _action, _param) -> None:
+        cb = self._callbacks.get("on_shuffle_album")
         if cb is not None:
             cb()
 
@@ -436,10 +504,11 @@ class ArtistContextMenu(_BaseContextMenu):
     Parameters
     ----------
     artist_data:
-        Dict with keys: artist.
+        Dict with keys: artist, is_followed (optional).
     callbacks:
         Dict with keys:
-            on_play_all, on_add_all_to_queue, on_view_artist.
+            on_play_all, on_add_all_to_queue, on_view_artist,
+            on_artist_radio, on_follow_artist, on_unfollow_artist.
     """
 
     def __init__(
@@ -471,12 +540,36 @@ class ArtistContextMenu(_BaseContextMenu):
         )
         menu.append_section(None, playback_section)
 
-        # Section 2: Navigation
+        # Shuffle
+        if self._callbacks.get("on_shuffle_artist"):
+            playback_section.append(
+                "Shuffle Artist", "ctx.shuffle-artist"
+            )
+
+        # Section 2: Navigation + Radio
         nav_section = Gio.Menu()
         nav_section.append(
             "View Artist Details", "ctx.view-artist"
         )
+        if self._callbacks.get("on_artist_radio"):
+            nav_section.append(
+                "Go to Artist Radio", "ctx.artist-radio"
+            )
         menu.append_section(None, nav_section)
+
+        # Section 3: Follow / Unfollow (Tidal)
+        if self._callbacks.get("on_follow_artist") or self._callbacks.get("on_unfollow_artist"):
+            follow_section = Gio.Menu()
+            is_followed = self._artist_data.get("is_followed", False)
+            if is_followed:
+                follow_section.append(
+                    "Unfollow Artist", "ctx.unfollow-artist"
+                )
+            else:
+                follow_section.append(
+                    "Follow Artist", "ctx.follow-artist"
+                )
+            menu.append_section(None, follow_section)
 
         return menu
 
@@ -489,6 +582,10 @@ class ArtistContextMenu(_BaseContextMenu):
             group, "add-all-to-queue", self._on_add_all_to_queue
         )
         self._add_action(group, "view-artist", self._on_view_artist)
+        self._add_action(group, "artist-radio", self._on_artist_radio)
+        self._add_action(group, "shuffle-artist", self._on_shuffle_artist)
+        self._add_action(group, "follow-artist", self._on_follow_artist)
+        self._add_action(group, "unfollow-artist", self._on_unfollow_artist)
 
         return group
 
@@ -504,5 +601,25 @@ class ArtistContextMenu(_BaseContextMenu):
 
     def _on_view_artist(self, _action, _param) -> None:
         cb = self._callbacks.get("on_view_artist")
+        if cb is not None:
+            cb()
+
+    def _on_artist_radio(self, _action, _param) -> None:
+        cb = self._callbacks.get("on_artist_radio")
+        if cb is not None:
+            cb()
+
+    def _on_shuffle_artist(self, _action, _param) -> None:
+        cb = self._callbacks.get("on_shuffle_artist")
+        if cb is not None:
+            cb()
+
+    def _on_follow_artist(self, _action, _param) -> None:
+        cb = self._callbacks.get("on_follow_artist")
+        if cb is not None:
+            cb()
+
+    def _on_unfollow_artist(self, _action, _param) -> None:
+        cb = self._callbacks.get("on_unfollow_artist")
         if cb is not None:
             cb()

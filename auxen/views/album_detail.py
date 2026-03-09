@@ -15,19 +15,19 @@ from gi.repository import Gdk, GdkPixbuf, Gtk, Pango
 
 from auxen.models import Track
 from auxen.views.context_menu import TrackContextMenu
-from auxen.views.widgets import make_tidal_source_badge
+from auxen.views.widgets import (
+    DragScrollHelper,
+    format_duration,
+    make_source_badge,
+    make_standard_track_row,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def _format_duration(seconds: float | None) -> str:
-    """Format seconds as M:SS."""
-    if seconds is None or seconds <= 0:
-        return "0:00"
-    total = int(seconds)
-    minutes = total // 60
-    secs = total % 60
-    return f"{minutes}:{secs:02d}"
+    """Format seconds as M:SS (delegates to shared utility)."""
+    return format_duration(seconds)
 
 
 def _format_total_duration(seconds: float) -> str:
@@ -43,18 +43,8 @@ def _format_total_duration(seconds: float) -> str:
 
 
 def _make_source_badge(source: str) -> Gtk.Widget:
-    """Create a small pill badge indicating the track source."""
-    if source == "tidal":
-        badge = make_tidal_source_badge(
-            label_text=source.capitalize(),
-            css_class="source-badge-tidal",
-            icon_size=10,
-        )
-    else:
-        badge = Gtk.Label(label=source.capitalize())
-        badge.add_css_class("source-badge-local")
-    badge.set_valign(Gtk.Align.CENTER)
-    return badge
+    """Create a small pill badge (delegates to shared utility)."""
+    return make_source_badge(source)
 
 
 class AlbumDetailView(Gtk.ScrolledWindow):
@@ -66,6 +56,7 @@ class AlbumDetailView(Gtk.ScrolledWindow):
         super().__init__(**kwargs)
 
         self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._drag_scroll = DragScrollHelper(self)
 
         # Callbacks
         self._on_play_track: Optional[Callable[[Track], None]] = None
@@ -130,6 +121,7 @@ class AlbumDetailView(Gtk.ScrolledWindow):
         )
         self._art_box.add_css_class("album-detail-art")
         self._art_box.set_size_request(200, 200)
+        self._art_box.set_vexpand(False)
 
         # Placeholder icon
         self._art_placeholder = Gtk.Image.new_from_icon_name(
@@ -359,57 +351,30 @@ class AlbumDetailView(Gtk.ScrolledWindow):
     def _make_track_row(
         self, track: Track, index: int
     ) -> Gtk.ListBoxRow:
-        """Build a single track row."""
-        row_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=12,
+        """Build a single track row using the shared standard layout."""
+        # Album detail uses track.track_number when available
+        display_index = (
+            (track.track_number - 1) if track.track_number else index
         )
-        row_box.add_css_class("album-detail-track-row")
-        row_box.set_margin_top(4)
-        row_box.set_margin_bottom(4)
-        row_box.set_margin_start(8)
-        row_box.set_margin_end(8)
+        row = make_standard_track_row(
+            track,
+            index=display_index,
+            show_art=False,
+            show_subtitle=False,
+            show_source_badge=False,
+            show_quality_badge=True,
+            show_duration=True,
+            css_class="album-detail-track-row",
+        )
 
         # Highlight if currently playing
+        row_box = row.get_child()
         if (
             self._current_track_id is not None
             and track.id == self._current_track_id
         ):
             row_box.add_css_class("album-detail-track-playing")
 
-        # Track number
-        track_num = track.track_number if track.track_number else index + 1
-        num_label = Gtk.Label(label=str(track_num))
-        num_label.add_css_class("album-detail-track-number")
-        num_label.set_xalign(1)
-        num_label.set_size_request(32, -1)
-        row_box.append(num_label)
-
-        # Title
-        title_label = Gtk.Label(label=track.title)
-        title_label.set_xalign(0)
-        title_label.set_hexpand(True)
-        title_label.set_ellipsize(Pango.EllipsizeMode.END)
-        title_label.add_css_class("body")
-        row_box.append(title_label)
-
-        # Quality badge
-        quality = track.quality_label
-        if quality and quality != "Unknown":
-            quality_badge = Gtk.Label(label=quality)
-            quality_badge.add_css_class("now-playing-quality-badge")
-            quality_badge.set_valign(Gtk.Align.CENTER)
-            row_box.append(quality_badge)
-
-        # Duration
-        dur_label = Gtk.Label(label=_format_duration(track.duration))
-        dur_label.add_css_class("caption")
-        dur_label.add_css_class("dim-label")
-        dur_label.set_valign(Gtk.Align.CENTER)
-        row_box.append(dur_label)
-
-        row = Gtk.ListBoxRow()
-        row.set_child(row_box)
         row.set_activatable(True)
         return row
 
@@ -485,6 +450,9 @@ class AlbumDetailView(Gtk.ScrolledWindow):
             "on_toggle_favorite": lambda t=track: self._context_callbacks.get("on_toggle_favorite", _noop)(t),
             "on_go_to_album": lambda t=track: self._context_callbacks.get("on_go_to_album", _noop)(t),
             "on_go_to_artist": lambda t=track: self._context_callbacks.get("on_go_to_artist", _noop)(t),
+            "on_track_radio": lambda t=track: self._context_callbacks.get("on_track_radio", _noop)(t),
+            "on_view_lyrics": lambda t=track: self._context_callbacks.get("on_view_lyrics", _noop)(t),
+            "on_credits": lambda t=track: self._context_callbacks.get("on_credits", _noop)(t),
         }
 
         track_data = {
@@ -493,6 +461,7 @@ class AlbumDetailView(Gtk.ScrolledWindow):
             "artist": track.artist,
             "album": track.album or "",
             "source": track.source,
+            "source_id": getattr(track, "source_id", None),
             "is_favorite": False,
         }
 

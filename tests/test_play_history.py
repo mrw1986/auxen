@@ -228,8 +228,8 @@ class TestGetListeningStats:
         stats = db.get_listening_stats()
         top_tracks = stats["top_tracks"]
         assert len(top_tracks) >= 2
-        assert top_tracks[0] == ("Popular", "Band", 5)
-        assert top_tracks[1] == ("Unpopular", "Band", 1)
+        assert top_tracks[0] == (t1, "Popular", "Band", 5)
+        assert top_tracks[1] == (t2, "Unpopular", "Band", 1)
 
     def test_top_artists_limited_to_10(self, db: Database) -> None:
         for i in range(15):

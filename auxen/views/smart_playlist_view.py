@@ -11,22 +11,21 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import GLib, Gtk, Pango
+from gi.repository import Gtk
 
 from auxen.views.context_menu import TrackContextMenu
-from auxen.views.widgets import make_tidal_source_badge
+from auxen.views.view_mode import (
+    ViewMode,
+    make_view_mode_toggle,
+    set_active_mode,
+)
+from auxen.views.widgets import (
+    DragScrollHelper,
+    make_compact_track_row,
+    make_standard_track_row,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _format_duration(seconds: float | None) -> str:
-    """Format seconds as M:SS."""
-    if seconds is None or seconds <= 0:
-        return "0:00"
-    total = int(seconds)
-    minutes = total // 60
-    secs = total % 60
-    return f"{minutes}:{secs:02d}"
 
 
 def _format_total_duration(seconds: float) -> str:
@@ -41,142 +40,47 @@ def _format_total_duration(seconds: float) -> str:
     return f"{minutes}m"
 
 
+def _make_play_count_widget(track) -> Gtk.Label | None:
+    """Create a play count badge widget if the track has plays."""
+    play_count = getattr(track, "play_count", 0)
+    if play_count and play_count > 0:
+        play_word = "play" if play_count == 1 else "plays"
+        count_label = Gtk.Label(label=f"{play_count} {play_word}")
+        count_label.add_css_class("play-count-badge")
+        count_label.set_valign(Gtk.Align.CENTER)
+        return count_label
+    return None
+
+
 def _make_smart_track_row(
     index: int,
     track,
     on_artist_clicked=None,
     on_album_clicked=None,
 ) -> Gtk.ListBoxRow:
-    """Build a single row for the smart-playlist track list."""
-    row_box = Gtk.Box(
-        orientation=Gtk.Orientation.HORIZONTAL,
-        spacing=12,
+    """Build a single row for the smart-playlist track list.
+
+    Uses the shared make_standard_track_row with a play count badge
+    as an extra widget.
+    """
+    # Build extra widgets: play count badge
+    extras_after: list[Gtk.Widget] = []
+    count_widget = _make_play_count_widget(track)
+    if count_widget is not None:
+        extras_after.append(count_widget)
+
+    row = make_standard_track_row(
+        track,
+        index=index,
+        show_art=True,
+        show_source_badge=True,
+        show_quality_badge=False,
+        show_duration=True,
+        css_class="playlist-track-row",
+        on_artist_clicked=on_artist_clicked,
+        on_album_clicked=on_album_clicked,
+        extra_widgets_after=extras_after if extras_after else None,
     )
-    row_box.add_css_class("playlist-track-row")
-    row_box.set_margin_top(4)
-    row_box.set_margin_bottom(4)
-    row_box.set_margin_start(8)
-    row_box.set_margin_end(8)
-
-    # -- Track number --
-    num_label = Gtk.Label(label=str(index + 1))
-    num_label.add_css_class("caption")
-    num_label.add_css_class("dim-label")
-    num_label.set_size_request(28, -1)
-    num_label.set_xalign(1)
-    num_label.set_valign(Gtk.Align.CENTER)
-    row_box.append(num_label)
-
-    # -- Album art placeholder (48x48) --
-    art_box = Gtk.Box(
-        orientation=Gtk.Orientation.VERTICAL,
-        halign=Gtk.Align.CENTER,
-        valign=Gtk.Align.CENTER,
-    )
-    art_box.add_css_class("album-art-placeholder")
-    art_box.add_css_class("album-art-mini")
-    art_box.set_size_request(48, 48)
-
-    art_icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
-    art_icon.set_pixel_size(20)
-    art_icon.set_opacity(0.4)
-    art_icon.set_halign(Gtk.Align.CENTER)
-    art_icon.set_valign(Gtk.Align.CENTER)
-    art_icon.set_vexpand(True)
-    art_box.append(art_icon)
-    row_box.append(art_box)
-
-    # -- Title + Artist + Album column --
-    text_box = Gtk.Box(
-        orientation=Gtk.Orientation.VERTICAL,
-        spacing=2,
-    )
-    text_box.set_hexpand(True)
-    text_box.set_valign(Gtk.Align.CENTER)
-
-    title_label = Gtk.Label()
-    title_label.set_xalign(0)
-    title_label.set_ellipsize(Pango.EllipsizeMode.END)
-    title_label.set_max_width_chars(40)
-    title_label.add_css_class("body")
-    title_label.set_markup(
-        f"<b>{GLib.markup_escape_text(track.title)}</b>"
-    )
-    text_box.append(title_label)
-
-    subtitle_box = Gtk.Box(
-        orientation=Gtk.Orientation.HORIZONTAL, spacing=0
-    )
-    subtitle_box.set_xalign(0) if hasattr(subtitle_box, "set_xalign") else None
-
-    def _make_nav_label(text: str, callback, *cb_args) -> Gtk.Label:
-        lbl = Gtk.Label(label=text)
-        lbl.set_ellipsize(Pango.EllipsizeMode.END)
-        lbl.set_max_width_chars(25)
-        lbl.add_css_class("track-row-subtitle")
-        if callback is not None:
-            lbl.add_css_class("track-nav-link")
-            g = Gtk.GestureClick.new()
-            g.set_button(1)
-            def _on_click(gest, n_press, _x, _y, _cb=callback, _args=cb_args):
-                if n_press != 1:
-                    return
-                gest.set_state(Gtk.EventSequenceState.CLAIMED)
-                _cb(*_args)
-            g.connect("released", _on_click)
-            lbl.add_controller(g)
-        return lbl
-
-    subtitle_box.append(
-        _make_nav_label(
-            track.artist, on_artist_clicked, track.artist
-        )
-    )
-    if track.album:
-        sep = Gtk.Label(label=" \u2014 ")
-        sep.add_css_class("track-row-subtitle")
-        subtitle_box.append(sep)
-        subtitle_box.append(
-            _make_nav_label(
-                track.album, on_album_clicked, track.album, track.artist
-            )
-        )
-    text_box.append(subtitle_box)
-
-    row_box.append(text_box)
-
-    # -- Play count badge (when available) --
-    if track.play_count and track.play_count > 0:
-        play_word = "play" if track.play_count == 1 else "plays"
-        count_label = Gtk.Label(label=f"{track.play_count} {play_word}")
-        count_label.add_css_class("play-count-badge")
-        count_label.set_valign(Gtk.Align.CENTER)
-        row_box.append(count_label)
-
-    # -- Source badge --
-    source_text = track.source.value.capitalize()
-    if track.source.value == "tidal":
-        source_badge = make_tidal_source_badge(
-            label_text=source_text,
-            css_class="source-badge-tidal",
-            icon_size=10,
-        )
-    else:
-        source_badge = Gtk.Label(label=source_text)
-        source_badge.add_css_class("source-badge-local")
-    source_badge.set_valign(Gtk.Align.CENTER)
-    row_box.append(source_badge)
-
-    # -- Duration --
-    dur_label = Gtk.Label(label=_format_duration(track.duration))
-    dur_label.add_css_class("caption")
-    dur_label.add_css_class("dim-label")
-    dur_label.set_valign(Gtk.Align.CENTER)
-    dur_label.set_margin_start(4)
-    row_box.append(dur_label)
-
-    row = Gtk.ListBoxRow()
-    row.set_child(row_box)
     return row
 
 
@@ -189,10 +93,13 @@ class SmartPlaylistView(Gtk.ScrolledWindow):
         super().__init__(**kwargs)
 
         self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._drag_scroll = DragScrollHelper(self)
 
         self._tracks: list = []
         self._definition: dict | None = None
         self._smart_id: str | None = None
+        self._view_mode: ViewMode = ViewMode.LIST
+        self._db = None
 
         # Public callbacks
         self.on_play_track: Callable | None = None
@@ -328,6 +235,15 @@ class SmartPlaylistView(Gtk.ScrolledWindow):
         refresh_btn.connect("clicked", self._on_refresh_clicked)
         actions_box.append(refresh_btn)
 
+        # View mode toggle (inline with actions)
+        self._view_mode_toggle = make_view_mode_toggle(
+            on_mode_changed=self._on_view_mode_changed,
+            initial_mode=ViewMode.LIST,
+            include_grid=False,
+        )
+        self._view_mode_toggle.set_valign(Gtk.Align.CENTER)
+        actions_box.append(self._view_mode_toggle)
+
         self._root.append(actions_box)
 
         # ---- 3. Content stack (list vs empty state) ----
@@ -381,6 +297,20 @@ class SmartPlaylistView(Gtk.ScrolledWindow):
         self._content_stack.set_visible_child_name("empty")
 
     # ---- Public API ----
+
+    def set_database(self, db) -> None:
+        """Set the database reference for view mode persistence."""
+        self._db = db
+        # Restore persisted view mode
+        try:
+            saved = db.get_setting("view_mode_smart_playlist", "list")
+            for mode in ViewMode:
+                if mode.value == saved:
+                    self._view_mode = mode
+                    set_active_mode(self._view_mode_toggle, mode)
+                    break
+        except Exception:
+            pass
 
     def show_playlist(
         self,
@@ -453,6 +383,15 @@ class SmartPlaylistView(Gtk.ScrolledWindow):
             self._content_stack.set_visible_child_name("empty")
             return
 
+        if self._view_mode == ViewMode.COMPACT_LIST:
+            self._rebuild_track_list_compact()
+        else:
+            self._rebuild_track_list_full()
+
+        self._content_stack.set_visible_child_name("list")
+
+    def _rebuild_track_list_full(self) -> None:
+        """Rebuild track list in full (list) mode."""
         for idx, track in enumerate(self._tracks):
             row = _make_smart_track_row(
                 index=idx,
@@ -467,7 +406,41 @@ class SmartPlaylistView(Gtk.ScrolledWindow):
             self._attach_context_gesture(row, track)
             self._track_list.append(row)
 
-        self._content_stack.set_visible_child_name("list")
+    def _rebuild_track_list_compact(self) -> None:
+        """Rebuild track list in compact mode (no art, single-line)."""
+        for idx, track in enumerate(self._tracks):
+            # Build play count as extra widget for compact mode
+            extras: list[Gtk.Widget] = []
+            count_widget = _make_play_count_widget(track)
+            if count_widget is not None:
+                extras.append(count_widget)
+
+            row = make_compact_track_row(
+                track,
+                index=idx,
+                show_source_badge=True,
+                on_artist_clicked=getattr(
+                    self, "_on_artist_clicked", None
+                ),
+                on_album_clicked=getattr(
+                    self, "_on_album_clicked", None
+                ),
+                extra_widgets_after=extras if extras else None,
+            )
+            self._attach_context_gesture(row, track)
+            self._track_list.append(row)
+
+    def _on_view_mode_changed(self, mode: ViewMode) -> None:
+        """Handle view mode toggle changes."""
+        self._view_mode = mode
+        if self._db is not None:
+            try:
+                self._db.set_setting(
+                    "view_mode_smart_playlist", mode.value
+                )
+            except Exception:
+                pass
+        self._rebuild_track_list()
 
     # ---- Context menu helpers ----
 
@@ -510,6 +483,9 @@ class SmartPlaylistView(Gtk.ScrolledWindow):
             "on_toggle_favorite": lambda t=track: self._context_callbacks.get("on_toggle_favorite", _noop)(t),
             "on_go_to_album": lambda t=track: self._context_callbacks.get("on_go_to_album", _noop)(t),
             "on_go_to_artist": lambda t=track: self._context_callbacks.get("on_go_to_artist", _noop)(t),
+            "on_track_radio": lambda t=track: self._context_callbacks.get("on_track_radio", _noop)(t),
+            "on_view_lyrics": lambda t=track: self._context_callbacks.get("on_view_lyrics", _noop)(t),
+            "on_credits": lambda t=track: self._context_callbacks.get("on_credits", _noop)(t),
         }
 
         track_data = {
@@ -518,6 +494,7 @@ class SmartPlaylistView(Gtk.ScrolledWindow):
             "artist": getattr(track, "artist", ""),
             "album": getattr(track, "album", ""),
             "source": getattr(track, "source", None),
+            "source_id": getattr(track, "source_id", None),
             "is_favorite": False,
         }
 

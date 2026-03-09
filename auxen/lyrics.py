@@ -1,7 +1,8 @@
 """Lyrics fetching service for the Auxen music player.
 
-Retrieves lyrics from embedded metadata (FLAC, MP3, M4A/AAC) and
-sidecar .lrc files.  Results are cached in memory to avoid re-reading.
+Retrieves lyrics from the Tidal API (for Tidal tracks), embedded
+metadata (FLAC, MP3, M4A/AAC), and sidecar .lrc files.  Results are
+cached in memory to avoid re-reading.
 """
 
 from __future__ import annotations
@@ -18,19 +19,23 @@ logger = logging.getLogger(__name__)
 
 
 class LyricsService:
-    """Fetch lyrics from embedded tags or sidecar LRC files.
+    """Fetch lyrics from embedded tags, sidecar LRC files, or Tidal.
 
     Lookup order:
         1. In-memory cache
-        2. Embedded lyrics in the audio file (FLAC / MP3 / M4A)
-        3. Sidecar ``.lrc`` file next to the audio file
-
-    Only local tracks are supported; Tidal tracks will always return None.
+        2. For Tidal tracks: Tidal lyrics API (falls back to embedded/LRC)
+        3. Embedded lyrics in the audio file (FLAC / MP3 / M4A)
+        4. Sidecar ``.lrc`` file next to the audio file
     """
 
     def __init__(self) -> None:
         self._cache: dict[tuple[str, str], Optional[str]] = {}
         self._lock = threading.Lock()
+        self._tidal_provider = None
+
+    def set_tidal_provider(self, provider) -> None:
+        """Wire a TidalProvider so lyrics can be fetched for Tidal tracks."""
+        self._tidal_provider = provider
 
     # ------------------------------------------------------------------
     # Public API
@@ -85,10 +90,15 @@ class LyricsService:
     # ------------------------------------------------------------------
 
     def _fetch_lyrics(self, track: Track) -> Optional[str]:
-        """Try embedded metadata, then sidecar LRC."""
-        if track.source != Source.LOCAL:
+        """Try Tidal lyrics (for Tidal tracks), embedded metadata, then sidecar LRC."""
+        # Tidal tracks: try the Tidal lyrics API first
+        if track.source == Source.TIDAL:
+            tidal_lyrics = self._fetch_tidal_lyrics(track)
+            if tidal_lyrics:
+                return tidal_lyrics
             return None
 
+        # Local tracks: embedded metadata, then sidecar LRC
         file_path = track.source_id
         if not file_path or not os.path.isfile(file_path):
             return None
@@ -102,6 +112,32 @@ class LyricsService:
         lrc = self._read_lrc_file(file_path)
         if lrc:
             return lrc
+
+        return None
+
+    def _fetch_tidal_lyrics(self, track: Track) -> Optional[str]:
+        """Fetch lyrics from the Tidal API for a Tidal track."""
+        if self._tidal_provider is None:
+            return None
+
+        try:
+            result = self._tidal_provider.get_lyrics(track.source_id)
+            if result is None:
+                return None
+
+            # Prefer plain text lyrics; fall back to subtitles (timed lyrics)
+            text = result.get("text", "")
+            if text and text.strip():
+                return text.strip()
+
+            subtitles = result.get("subtitles", "")
+            if subtitles and subtitles.strip():
+                return subtitles.strip()
+        except Exception:
+            logger.debug(
+                "Failed to fetch Tidal lyrics for %s", track.title,
+                exc_info=True,
+            )
 
         return None
 

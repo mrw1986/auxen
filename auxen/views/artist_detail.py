@@ -10,12 +10,13 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
+gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango
 
 from auxen.models import Track
-from auxen.views.context_menu import TrackContextMenu
-from auxen.views.widgets import make_tidal_source_badge
+from auxen.views.context_menu import AlbumContextMenu, TrackContextMenu
+from auxen.views.widgets import DragScrollHelper, make_tidal_source_badge
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,8 @@ def _make_source_badge(source: str) -> Gtk.Widget:
 
 def _make_album_card(
     album: str, track_count: int, year: int | None, source: str,
-) -> Gtk.FlowBoxChild:
+    cover_url: str | None = None, tidal_id: str | None = None,
+) -> Gtk.Box:
     """Build a single album card for the artist's albums row."""
     card = Gtk.Box(
         orientation=Gtk.Orientation.VERTICAL,
@@ -77,6 +79,7 @@ def _make_album_card(
     )
     art_box.add_css_class("album-art-placeholder")
     art_box.set_size_request(160, 160)
+    art_box.set_vexpand(False)
 
     art_icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
     art_icon.set_pixel_size(48)
@@ -85,6 +88,15 @@ def _make_album_card(
     art_icon.set_valign(Gtk.Align.CENTER)
     art_icon.set_vexpand(True)
     art_box.append(art_icon)
+
+    art_image = Gtk.Image()
+    art_image.set_pixel_size(160)
+    art_image.set_size_request(160, 160)
+    art_image.set_halign(Gtk.Align.FILL)
+    art_image.set_valign(Gtk.Align.FILL)
+    art_image.add_css_class("album-card-art-image")
+    art_image.set_visible(False)
+    art_box.append(art_image)
 
     overlay.set_child(art_box)
 
@@ -133,12 +145,15 @@ def _make_album_card(
     subtitle_label.set_margin_end(4)
     card.append(subtitle_label)
 
-    child = Gtk.FlowBoxChild()
-    child.set_child(card)
-    # Store data for click handling
-    child._album_title = album  # type: ignore[attr-defined]
-    child._album_source = source  # type: ignore[attr-defined]
-    return child
+    # Store data for click handling and async art loading
+    card._album_title = album  # type: ignore[attr-defined]
+    card._album_source = source  # type: ignore[attr-defined]
+    card._tidal_id = tidal_id  # type: ignore[attr-defined]
+    card._art_icon = art_icon  # type: ignore[attr-defined]
+    card._art_image = art_image  # type: ignore[attr-defined]
+    card._art_box = art_box  # type: ignore[attr-defined]
+    card._cover_url = cover_url  # type: ignore[attr-defined]
+    return card
 
 
 class ArtistDetailView(Gtk.ScrolledWindow):
@@ -150,18 +165,24 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         super().__init__(**kwargs)
 
         self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._drag_scroll = DragScrollHelper(self)
 
         # Callbacks
         self._on_play_track: Optional[Callable[[Track], None]] = None
         self._on_play_all: Optional[Callable[[list[Track]], None]] = None
         self._on_back: Optional[Callable[[], None]] = None
         self._on_album_clicked: Optional[
-            Callable[[str, str], None]
+            Callable[..., None]
+        ] = None
+        self._on_similar_artist_clicked: Optional[
+            Callable[[str], None]
         ] = None
 
         # Context menu callbacks
         self._context_callbacks: Optional[dict] = None
         self._get_playlists: Optional[Callable] = None
+        self._album_context_callbacks: Optional[dict] = None
+        self._get_album_playlists: Optional[Callable] = None
         self._current_menu: object = None
 
         # Data
@@ -216,16 +237,28 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         )
         icon_box.add_css_class("artist-detail-icon")
         icon_box.set_size_request(120, 120)
+        icon_box.set_vexpand(False)
 
-        artist_icon = Gtk.Image.new_from_icon_name(
+        self._artist_icon = Gtk.Image.new_from_icon_name(
             "avatar-default-symbolic"
         )
-        artist_icon.set_pixel_size(56)
-        artist_icon.set_opacity(0.5)
-        artist_icon.set_halign(Gtk.Align.CENTER)
-        artist_icon.set_valign(Gtk.Align.CENTER)
-        artist_icon.set_vexpand(True)
-        icon_box.append(artist_icon)
+        self._artist_icon.set_pixel_size(56)
+        self._artist_icon.set_opacity(0.5)
+        self._artist_icon.set_halign(Gtk.Align.CENTER)
+        self._artist_icon.set_valign(Gtk.Align.CENTER)
+        self._artist_icon.set_vexpand(True)
+        icon_box.append(self._artist_icon)
+
+        self._artist_image = Gtk.Image()
+        self._artist_image.set_pixel_size(120)
+        self._artist_image.set_size_request(120, 120)
+        self._artist_image.set_halign(Gtk.Align.FILL)
+        self._artist_image.set_valign(Gtk.Align.FILL)
+        self._artist_image.add_css_class("artist-detail-photo")
+        self._artist_image.set_visible(False)
+        icon_box.append(self._artist_image)
+
+        self._icon_box = icon_box
         self._header.append(icon_box)
 
         # Info column
@@ -303,26 +336,23 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         self._albums_section.append(albums_header)
 
         # Horizontal scrolling for album cards
-        albums_scroll = Gtk.ScrolledWindow()
-        albums_scroll.set_policy(
+        self._albums_scroll = Gtk.ScrolledWindow()
+        self._albums_scroll.set_policy(
             Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER
         )
-        albums_scroll.set_min_content_height(240)
-        albums_scroll.add_css_class("artist-detail-albums-row")
+        self._albums_scroll.set_min_content_height(240)
+        self._albums_scroll.add_css_class("artist-detail-albums-row")
 
-        self._album_grid = Gtk.FlowBox()
-        self._album_grid.set_homogeneous(True)
-        self._album_grid.set_min_children_per_line(2)
-        self._album_grid.set_max_children_per_line(10)
-        self._album_grid.set_column_spacing(16)
-        self._album_grid.set_row_spacing(16)
-        self._album_grid.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self._album_grid.connect(
-            "child-activated", self._on_album_card_activated
+        self._album_grid = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=16,
         )
 
-        albums_scroll.set_child(self._album_grid)
-        self._albums_section.append(albums_scroll)
+        self._albums_scroll.set_child(self._album_grid)
+        self._albums_section.append(self._albums_scroll)
+
+        # Drag-to-scroll with kinetic momentum
+        self._albums_drag_helper = DragScrollHelper(self._albums_scroll)
 
         self._root.append(self._albums_section)
 
@@ -335,7 +365,7 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         track_section.set_margin_end(32)
         track_section.set_margin_bottom(32)
 
-        track_header = Gtk.Label(label="All Tracks")
+        track_header = Gtk.Label(label="Top Tracks")
         track_header.set_xalign(0)
         track_header.add_css_class("section-header")
         track_section.append(track_header)
@@ -348,6 +378,68 @@ class ArtistDetailView(Gtk.ScrolledWindow):
 
         self._root.append(track_section)
 
+        # ---- Biography section ----
+        self._bio_section = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=8,
+        )
+        self._bio_section.set_margin_start(32)
+        self._bio_section.set_margin_end(32)
+        self._bio_section.set_margin_bottom(24)
+        self._bio_section.set_visible(False)
+
+        bio_header = Gtk.Label(label="About")
+        bio_header.set_xalign(0)
+        bio_header.add_css_class("section-header")
+        self._bio_section.append(bio_header)
+
+        self._bio_label = Gtk.Label(label="")
+        self._bio_label.set_xalign(0)
+        self._bio_label.set_yalign(0)
+        self._bio_label.set_wrap(True)
+        self._bio_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self._bio_label.set_max_width_chars(80)
+        self._bio_label.add_css_class("body")
+        self._bio_label.add_css_class("artist-bio-text")
+        self._bio_label.set_selectable(True)
+        self._bio_section.append(self._bio_label)
+
+        self._root.append(self._bio_section)
+
+        # ---- Similar Artists section ----
+        self._similar_section = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=8,
+        )
+        self._similar_section.set_margin_start(32)
+        self._similar_section.set_margin_end(32)
+        self._similar_section.set_margin_bottom(32)
+        self._similar_section.set_visible(False)
+
+        similar_header = Gtk.Label(label="Similar Artists")
+        similar_header.set_xalign(0)
+        similar_header.add_css_class("section-header")
+        self._similar_section.append(similar_header)
+
+        self._similar_scroll = Gtk.ScrolledWindow()
+        self._similar_scroll.set_policy(
+            Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER
+        )
+        self._similar_scroll.set_min_content_height(160)
+
+        self._similar_grid = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=12,
+        )
+
+        self._similar_scroll.set_child(self._similar_grid)
+        self._similar_section.append(self._similar_scroll)
+
+        # Drag-to-scroll with kinetic momentum
+        self._similar_drag_helper = DragScrollHelper(self._similar_scroll)
+
+        self._root.append(self._similar_section)
+
         self.set_child(self._root)
 
     # ---- Public API ----
@@ -358,12 +450,14 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         on_play_all: Callable[[list[Track]], None] | None = None,
         on_back: Callable[[], None] | None = None,
         on_album_clicked: Callable[[str, str], None] | None = None,
+        on_similar_artist_clicked: Callable[[str], None] | None = None,
     ) -> None:
         """Set callback functions for user actions."""
         self._on_play_track = on_play_track
         self._on_play_all = on_play_all
         self._on_back = on_back
         self._on_album_clicked = on_album_clicked
+        self._on_similar_artist_clicked = on_similar_artist_clicked
 
     def set_context_callbacks(
         self,
@@ -374,12 +468,24 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         self._context_callbacks = callbacks
         self._get_playlists = get_playlists
 
+    def set_album_context_callbacks(
+        self,
+        callbacks: dict,
+        get_playlists: Callable,
+    ) -> None:
+        """Set callback functions for the album right-click context menu."""
+        self._album_context_callbacks = callbacks
+        self._get_album_playlists = get_playlists
+
     def show_artist(
         self,
         artist_name: str,
         albums: list[dict],
         tracks: list[Track],
         source: str,
+        image_url: str | None = None,
+        bio: str | None = None,
+        similar_artists: list[dict] | None = None,
     ) -> None:
         """Populate the view with artist data.
 
@@ -393,10 +499,22 @@ class ArtistDetailView(Gtk.ScrolledWindow):
             All tracks by this artist.
         source:
             Primary source identifier (e.g. "local", "tidal").
+        image_url:
+            Optional URL for the artist's photo.
+        bio:
+            Optional biography text.
+        similar_artists:
+            Optional list of similar artist dicts with keys: name, image_url, tidal_id.
         """
         self._artist_name = artist_name
         self._albums = list(albums)
         self._tracks = list(tracks)
+
+        # Load artist image if URL provided
+        self._artist_image.set_visible(False)
+        self._artist_icon.set_visible(True)
+        if image_url:
+            self._load_artist_image(image_url)
 
         # Update header
         self._name_label.set_label(artist_name)
@@ -424,28 +542,157 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         for src in sources:
             self._source_badge_box.append(_make_source_badge(src))
 
-        # Albums grid
-        self._clear_flow_box(self._album_grid)
+        # Albums row (horizontal scrollable)
+        self._clear_box(self._album_grid)
         if albums:
             self._albums_section.set_visible(True)
             for album_data in albums:
-                self._album_grid.append(
-                    _make_album_card(
-                        album=album_data["album"],
-                        track_count=album_data["track_count"],
-                        year=album_data["year"],
-                        source=album_data["source"],
-                    )
+                card = _make_album_card(
+                    album=album_data["album"],
+                    track_count=album_data["track_count"],
+                    year=album_data["year"],
+                    source=album_data["source"],
+                    cover_url=album_data.get("cover_url"),
+                    tidal_id=album_data.get("tidal_id"),
                 )
+                # Click gesture for album card activation
+                gesture = Gtk.GestureClick(button=1)
+                gesture.connect(
+                    "released", self._on_album_card_click, card,
+                )
+                card.add_controller(gesture)
+                # Right-click gesture for album context menu
+                self._attach_album_context_gesture(card)
+                self._album_grid.append(card)
+                # Load cover art if URL available
+                url = getattr(card, "_cover_url", None)
+                if url:
+                    self._load_album_cover(card, url)
         else:
             self._albums_section.set_visible(False)
 
-        # Track list
+        # Top tracks (limit to 50)
+        display_tracks = tracks[:50]
         self._clear_list_box(self._track_list)
-        for i, track in enumerate(tracks):
+        for i, track in enumerate(display_tracks):
             row = self._make_track_row(track, i)
             self._attach_context_gesture(row, track)
             self._track_list.append(row)
+
+        # Biography
+        if bio:
+            markup = self._format_bio(bio)
+            self._bio_label.set_use_markup(True)
+            self._bio_label.set_markup(markup)
+            self._bio_section.set_visible(True)
+        else:
+            self._bio_section.set_visible(False)
+
+        # Similar artists
+        self._clear_box(self._similar_grid)
+        if similar_artists:
+            self._similar_section.set_visible(True)
+            for sa in similar_artists:
+                card = self._make_similar_artist_card(
+                    sa["name"], sa.get("image_url"),
+                )
+                # Click gesture for similar artist activation
+                gesture = Gtk.GestureClick(button=1)
+                gesture.connect(
+                    "released", self._on_similar_card_click, card,
+                )
+                card.add_controller(gesture)
+                self._similar_grid.append(card)
+        else:
+            self._similar_section.set_visible(False)
+
+    def _load_artist_image(self, url: str) -> None:
+        """Load artist image from URL in a background thread."""
+        import urllib.request
+
+        request_token = object()
+        self._artist_image_token = request_token
+
+        def _fetch() -> bytes | None:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Auxen/1.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return resp.read()
+            except Exception:
+                return None
+
+        def _on_done(data: bytes | None) -> bool:
+            if getattr(self, "_artist_image_token", None) is not request_token:
+                return False
+            if data is not None:
+                try:
+                    loader = GdkPixbuf.PixbufLoader()
+                    loader.write(data)
+                    loader.close()
+                    pixbuf = loader.get_pixbuf()
+                    if pixbuf:
+                        texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                        self._artist_image.set_from_paintable(texture)
+                        self._artist_image.set_visible(True)
+                        self._artist_icon.set_visible(False)
+                except Exception:
+                    pass
+            return False
+
+        import threading
+
+        def _thread():
+            data = _fetch()
+            GLib.idle_add(_on_done, data)
+
+        threading.Thread(target=_thread, daemon=True).start()
+
+    def _load_album_cover(self, card: Gtk.Box, url: str) -> None:
+        """Load album cover art from URL in a background thread."""
+        import threading
+        import urllib.request
+
+        request_token = object()
+        card._art_token = request_token  # type: ignore[attr-defined]
+
+        def _fetch() -> bytes | None:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Auxen/1.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return resp.read()
+            except Exception:
+                return None
+
+        def _on_done(data: bytes | None) -> bool:
+            if getattr(card, "_art_token", None) is not request_token:
+                return False
+            if data is not None:
+                try:
+                    loader = GdkPixbuf.PixbufLoader()
+                    loader.write(data)
+                    loader.close()
+                    pixbuf = loader.get_pixbuf()
+                    if pixbuf:
+                        texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                        art_image = getattr(card, "_art_image", None)
+                        art_icon = getattr(card, "_art_icon", None)
+                        art_box = getattr(card, "_art_box", None)
+                        if art_image:
+                            art_image.set_from_paintable(texture)
+                            art_image.set_visible(True)
+                        if art_icon:
+                            art_icon.set_visible(False)
+                        if art_box:
+                            art_box.remove_css_class("album-art-placeholder")
+                except Exception:
+                    pass
+            return False
+
+        def _thread():
+            data = _fetch()
+            GLib.idle_add(_on_done, data)
+
+        threading.Thread(target=_thread, daemon=True).start()
 
     # ---- Internal ----
 
@@ -513,18 +760,191 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         row.set_activatable(True)
         return row
 
-    def _on_album_card_activated(
+    def _make_similar_artist_card(
+        self, name: str, image_url: str | None,
+    ) -> Gtk.Box:
+        """Build a clickable card for a similar artist."""
+        card = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=6,
+            halign=Gtk.Align.CENTER,
+        )
+        card.add_css_class("similar-artist-card")
+
+        # Artist image placeholder
+        img_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER,
+        )
+        img_box.add_css_class("similar-artist-image-box")
+        img_box.set_size_request(80, 80)
+        img_box.set_vexpand(False)
+
+        icon = Gtk.Image.new_from_icon_name("avatar-default-symbolic")
+        icon.set_pixel_size(32)
+        icon.set_opacity(0.4)
+        icon.set_halign(Gtk.Align.CENTER)
+        icon.set_valign(Gtk.Align.CENTER)
+        icon.set_vexpand(True)
+        img_box.append(icon)
+
+        img = Gtk.Image()
+        img.set_pixel_size(80)
+        img.set_size_request(80, 80)
+        img.set_halign(Gtk.Align.FILL)
+        img.set_valign(Gtk.Align.FILL)
+        img.add_css_class("similar-artist-photo")
+        img.set_visible(False)
+        img_box.append(img)
+
+        card.append(img_box)
+
+        name_label = Gtk.Label(label=name)
+        name_label.set_ellipsize(Pango.EllipsizeMode.END)
+        name_label.set_max_width_chars(12)
+        name_label.add_css_class("caption")
+        card.append(name_label)
+
+        card._artist_name = name  # type: ignore[attr-defined]
+
+        # Load image if available
+        if image_url:
+            self._load_similar_artist_image(card, icon, img, img_box, image_url)
+
+        return card
+
+    def _load_similar_artist_image(
         self,
-        _flow_box: Gtk.FlowBox,
-        child: Gtk.FlowBoxChild,
+        card: Gtk.Box,
+        icon: Gtk.Image,
+        img: Gtk.Image,
+        img_box: Gtk.Box,
+        url: str,
+    ) -> None:
+        """Load a similar artist's image from URL."""
+        import threading
+        import urllib.request
+
+        request_token = object()
+        card._img_token = request_token  # type: ignore[attr-defined]
+
+        def _fetch() -> bytes | None:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Auxen/1.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return resp.read()
+            except Exception:
+                return None
+
+        def _on_done(data: bytes | None) -> bool:
+            if getattr(card, "_img_token", None) is not request_token:
+                return False
+            if data is not None:
+                try:
+                    loader = GdkPixbuf.PixbufLoader()
+                    loader.write(data)
+                    loader.close()
+                    pixbuf = loader.get_pixbuf()
+                    if pixbuf:
+                        texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                        img.set_from_paintable(texture)
+                        img.set_visible(True)
+                        icon.set_visible(False)
+                        img_box.remove_css_class("similar-artist-image-box")
+                except Exception:
+                    pass
+            return False
+
+        def _thread():
+            data = _fetch()
+            GLib.idle_add(_on_done, data)
+
+        threading.Thread(target=_thread, daemon=True).start()
+
+    def _on_similar_card_click(
+        self,
+        gesture: Gtk.GestureClick,
+        _n_press: int,
+        _x: float,
+        _y: float,
+        card: Gtk.Box,
+    ) -> None:
+        """Handle a similar artist card click."""
+        if self._similar_drag_helper.is_dragging:
+            return
+        name = getattr(card, "_artist_name", None)
+        if name and self._on_similar_artist_clicked:
+            self._on_similar_artist_clicked(name)
+
+    def _on_album_card_click(
+        self,
+        gesture: Gtk.GestureClick,
+        _n_press: int,
+        _x: float,
+        _y: float,
+        card: Gtk.Box,
     ) -> None:
         """Handle an album card click in the artist's albums row."""
-        album_title = getattr(child, "_album_title", None)
+        # Suppress click if the user was dragging to scroll
+        if self._albums_drag_helper.is_dragging:
+            return
+        album_title = getattr(card, "_album_title", None)
+        tidal_id = getattr(card, "_tidal_id", None)
         if (
             album_title is not None
             and self._on_album_clicked is not None
         ):
-            self._on_album_clicked(album_title, self._artist_name)
+            self._on_album_clicked(album_title, self._artist_name, tidal_id)
+
+    def _attach_album_context_gesture(self, card: Gtk.Box) -> None:
+        """Attach a right-click gesture to an album card."""
+        if self._album_context_callbacks is None:
+            return
+        album_title = getattr(card, "_album_title", None)
+        album_artist = getattr(card, "_album_artist", self._artist_name)
+        if album_title is None:
+            return
+
+        gesture = Gtk.GestureClick(button=3)
+
+        def _on_right_click(g, n_press, x, y, a=album_title, ar=album_artist):
+            if n_press != 1:
+                return
+            self._show_album_context_menu(card, x, y, a, ar)
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
+
+        gesture.connect("pressed", _on_right_click)
+        card.add_controller(gesture)
+
+    def _show_album_context_menu(
+        self, widget: Gtk.Widget, x: float, y: float,
+        album_name: str, artist: str,
+    ) -> None:
+        """Create and display a context menu for an album card."""
+        if self._album_context_callbacks is None:
+            return
+        playlists = []
+        if self._get_album_playlists is not None:
+            playlists = self._get_album_playlists()
+
+        cbs = self._album_context_callbacks
+        _noop = lambda *_args: None
+        callbacks = {
+            "on_play_album": lambda a=album_name, ar=artist: cbs.get("on_play_album", _noop)(a, ar),
+            "on_play_album_next": lambda a=album_name, ar=artist: cbs.get("on_play_album_next", _noop)(a, ar),
+            "on_add_album_to_queue": lambda a=album_name, ar=artist: cbs.get("on_add_album_to_queue", _noop)(a, ar),
+            "on_add_to_playlist": lambda pid, a=album_name, ar=artist: cbs.get("on_add_to_playlist", _noop)(a, ar, pid),
+            "on_new_playlist": lambda a=album_name, ar=artist: cbs.get("on_new_playlist", _noop)(a, ar),
+            "on_add_to_favorites": lambda a=album_name, ar=artist: cbs.get("on_add_to_favorites", _noop)(a, ar),
+            "on_go_to_artist": lambda a=album_name, ar=artist: cbs.get("on_go_to_artist", _noop)(a, ar),
+            "on_shuffle_album": lambda a=album_name, ar=artist: cbs.get("on_shuffle_album", _noop)(a, ar),
+        }
+        album_data = {"album": album_name, "artist": artist}
+        self._current_menu = AlbumContextMenu(
+            album_data=album_data, callbacks=callbacks, playlists=playlists,
+        )
+        self._current_menu.show(widget, x, y)
 
     def _on_row_activated(
         self, _list_box: Gtk.ListBox, row: Gtk.ListBoxRow,
@@ -596,6 +1016,9 @@ class ArtistDetailView(Gtk.ScrolledWindow):
             "on_toggle_favorite": lambda t=track: self._context_callbacks.get("on_toggle_favorite", _noop)(t),
             "on_go_to_album": lambda t=track: self._context_callbacks.get("on_go_to_album", _noop)(t),
             "on_go_to_artist": lambda t=track: self._context_callbacks.get("on_go_to_artist", _noop)(t),
+            "on_track_radio": lambda t=track: self._context_callbacks.get("on_track_radio", _noop)(t),
+            "on_view_lyrics": lambda t=track: self._context_callbacks.get("on_view_lyrics", _noop)(t),
+            "on_credits": lambda t=track: self._context_callbacks.get("on_credits", _noop)(t),
         }
 
         track_data = {
@@ -604,6 +1027,7 @@ class ArtistDetailView(Gtk.ScrolledWindow):
             "artist": track.artist,
             "album": track.album or "",
             "source": track.source,
+            "source_id": getattr(track, "source_id", None),
             "is_favorite": False,
         }
 
@@ -615,6 +1039,51 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         self._current_menu.show(widget, x, y)
 
     @staticmethod
+    def _format_bio(bio: str) -> str:
+        """Convert Tidal bio markup to Pango markup."""
+        import re
+
+        text = bio
+        # Convert <br>, <br/>, <br /> to newlines
+        text = re.sub(r'<br\s*/?>', '\n', text)
+        # Convert [wimpLink ...]Name[/wimpLink] to placeholder tokens
+        # (do this before HTML processing to protect the content)
+        links: list[str] = []
+        def _save_link(m):
+            links.append(m.group(1))
+            return f'\x00LINK{len(links) - 1}\x00'
+        text = re.sub(
+            r'\[wimpLink[^\]]*\](.*?)\[/wimpLink\]', _save_link, text,
+        )
+        # Preserve Pango-compatible HTML tags: b, i, u, s, sub, sup
+        kept_tags: dict[str, str] = {}
+        def _save_tag(m):
+            tag = m.group(0)
+            key = f'\x00TAG{len(kept_tags)}\x00'
+            kept_tags[key] = tag
+            return key
+        text = re.sub(
+            r'</?(?:b|i|u|s|sub|sup|big|small|tt|span)[^>]*>',
+            _save_tag, text, flags=re.IGNORECASE,
+        )
+        # Strip all remaining HTML tags
+        text = re.sub(r'<[^>]+>', '', text)
+        # Escape Pango special chars in the remaining text
+        text = text.replace('&', '&amp;')
+        text = text.replace('<', '&lt;')
+        text = text.replace('>', '&gt;')
+        # Restore kept HTML tags
+        for key, tag in kept_tags.items():
+            text = text.replace(key, tag)
+        # Restore wimpLink content as bold
+        for i, name in enumerate(links):
+            safe_name = name.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            text = text.replace(f'\x00LINK{i}\x00', f'<b>{safe_name}</b>')
+        # Collapse excessive blank lines
+        text = re.sub(r'\n{3,}', '\n\n', text).strip()
+        return text
+
+    @staticmethod
     def _clear_list_box(list_box: Gtk.ListBox) -> None:
         """Remove all rows from a ListBox."""
         while True:
@@ -622,15 +1091,6 @@ class ArtistDetailView(Gtk.ScrolledWindow):
             if row is None:
                 break
             list_box.remove(row)
-
-    @staticmethod
-    def _clear_flow_box(flow_box: Gtk.FlowBox) -> None:
-        """Remove all children from a FlowBox."""
-        while True:
-            child = flow_box.get_child_at_index(0)
-            if child is None:
-                break
-            flow_box.remove(child)
 
     @staticmethod
     def _clear_box(box: Gtk.Box) -> None:

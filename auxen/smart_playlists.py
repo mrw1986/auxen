@@ -50,7 +50,7 @@ _DEFINITIONS: list[dict] = [
     {
         "id": SmartPlaylistType.FORGOTTEN_GEMS.value,
         "name": "Forgotten Gems",
-        "icon": "non-starred-symbolic",
+        "icon": "itmages-question",
         "description": (
             "Tracks you loved (5+ plays) but haven't "
             "listened to in over 30 days."
@@ -59,7 +59,7 @@ _DEFINITIONS: list[dict] = [
     {
         "id": SmartPlaylistType.NEVER_PLAYED.value,
         "name": "Never Played",
-        "icon": "media-playback-start-symbolic",
+        "icon": "never-played-symbolic",
         "description": "Tracks added to your library but never played.",
     },
 ]

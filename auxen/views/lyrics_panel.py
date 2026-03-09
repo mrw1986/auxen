@@ -9,14 +9,14 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gtk, Pango
 
+from auxen.views.widgets import DragScrollHelper
 
 class LyricsPanel(Gtk.Box):
     """Right-side panel displaying lyrics for the currently playing track.
 
-    Layout (top to bottom):
-        - Header row: "Lyrics" title + close button
-        - Track info: small title + artist
-        - Scrollable lyrics area (or empty-state placeholder)
+    Layout (left to right):
+        - Thin resize handle (drag to resize)
+        - Panel content (header, track info, scrollable lyrics)
     """
 
     __gtype_name__ = "LyricsPanel"
@@ -34,7 +34,7 @@ class LyricsPanel(Gtk.Box):
         self._on_close = on_close
 
         self.add_css_class("lyrics-panel")
-        self.set_size_request(300, -1)
+        self.set_overflow(Gtk.Overflow.HIDDEN)
 
         # ---- Header ----
         header = self._build_header()
@@ -51,6 +51,7 @@ class LyricsPanel(Gtk.Box):
         )
         self._scrolled.set_vexpand(True)
         self._scrolled.set_hexpand(True)
+        self._drag_scroll = DragScrollHelper(self._scrolled)
 
         self._lyrics_label = Gtk.Label()
         self._lyrics_label.set_wrap(True)
@@ -114,14 +115,16 @@ class LyricsPanel(Gtk.Box):
         self._info_title = Gtk.Label(label="")
         self._info_title.set_xalign(0.5)
         self._info_title.set_ellipsize(Pango.EllipsizeMode.END)
-        self._info_title.set_max_width_chars(30)
+        self._info_title.set_hexpand(True)
+        self._info_title.set_width_chars(6)
         self._info_title.add_css_class("lyrics-info-title")
         info_box.append(self._info_title)
 
         self._info_artist = Gtk.Label(label="")
         self._info_artist.set_xalign(0.5)
         self._info_artist.set_ellipsize(Pango.EllipsizeMode.END)
-        self._info_artist.set_max_width_chars(30)
+        self._info_artist.set_hexpand(True)
+        self._info_artist.set_width_chars(6)
         self._info_artist.add_css_class("lyrics-info-artist")
         info_box.append(self._info_artist)
 
@@ -132,7 +135,7 @@ class LyricsPanel(Gtk.Box):
         empty = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=12,
-            halign=Gtk.Align.CENTER,
+            halign=Gtk.Align.FILL,
             valign=Gtk.Align.CENTER,
         )
         empty.set_vexpand(True)
@@ -140,10 +143,14 @@ class LyricsPanel(Gtk.Box):
 
         icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
         icon.set_pixel_size(48)
+        icon.set_halign(Gtk.Align.CENTER)
         empty.append(icon)
 
         label = Gtk.Label(label="No lyrics available")
         label.add_css_class("dim-label")
+        label.set_wrap(True)
+        label.set_justify(Gtk.Justification.CENTER)
+        label.set_halign(Gtk.Align.CENTER)
         empty.append(label)
 
         return empty

@@ -12,7 +12,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gdk, GObject, Gtk, Pango
 
-from auxen.views.widgets import make_tidal_source_badge
+from auxen.views.widgets import DragScrollHelper, make_tidal_source_badge
 
 
 def _format_duration(seconds: Optional[float]) -> str:
@@ -28,12 +28,9 @@ def _format_duration(seconds: Optional[float]) -> str:
 class QueuePanel(Gtk.Box):
     """Right-side panel displaying the play queue.
 
-    Layout (top to bottom):
-        - Header row: "Queue" title + track count + close button
-        - Now-playing indicator (highlighted current track)
-        - Scrollable queue list
-        - Empty state (when queue is empty)
-        - Clear queue button at bottom
+    Layout (left to right):
+        - Thin resize handle (drag to resize)
+        - Panel content (header, now-playing, scrollable queue list, clear btn)
     """
 
     __gtype_name__ = "QueuePanel"
@@ -58,7 +55,7 @@ class QueuePanel(Gtk.Box):
         self._current_index: int = -1
 
         self.add_css_class("queue-panel")
-        self.set_size_request(320, -1)
+        self.set_overflow(Gtk.Overflow.HIDDEN)
 
         # ---- Header ----
         header = self._build_header()
@@ -75,6 +72,7 @@ class QueuePanel(Gtk.Box):
         )
         self._scrolled.set_vexpand(True)
         self._scrolled.set_hexpand(True)
+        self._drag_scroll = DragScrollHelper(self._scrolled)
 
         self._list_box = Gtk.ListBox()
         self._list_box.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -111,6 +109,7 @@ class QueuePanel(Gtk.Box):
         title_label = Gtk.Label(label="Queue")
         title_label.set_xalign(0)
         title_label.set_hexpand(True)
+        title_label.set_ellipsize(Pango.EllipsizeMode.END)
         title_label.add_css_class("title-3")
         header.append(title_label)
 
@@ -173,14 +172,16 @@ class QueuePanel(Gtk.Box):
         self._np_title = Gtk.Label(label="")
         self._np_title.set_xalign(0)
         self._np_title.set_ellipsize(Pango.EllipsizeMode.END)
-        self._np_title.set_max_width_chars(28)
+        self._np_title.set_hexpand(True)
+        self._np_title.set_width_chars(6)
         self._np_title.add_css_class("queue-track-title")
         np_text.append(self._np_title)
 
         self._np_artist = Gtk.Label(label="")
         self._np_artist.set_xalign(0)
         self._np_artist.set_ellipsize(Pango.EllipsizeMode.END)
-        self._np_artist.set_max_width_chars(28)
+        self._np_artist.set_hexpand(True)
+        self._np_artist.set_width_chars(6)
         self._np_artist.add_css_class("queue-track-artist")
         np_text.append(self._np_artist)
 
@@ -201,7 +202,7 @@ class QueuePanel(Gtk.Box):
         empty = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=12,
-            halign=Gtk.Align.CENTER,
+            halign=Gtk.Align.FILL,
             valign=Gtk.Align.CENTER,
         )
         empty.set_vexpand(True)
@@ -209,16 +210,24 @@ class QueuePanel(Gtk.Box):
 
         icon = Gtk.Image.new_from_icon_name("view-list-symbolic")
         icon.set_pixel_size(48)
+        icon.set_halign(Gtk.Align.CENTER)
         empty.append(icon)
 
         heading = Gtk.Label(label="Queue is empty")
         heading.add_css_class("dim-label")
         heading.add_css_class("title-4")
+        heading.set_wrap(True)
+        heading.set_justify(Gtk.Justification.CENTER)
+        heading.set_halign(Gtk.Align.CENTER)
         empty.append(heading)
 
         subtitle = Gtk.Label(label="Play some tracks to fill the queue")
         subtitle.add_css_class("dim-label")
         subtitle.add_css_class("caption")
+        subtitle.set_wrap(True)
+        subtitle.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        subtitle.set_justify(Gtk.Justification.CENTER)
+        subtitle.set_halign(Gtk.Align.CENTER)
         empty.append(subtitle)
 
         return empty
@@ -248,19 +257,19 @@ class QueuePanel(Gtk.Box):
         """Build a single queue track row with drag-and-drop support."""
         row = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=8,
+            spacing=6,
         )
         row.add_css_class("queue-track-row")
-        row.set_margin_start(8)
-        row.set_margin_end(8)
+        row.set_margin_start(4)
+        row.set_margin_end(4)
 
         is_current = index == self._current_index
         if is_current:
             row.add_css_class("queue-track-active")
 
         # Drag handle (grip icon)
-        drag_handle = Gtk.Image.new_from_icon_name("drag-symbolic")
-        drag_handle.set_pixel_size(16)
+        drag_handle = Gtk.Image.new_from_icon_name("list-drag-handle-symbolic")
+        drag_handle.set_pixel_size(14)
         drag_handle.add_css_class("drag-handle")
         drag_handle.set_valign(Gtk.Align.CENTER)
         drag_handle.set_tooltip_text("Drag to reorder")
@@ -293,10 +302,10 @@ class QueuePanel(Gtk.Box):
         position_label = Gtk.Label(label=str(index + 1))
         position_label.add_css_class("queue-track-number")
         position_label.set_valign(Gtk.Align.CENTER)
-        position_label.set_size_request(28, -1)
+        position_label.set_size_request(22, -1)
         row.append(position_label)
 
-        # Track info (title + artist)
+        # Track info (title + artist) — must expand to fill available space
         text_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=1,
@@ -306,60 +315,26 @@ class QueuePanel(Gtk.Box):
         title_label = Gtk.Label(label=track.title)
         title_label.set_xalign(0)
         title_label.set_ellipsize(Pango.EllipsizeMode.END)
-        title_label.set_max_width_chars(24)
+        title_label.set_hexpand(True)
+        title_label.set_width_chars(6)
         title_label.add_css_class("queue-track-title")
         text_box.append(title_label)
 
         artist_label = Gtk.Label(label=track.artist)
         artist_label.set_xalign(0)
         artist_label.set_ellipsize(Pango.EllipsizeMode.END)
-        artist_label.set_max_width_chars(24)
+        artist_label.set_hexpand(True)
+        artist_label.set_width_chars(6)
         artist_label.add_css_class("queue-track-artist")
         text_box.append(artist_label)
 
         row.append(text_box)
-
-        # Source badge
-        source_val = (
-            track.source.value if hasattr(track.source, "value") else str(track.source)
-        )
-        if source_val == "tidal":
-            badge = make_tidal_source_badge(
-                label_text=source_val.upper(),
-                css_class="source-badge-tidal",
-                icon_size=10,
-            )
-        else:
-            badge = Gtk.Label(label=source_val.upper())
-            badge.add_css_class("source-badge-local")
-        badge.set_valign(Gtk.Align.CENTER)
-        row.append(badge)
 
         # Duration
         duration_label = Gtk.Label(label=_format_duration(track.duration))
         duration_label.add_css_class("queue-track-duration")
         duration_label.set_valign(Gtk.Align.CENTER)
         row.append(duration_label)
-
-        # Move up button
-        if index > 0:
-            up_btn = Gtk.Button.new_from_icon_name("go-up-symbolic")
-            up_btn.add_css_class("flat")
-            up_btn.add_css_class("queue-move-btn")
-            up_btn.set_valign(Gtk.Align.CENTER)
-            up_btn.set_tooltip_text("Move up")
-            up_btn.connect("clicked", self._on_move_up_clicked, index)
-            row.append(up_btn)
-
-        # Move down button
-        if index < len(self._tracks) - 1:
-            down_btn = Gtk.Button.new_from_icon_name("go-down-symbolic")
-            down_btn.add_css_class("flat")
-            down_btn.add_css_class("queue-move-btn")
-            down_btn.set_valign(Gtk.Align.CENTER)
-            down_btn.set_tooltip_text("Move down")
-            down_btn.connect("clicked", self._on_move_down_clicked, index)
-            row.append(down_btn)
 
         # Remove button
         remove_btn = Gtk.Button.new_from_icon_name("window-close-symbolic")

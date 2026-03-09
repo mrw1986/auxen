@@ -94,6 +94,8 @@ class Player(GObject.Object):
         self._play_generation: int = 0  # guards against stale resolvers
         self._uri_cache: dict[str, str] = {}  # source_id -> stream URI
         self._cache_lock = threading.Lock()  # protects _uri_cache
+        self._gapless_pending: bool = False  # set by about-to-finish
+        self._gapless_saved_duration: float = 0.0  # old track's duration
 
         # --- ReplayGain + Equalizer + Spectrum audio chain (optional) ---
         self._rgvolume_element: Optional[Gst.Element] = None
@@ -316,7 +318,59 @@ class Player(GObject.Object):
     # Playback controls
     # ------------------------------------------------------------------
 
-    def play_track(self, track: Track) -> None:
+    @staticmethod
+    def _coerce_track(track: object) -> Optional[Track]:
+        """Return a Track instance from *track* (Track or dict)."""
+        if isinstance(track, Track):
+            return track
+
+        if not isinstance(track, dict):
+            logger.error(
+                "play_track received unsupported track type: %s",
+                type(track).__name__,
+            )
+            return None
+
+        source_raw = track.get("source", Source.LOCAL)
+        if isinstance(source_raw, Source):
+            source = source_raw
+        else:
+            source = (
+                Source.TIDAL
+                if str(source_raw).lower() == "tidal"
+                else Source.LOCAL
+            )
+
+        source_id = track.get("source_id")
+        if source_id is None:
+            logger.error(
+                "play_track received dict track without source_id: %r",
+                track,
+            )
+            return None
+
+        duration_val = track.get("duration")
+        duration: Optional[float]
+        if isinstance(duration_val, (int, float)):
+            duration = float(duration_val)
+        else:
+            duration = None
+
+        track_id = track.get("id")
+        if not isinstance(track_id, int):
+            track_id = None
+
+        return Track(
+            title=str(track.get("title") or ""),
+            artist=str(track.get("artist") or ""),
+            source=source,
+            source_id=str(source_id),
+            album=track.get("album") or None,
+            duration=duration,
+            id=track_id,
+        )
+
+    def play_track(self, track: Track | dict) -> None:
         """Resolve *track* to a URI and start playing it.
 
         URI resolution (which may involve a Tidal network call) is done
@@ -325,7 +379,13 @@ class Player(GObject.Object):
         a newer play request.  After starting playback, the next track's
         URI is prefetched into ``_uri_cache`` for gapless transitions.
         """
+        normalized_track = self._coerce_track(track)
+        if normalized_track is None:
+            return
+        track = normalized_track
+
         self._play_generation += 1
+        self._gapless_pending = False
         gen = self._play_generation
         with self._cache_lock:
             self._uri_cache.clear()
@@ -337,6 +397,12 @@ class Player(GObject.Object):
 
             uri = self._resolve_uri(track)
             if uri is None:
+                logger.warning(
+                    "Skipping unavailable track: %s",
+                    getattr(track, "title", "?"),
+                )
+                # Auto-skip to next track on the main thread
+                GLib.idle_add(self.next_track)
                 return
 
             # Re-check after the (potentially slow) resolve
@@ -551,7 +617,11 @@ class Player(GObject.Object):
             # about-to-finish for gapless playback).
             track = self.queue.next()
             if track is not None:
-                self.emit("track-changed", track)
+                # Emit on the main GTK thread so widget updates work
+                def _emit_on_main(_t=track):
+                    self.emit("track-changed", _t)
+                    return False
+                GLib.idle_add(_emit_on_main)
                 # Trigger fade-in for the gapless-transitioned track.
                 if self._crossfade is not None and self._crossfade.enabled:
                     self._crossfade.start_fade_in(
@@ -566,6 +636,40 @@ class Player(GObject.Object):
             if debug:
                 print(f"  Debug: {debug}")
             self.next_track()
+
+        elif msg_type == Gst.MessageType.STREAM_START:
+            if self._gapless_pending:
+                self._gapless_pending = False
+
+                # Cancel old poll timer — prevents any stale tick
+                self._stop_position_polling()
+
+                # Reset progress bar and advance queue on main thread
+                def _reset_and_advance():
+                    self.emit("position-updated", 0.0, 0.0)
+                    return False
+                GLib.idle_add(_reset_and_advance)
+                track = self.queue.next()
+                if track is not None:
+                    def _emit_on_main(_t=track):
+                        self.emit("track-changed", _t)
+                        return False
+                    GLib.idle_add(_emit_on_main)
+                    if self._crossfade is not None and self._crossfade.enabled:
+                        self._crossfade.start_fade_in(
+                            self, self._target_volume
+                        )
+                    # Prefetch the *next* next track for continued gapless
+                    gen = self._play_generation
+                    threading.Thread(
+                        target=self._prefetch_next_uri,
+                        args=(gen,),
+                        daemon=True,
+                    ).start()
+
+                # Start fresh poll timer — first tick in 500ms when
+                # the new stream's position/duration are stable
+                self._start_position_polling()
 
         elif msg_type == Gst.MessageType.ELEMENT:
             self._handle_spectrum_message(message)
@@ -613,7 +717,7 @@ class Player(GObject.Object):
         This callback fires from the GStreamer streaming thread shortly
         before the current stream ends.  We peek at the next track
         *without* advancing the queue position (the actual advance
-        happens in the EOS handler).
+        happens in the EOS handler or stream-start handler).
 
         The URI is looked up in ``_uri_cache`` (populated by
         ``_prefetch_next_uri``) so no network I/O occurs on this thread.
@@ -647,6 +751,12 @@ class Player(GObject.Object):
 
         if uri is not None:
             self._pipeline.set_property("uri", uri)
+            # Save the current track's duration before GStreamer switches
+            # it — query_duration() will report the NEW track's duration
+            # almost immediately, but position stays on the old stream.
+            cur_dur = self.get_duration()
+            self._gapless_saved_duration = cur_dur if cur_dur else 0.0
+            self._gapless_pending = True
 
         # Start fade-out if crossfade is enabled.
         if self._crossfade is not None and self._crossfade.enabled:
@@ -678,7 +788,18 @@ class Player(GObject.Object):
 
         pos = self.get_position()
         dur = self.get_duration()
-        if pos is not None and dur is not None:
-            self.emit("position-updated", pos, dur)
+        if pos is None or dur is None or dur <= 0:
+            return True  # query failed — skip this tick
 
+        # During gapless transition, GStreamer reports the NEW track's
+        # duration almost immediately but position stays on the OLD
+        # stream.  Use the saved old duration so the progress bar
+        # plays out naturally until STREAM_START resets everything.
+        if self._gapless_pending and self._gapless_saved_duration > 0:
+            dur = self._gapless_saved_duration
+
+        if pos > dur:
+            return True  # incoherent — skip
+
+        self.emit("position-updated", pos, dur)
         return True

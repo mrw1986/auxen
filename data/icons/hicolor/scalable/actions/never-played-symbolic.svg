@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!--
+    Never Played: play triangle overlaid with a prohibition circle
+    (circle outline + diagonal slash), all in currentColor for symbolic use.
+  -->
+  <g fill="currentColor">
+    <!-- Play triangle, slightly left-of-center to look balanced inside the circle -->
+    <polygon points="5.5,4 5.5,12 12,8"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+    <!-- Prohibition circle -->
+    <circle cx="8" cy="8" r="7"/>
+    <!-- Diagonal slash: top-right to bottom-left -->
+    <line x1="12.95" y1="3.05" x2="3.05" y2="12.95"/>
+  </g>
+</svg>

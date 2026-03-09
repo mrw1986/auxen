@@ -177,7 +177,10 @@ class AuxenSettings(Adw.PreferencesWindow):
         group = Adw.PreferencesGroup(title="Playback")
 
         # Source priority
-        self._source_priority = Adw.ComboRow(title="Source Priority")
+        self._source_priority = Adw.ComboRow(
+            title="Source Priority",
+            subtitle="Choose which source to prefer when a track is available from multiple sources",
+        )
         source_model = Gtk.StringList.new(
             [
                 "Prefer Local",
@@ -191,7 +194,10 @@ class AuxenSettings(Adw.PreferencesWindow):
         group.add(self._source_priority)
 
         # Audio quality
-        self._audio_quality = Adw.ComboRow(title="Tidal Audio Quality")
+        self._audio_quality = Adw.ComboRow(
+            title="Tidal Audio Quality",
+            subtitle="Streaming quality for Tidal tracks",
+        )
         quality_model = Gtk.StringList.new(
             [
                 "Low (96 kbps)",
@@ -205,12 +211,18 @@ class AuxenSettings(Adw.PreferencesWindow):
         group.add(self._audio_quality)
 
         # Gapless playback
-        self._gapless = Adw.SwitchRow(title="Gapless Playback")
+        self._gapless = Adw.SwitchRow(
+            title="Gapless Playback",
+            subtitle="Eliminate silence between consecutive tracks",
+        )
         self._gapless.set_active(True)
         group.add(self._gapless)
 
         # ReplayGain
-        self._replaygain = Adw.SwitchRow(title="ReplayGain Normalization")
+        self._replaygain = Adw.SwitchRow(
+            title="ReplayGain Normalization",
+            subtitle="Normalize volume levels for consistent loudness",
+        )
         self._replaygain.set_active(True)
         self._replaygain.connect(
             "notify::active", self._on_replaygain_toggled
@@ -218,7 +230,10 @@ class AuxenSettings(Adw.PreferencesWindow):
         group.add(self._replaygain)
 
         # ReplayGain mode
-        self._replaygain_mode = Adw.ComboRow(title="ReplayGain Mode")
+        self._replaygain_mode = Adw.ComboRow(
+            title="ReplayGain Mode",
+            subtitle="Adjusts playback volume to normalize loudness across tracks",
+        )
         mode_model = Gtk.StringList.new(["Album", "Track"])
         self._replaygain_mode.set_model(mode_model)
         self._replaygain_mode.set_selected(0)
@@ -273,7 +288,7 @@ class AuxenSettings(Adw.PreferencesWindow):
             title="Equalizer",
             subtitle="10-band graphic equalizer with presets",
         )
-        eq_row.set_icon_name("media-eq-symbolic")
+        eq_row.set_icon_name("view-media-equalizer")
         eq_btn = Gtk.Button(
             icon_name="go-next-symbolic",
             valign=Gtk.Align.CENTER,
@@ -312,10 +327,20 @@ class AuxenSettings(Adw.PreferencesWindow):
         )
         group.add(self._subscription_row)
 
-        # Sync Tidal Favorites button
+        # Auto-Sync Favorites toggle
+        self._auto_sync_row = Adw.SwitchRow(
+            title="Auto-Sync Favorites",
+            subtitle="Automatically sync Tidal favorites every 5 minutes",
+        )
+        self._auto_sync_row.connect(
+            "notify::active", self._on_auto_sync_toggled
+        )
+        group.add(self._auto_sync_row)
+
+        # Sync Now button
         sync_row = Adw.ActionRow(
-            title="Sync Tidal Favorites",
-            subtitle="Two-way sync between local and Tidal favorites",
+            title="Sync Now",
+            subtitle="Trigger a manual two-way favorites sync",
         )
         self._sync_btn = Gtk.Button(
             icon_name="emblem-synchronizing-symbolic",
@@ -327,12 +352,65 @@ class AuxenSettings(Adw.PreferencesWindow):
         sync_row.set_activatable_widget(self._sync_btn)
         group.add(sync_row)
 
+        # Last sync time display
+        self._last_sync_row = Adw.ActionRow(
+            title="Last Sync",
+            subtitle="Never",
+        )
+        group.add(self._last_sync_row)
+
         return group
 
     # ── Last.fm ──────────────────────────────────────────
 
     def _build_lastfm_group(self) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup(title="Last.fm")
+
+        # API Key entry
+        self._lastfm_api_key_row = Adw.EntryRow(
+            title="API Key",
+        )
+        self._lastfm_api_key_row.set_tooltip_text(
+            "Register at https://www.last.fm/api/account/create"
+        )
+        # Save on focus-out instead of every keystroke to avoid
+        # partial saves and session invalidation while typing.
+        key_focus_ctrl = Gtk.EventControllerFocus()
+        key_focus_ctrl.connect(
+            "leave", self._on_lastfm_key_focus_out
+        )
+        self._lastfm_api_key_row.add_controller(key_focus_ctrl)
+        group.add(self._lastfm_api_key_row)
+
+        # API Secret entry
+        self._lastfm_api_secret_row = Adw.PasswordEntryRow(
+            title="Shared Secret",
+        )
+        self._lastfm_api_secret_row.set_tooltip_text(
+            "The Shared Secret from your Last.fm API application"
+        )
+        secret_focus_ctrl = Gtk.EventControllerFocus()
+        secret_focus_ctrl.connect(
+            "leave", self._on_lastfm_secret_focus_out
+        )
+        self._lastfm_api_secret_row.add_controller(secret_focus_ctrl)
+        group.add(self._lastfm_api_secret_row)
+
+        # Help text for registering an API application
+        self._lastfm_help_row = Adw.ActionRow(
+            title="Get API credentials",
+            subtitle="Register at last.fm/api/account/create",
+        )
+        self._lastfm_help_row.set_icon_name("dialog-information-symbolic")
+        help_link_btn = Gtk.Button(
+            icon_name="go-next-symbolic",
+            valign=Gtk.Align.CENTER,
+        )
+        help_link_btn.add_css_class("flat")
+        help_link_btn.connect("clicked", self._on_lastfm_help_clicked)
+        self._lastfm_help_row.add_suffix(help_link_btn)
+        self._lastfm_help_row.set_activatable_widget(help_link_btn)
+        group.add(self._lastfm_help_row)
 
         # Account status
         self._lastfm_account_row = Adw.ActionRow(
@@ -500,20 +578,28 @@ class AuxenSettings(Adw.PreferencesWindow):
                 "Failed to load crossfade_duration", exc_info=True
             )
 
-        # Check Tidal login status
+        # Check Tidal login status and fetch subscription info
         if self._tidal_provider is not None:
             try:
                 if self._tidal_provider.is_logged_in:
                     self._account_row.set_subtitle("Connected")
                     self._login_btn.set_label("Log Out")
+                    self._fetch_tidal_subscription()
             except Exception:
                 logger.warning(
                     "Failed to check Tidal login status", exc_info=True
                 )
 
-        # Check Last.fm status
+        # Load Last.fm API credentials and status
         if self._lastfm_service is not None:
             try:
+                # Populate API key/secret fields from the service
+                api_key = self._lastfm_service.api_key
+                api_secret = self._lastfm_service.api_secret
+                if not self._lastfm_service.uses_default_credentials:
+                    self._lastfm_api_key_row.set_text(api_key)
+                    self._lastfm_api_secret_row.set_text(api_secret)
+
                 if self._lastfm_service.is_authenticated():
                     username = self._lastfm_service.username or "Connected"
                     self._lastfm_account_row.set_subtitle(
@@ -527,6 +613,18 @@ class AuxenSettings(Adw.PreferencesWindow):
                 logger.warning(
                     "Failed to check Last.fm status", exc_info=True
                 )
+
+        # Load auto-sync toggle state
+        try:
+            if self._favorites_sync is not None:
+                self._auto_sync_row.set_active(
+                    self._favorites_sync.auto_sync_enabled
+                )
+            self._update_last_sync_display()
+        except Exception:
+            logger.warning(
+                "Failed to load auto-sync settings", exc_info=True
+            )
 
     # ── Signal handlers ──────────────────────────────────
 
@@ -781,6 +879,52 @@ class AuxenSettings(Adw.PreferencesWindow):
         parent = self.get_transient_for()
         show_about_dialog(parent or self)
 
+    def _fetch_tidal_subscription(self) -> None:
+        """Fetch Tidal subscription info in a background thread and update the UI."""
+        if self._tidal_provider is None:
+            return
+
+        def _fetch_thread() -> None:
+            info = self._tidal_provider.get_subscription_info()
+            GLib.idle_add(self._on_subscription_fetched, info)
+
+        thread = threading.Thread(target=_fetch_thread, daemon=True)
+        thread.start()
+
+    def _on_subscription_fetched(self, info: dict) -> bool:
+        """Update the subscription row with fetched info (runs on main thread)."""
+        if not info:
+            self._subscription_row.set_subtitle("\u2014")
+            return False
+
+        # Map API type values to user-friendly labels
+        type_map = {
+            "HIFI": "HiFi",
+            "HIFI_PLUS": "HiFi Plus",
+            "PREMIUM": "Premium",
+            "FREE": "Free",
+        }
+        raw_type = info.get("type", "Unknown")
+        display_type = type_map.get(raw_type, raw_type.replace("_", " ").title())
+
+        # Map quality values to user-friendly labels
+        quality_map = {
+            "HI_RES_LOSSLESS": "Hi-Res Lossless",
+            "HI_RES": "Hi-Res",
+            "LOSSLESS": "Lossless",
+            "HIGH": "High",
+            "LOW": "Low",
+        }
+        raw_quality = info.get("quality", "")
+        display_quality = quality_map.get(raw_quality, raw_quality)
+
+        label = display_type
+        if display_quality and display_quality != "Unknown":
+            label += f" ({display_quality})"
+
+        self._subscription_row.set_subtitle(label)
+        return False
+
     def _on_tidal_login(self, _button: Gtk.Button) -> None:
         """Start or manage the Tidal login flow.
 
@@ -803,7 +947,11 @@ class AuxenSettings(Adw.PreferencesWindow):
                 logger.warning("Tidal logout failed", exc_info=True)
                 self._account_row.set_subtitle("Logout failed")
                 return
+            # Stop auto-sync polling on logout
+            if self._favorites_sync is not None:
+                self._favorites_sync.stop_polling()
             self._account_row.set_subtitle("Not connected")
+            self._subscription_row.set_subtitle("\u2014")
             self._login_btn.set_label("Log In")
             parent = self.get_transient_for()
             if parent is not None:
@@ -821,8 +969,74 @@ class AuxenSettings(Adw.PreferencesWindow):
 
     # ── Last.fm handlers ───────────────────────────────────
 
+    def _on_lastfm_key_focus_out(
+        self, _controller: Gtk.EventControllerFocus
+    ) -> None:
+        """Save Last.fm credentials when the API key field loses focus."""
+        if getattr(self, "_loading_settings", False):
+            return
+        self._save_lastfm_credentials()
+
+    def _on_lastfm_secret_focus_out(
+        self, _controller: Gtk.EventControllerFocus
+    ) -> None:
+        """Save Last.fm credentials when the secret field loses focus."""
+        if getattr(self, "_loading_settings", False):
+            return
+        self._save_lastfm_credentials()
+
+    def _save_lastfm_credentials(self) -> None:
+        """Persist updated Last.fm API credentials to the service.
+
+        Only saves when both fields are non-empty. Does NOT reset
+        the existing session -- that only happens when the user
+        explicitly disconnects or connects with new credentials.
+        """
+        if self._lastfm_service is None:
+            return
+
+        api_key = self._lastfm_api_key_row.get_text().strip()
+        api_secret = self._lastfm_api_secret_row.get_text().strip()
+
+        # Only save if both fields have content
+        if api_key and api_secret:
+            try:
+                # Persist credentials without resetting the session.
+                # The session is only invalidated when the user clicks
+                # Connect/Disconnect explicitly.
+                if self._lastfm_service._db is not None:
+                    self._lastfm_service._db.set_setting(
+                        "lastfm_api_key", api_key
+                    )
+                    self._lastfm_service._db.set_setting(
+                        "lastfm_api_secret", api_secret
+                    )
+                self._lastfm_service._api_key = api_key
+                self._lastfm_service._api_secret = api_secret
+                logger.info("Last.fm API credentials saved")
+            except Exception:
+                logger.warning(
+                    "Failed to save Last.fm credentials",
+                    exc_info=True,
+                )
+
+    def _on_lastfm_help_clicked(self, _button: Gtk.Button) -> None:
+        """Open the Last.fm API registration page in the default browser."""
+        parent = self.get_transient_for() or self
+        launcher = Gtk.UriLauncher.new(
+            "https://www.last.fm/api/account/create"
+        )
+        launcher.launch(parent, None, None, None)
+
     def _on_lastfm_connect(self, _button: Gtk.Button) -> None:
-        """Start or manage the Last.fm connection flow."""
+        """Start or manage the Last.fm connection flow.
+
+        Uses the proper Last.fm desktop auth flow:
+        1. Request an auth token from the Last.fm API
+        2. Open the browser with the token-based auth URL
+        3. User authorizes in the browser
+        4. Exchange the token for a session key
+        """
         if self._lastfm_service is None:
             return
 
@@ -836,26 +1050,56 @@ class AuxenSettings(Adw.PreferencesWindow):
         except Exception:
             pass
 
-        # Show auth URL and prompt for token
-        try:
-            url = self._lastfm_service.get_auth_url()
-            self._lastfm_account_row.set_subtitle(
-                f"Visit: {url}"
-            )
-            self._lastfm_connect_btn.set_sensitive(False)
-            self._show_lastfm_token_dialog(url)
-        except Exception:
-            logger.warning("Failed to start Last.fm auth", exc_info=True)
-            self._lastfm_account_row.set_subtitle("Auth failed")
+        # Step 1: Validate the API key first
+        self._lastfm_account_row.set_subtitle("Validating API key...")
+        self._lastfm_connect_btn.set_sensitive(False)
 
-    def _show_lastfm_token_dialog(self, url: str) -> None:
-        """Show a dialog prompting the user to enter their Last.fm auth token.
+        def _validate_and_get_token() -> None:
+            valid, error_msg = self._lastfm_service.validate_api_key()
+            if not valid:
+                GLib.idle_add(
+                    self._on_lastfm_validation_failed, error_msg
+                )
+                return
 
-        Opens the authorization URL in the default browser first so the
-        user can actually complete the authorization flow, then shows the
-        dialog asking for the resulting token.
+            # Step 2: Get an auth token
+            token = self._lastfm_service.get_auth_token()
+            if not token:
+                GLib.idle_add(
+                    self._on_lastfm_validation_failed,
+                    "Failed to obtain auth token from Last.fm. "
+                    "Check your API key and try again.",
+                )
+                return
+
+            # Step 3: Build the auth URL with the token
+            url = self._lastfm_service.get_auth_url(token)
+            GLib.idle_add(self._show_lastfm_auth_dialog, url)
+
+        thread = threading.Thread(
+            target=_validate_and_get_token, daemon=True
+        )
+        thread.start()
+
+    def _on_lastfm_validation_failed(self, error_msg: str) -> bool:
+        """Show an error when API key validation fails."""
+        self._lastfm_connect_btn.set_sensitive(True)
+        self._lastfm_account_row.set_subtitle(error_msg)
+        logger.warning("Last.fm API key validation failed: %s", error_msg)
+        return False
+
+    def _show_lastfm_auth_dialog(self, url: str) -> bool:
+        """Show the Last.fm authorization dialog.
+
+        Opens the authorization URL in the default browser and shows
+        a dialog asking the user to confirm they authorized the app.
+        The token exchange happens automatically since the token was
+        already obtained via ``get_auth_token()``.
         """
-        # Open the auth URL in the default browser FIRST
+        self._lastfm_connect_btn.set_sensitive(True)
+        self._lastfm_account_row.set_subtitle("Waiting for authorization...")
+
+        # Open the auth URL in the default browser
         parent = self.get_transient_for() or self
         launcher = Gtk.UriLauncher.new(url)
         launcher.launch(parent, None, None, None)
@@ -864,64 +1108,46 @@ class AuxenSettings(Adw.PreferencesWindow):
             self,
             "Connect to Last.fm",
             (
-                "A browser window has been opened to Last.fm.\n"
+                "A browser window has been opened to Last.fm.\n\n"
                 "1. Authorize Auxen in the browser.\n"
-                "2. Copy the token from the URL after authorization.\n"
-                "3. Paste it below and click Connect.\n\n"
+                "2. Once authorized, click 'Complete' below.\n\n"
                 "If the browser didn't open, click the link below:"
             ),
         )
         dialog.add_response("cancel", "Cancel")
-        dialog.add_response("connect", "Connect")
+        dialog.add_response("complete", "Complete")
         dialog.set_response_appearance(
-            "connect", Adw.ResponseAppearance.SUGGESTED
+            "complete", Adw.ResponseAppearance.SUGGESTED
         )
 
-        # Clickable link + token entry stacked vertically
-        extra_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=8
-        )
+        # Clickable link
         link_btn = Gtk.LinkButton.new_with_label(url, url)
         link_btn.set_halign(Gtk.Align.CENTER)
-        extra_box.append(link_btn)
-
-        entry = Gtk.Entry()
-        entry.set_placeholder_text("Paste token here")
-        entry.set_hexpand(True)
-        extra_box.append(entry)
-
-        dialog.set_extra_child(extra_box)
+        dialog.set_extra_child(link_btn)
 
         dialog.connect(
             "response",
-            self._on_lastfm_token_response,
-            entry,
+            self._on_lastfm_auth_dialog_response,
         )
         dialog.present()
+        return False
 
-    def _on_lastfm_token_response(
-        self, dialog, response: str, entry: Gtk.Entry
+    def _on_lastfm_auth_dialog_response(
+        self, dialog, response: str
     ) -> None:
-        """Handle the token dialog response."""
-        self._lastfm_connect_btn.set_sensitive(True)
-
-        if response != "connect":
+        """Handle the auth dialog response (complete or cancel)."""
+        if response != "complete":
             self._lastfm_account_row.set_subtitle("Not connected")
             return
 
-        token = entry.get_text().strip()
-        if not token:
-            self._lastfm_account_row.set_subtitle("Not connected")
-            return
-
-        # Complete auth in background thread
+        # Exchange the pre-fetched token for a session key
         self._lastfm_account_row.set_subtitle("Authenticating...")
         self._lastfm_connect_btn.set_sensitive(False)
 
         def _auth_thread() -> None:
             success = False
             try:
-                success = self._lastfm_service.complete_auth(token)
+                success = self._lastfm_service.complete_auth_from_token()
             except Exception:
                 logger.warning(
                     "Last.fm auth failed", exc_info=True
@@ -941,7 +1167,9 @@ class AuxenSettings(Adw.PreferencesWindow):
             )
             self._lastfm_connect_btn.set_label("Disconnect")
         else:
-            self._lastfm_account_row.set_subtitle("Auth failed")
+            self._lastfm_account_row.set_subtitle(
+                "Auth failed - did you authorize in the browser?"
+            )
         return False
 
     def _on_lastfm_scrobble_toggled(
@@ -951,6 +1179,16 @@ class AuxenSettings(Adw.PreferencesWindow):
         active = row.get_active()
         if self._lastfm_service is not None:
             self._lastfm_service.set_enabled(active)
+
+    def _on_auto_sync_toggled(
+        self, row: Adw.SwitchRow, _pspec
+    ) -> None:
+        """Toggle automatic Tidal favorites syncing."""
+        if getattr(self, "_loading_settings", False):
+            return
+        active = row.get_active()
+        if self._favorites_sync is not None:
+            self._favorites_sync.auto_sync_enabled = active
 
     def _on_sync_favorites(self, _button: Gtk.Button) -> None:
         """Trigger a two-way Tidal favorites sync."""
@@ -972,8 +1210,32 @@ class AuxenSettings(Adw.PreferencesWindow):
                 parts.append(f"{len(result.errors)} error(s)")
             summary = ", ".join(parts) if parts else "Nothing to sync"
             logger.info("Favorites sync result: %s", summary)
+            # Update last sync time display
+            self._update_last_sync_display()
 
         self._favorites_sync.sync_async(_on_result)
+
+    def _update_last_sync_display(self) -> None:
+        """Update the Last Sync row subtitle from the database."""
+        if not hasattr(self, "_last_sync_row"):
+            return
+        if self._favorites_sync is None:
+            return
+        try:
+            last_sync = self._favorites_sync.last_sync_time
+            if last_sync:
+                from datetime import datetime
+
+                try:
+                    dt = datetime.fromisoformat(last_sync)
+                    display = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+                except (ValueError, TypeError):
+                    display = last_sync
+                self._last_sync_row.set_subtitle(display)
+            else:
+                self._last_sync_row.set_subtitle("Never")
+        except Exception:
+            self._last_sync_row.set_subtitle("Unknown")
 
     def _on_import_playlist(self, _button: Gtk.Button) -> None:
         """Open a file dialog to import an M3U/M3U8 playlist."""

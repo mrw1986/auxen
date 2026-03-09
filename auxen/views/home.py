@@ -12,10 +12,16 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import Gdk, GdkPixbuf, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, GObject, Gtk, Pango
 
 from auxen.views.context_menu import AlbumContextMenu, TrackContextMenu
-from auxen.views.widgets import make_tidal_source_badge
+from auxen.views.view_mode import ViewMode, make_view_mode_toggle
+from auxen.views.widgets import (
+    DragScrollHelper,
+    make_compact_track_row,
+    make_standard_track_row,
+    make_tidal_source_badge,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +65,10 @@ def _make_source_badge(source: str) -> Gtk.Widget:
     else:
         badge = Gtk.Label(label=source.capitalize())
         badge.add_css_class("source-badge-local")
-    badge.set_halign(Gtk.Align.START)
+    badge.set_halign(Gtk.Align.END)
     badge.set_valign(Gtk.Align.START)
     badge.set_margin_top(8)
-    badge.set_margin_start(8)
+    badge.set_margin_end(8)
     return badge
 
 
@@ -94,6 +100,7 @@ def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
     )
     art_box.add_css_class("album-art-placeholder")
     art_box.set_size_request(160, 160)
+    art_box.set_vexpand(False)
 
     # Placeholder icon (shown when no art is available)
     art_icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
@@ -120,6 +127,23 @@ def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
     badge = _make_source_badge(source)
     overlay.add_overlay(badge)
 
+    # -- Hover overlay (darkens art) --
+    hover_overlay = Gtk.Box()
+    hover_overlay.add_css_class("album-card-hover-overlay")
+    hover_overlay.set_halign(Gtk.Align.FILL)
+    hover_overlay.set_valign(Gtk.Align.FILL)
+    overlay.add_overlay(hover_overlay)
+
+    # -- Play button (centered, revealed on hover) --
+    play_btn = Gtk.Button.new_from_icon_name(
+        "media-playback-start-symbolic"
+    )
+    play_btn.add_css_class("album-card-play-btn")
+    play_btn.set_halign(Gtk.Align.CENTER)
+    play_btn.set_valign(Gtk.Align.CENTER)
+    play_btn.set_tooltip_text(f"Play {title}")
+    overlay.add_overlay(play_btn)
+
     card.append(overlay)
 
     # -- Title --
@@ -128,8 +152,8 @@ def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
     title_label.set_ellipsize(Pango.EllipsizeMode.END)
     title_label.set_max_width_chars(18)
     title_label.add_css_class("body")
-    title_label.set_margin_start(4)
-    title_label.set_margin_end(4)
+    title_label.set_margin_start(6)
+    title_label.set_margin_end(6)
     card.append(title_label)
 
     # -- Artist --
@@ -140,8 +164,8 @@ def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
     artist_label.add_css_class("caption")
     artist_label.add_css_class("clickable-link")
     artist_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
-    artist_label.set_margin_start(4)
-    artist_label.set_margin_end(4)
+    artist_label.set_margin_start(6)
+    artist_label.set_margin_end(6)
     card.append(artist_label)
 
     child = Gtk.FlowBoxChild()
@@ -149,94 +173,41 @@ def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
     # Store album/artist data for click handling
     child._album_title = title  # type: ignore[attr-defined]
     child._album_artist = artist  # type: ignore[attr-defined]
+    child._source = source  # type: ignore[attr-defined]
     # Store references to art widgets for async loading
     child._art_icon = art_icon  # type: ignore[attr-defined]
     child._art_image = art_image  # type: ignore[attr-defined]
     # Store artist label for click gesture attachment
     child._artist_label = artist_label  # type: ignore[attr-defined]
+    # Store play button for wiring callbacks
+    child._play_btn = play_btn  # type: ignore[attr-defined]
     return child
 
 
 def _make_recently_played_row(
     title: str, artist: str, duration: str, source: str,
-    track=None,
+    track=None, on_play_clicked=None,
+    on_artist_clicked=None, on_album_clicked=None,
 ) -> Gtk.ListBoxRow:
-    """Build a row for the 'Recently Played' list."""
-    row_box = Gtk.Box(
-        orientation=Gtk.Orientation.HORIZONTAL,
-        spacing=12,
+    """Build a row for the 'Recently Played' list using the shared widget."""
+    track_dict = {
+        "title": title,
+        "artist": artist,
+        "source": source,
+        "duration": duration,
+    }
+    row = make_standard_track_row(
+        track_dict,
+        show_art=True,
+        show_source_badge=True,
+        show_quality_badge=False,
+        show_duration=True,
+        art_size=48,
+        css_class="recently-played-row",
+        on_play_clicked=on_play_clicked,
+        on_artist_clicked=on_artist_clicked,
+        on_album_clicked=on_album_clicked,
     )
-    row_box.add_css_class("recently-played-row")
-    row_box.set_margin_top(4)
-    row_box.set_margin_bottom(4)
-    row_box.set_margin_start(4)
-    row_box.set_margin_end(4)
-
-    # -- Small album art placeholder --
-    art_mini = Gtk.Box(
-        orientation=Gtk.Orientation.VERTICAL,
-        halign=Gtk.Align.CENTER,
-        valign=Gtk.Align.CENTER,
-    )
-    art_mini.add_css_class("album-art-placeholder")
-    art_mini.add_css_class("album-art-mini")
-    art_mini.set_size_request(48, 48)
-
-    art_icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
-    art_icon.set_pixel_size(20)
-    art_icon.set_opacity(0.4)
-    art_icon.set_halign(Gtk.Align.CENTER)
-    art_icon.set_valign(Gtk.Align.CENTER)
-    art_icon.set_vexpand(True)
-    art_mini.append(art_icon)
-    row_box.append(art_mini)
-
-    # -- Title + Artist column --
-    text_box = Gtk.Box(
-        orientation=Gtk.Orientation.VERTICAL,
-        spacing=2,
-    )
-    text_box.set_hexpand(True)
-    text_box.set_valign(Gtk.Align.CENTER)
-
-    title_lbl = Gtk.Label(label=title)
-    title_lbl.set_xalign(0)
-    title_lbl.set_ellipsize(Pango.EllipsizeMode.END)
-    title_lbl.add_css_class("body")
-    text_box.append(title_lbl)
-
-    artist_lbl = Gtk.Label(label=artist)
-    artist_lbl.set_xalign(0)
-    artist_lbl.set_ellipsize(Pango.EllipsizeMode.END)
-    artist_lbl.add_css_class("caption")
-    artist_lbl.add_css_class("dim-label")
-    text_box.append(artist_lbl)
-
-    row_box.append(text_box)
-
-    # -- Duration --
-    dur_label = Gtk.Label(label=duration)
-    dur_label.add_css_class("caption")
-    dur_label.add_css_class("dim-label")
-    dur_label.set_valign(Gtk.Align.CENTER)
-    row_box.append(dur_label)
-
-    # -- Source badge --
-    if source == "tidal":
-        badge = make_tidal_source_badge(
-            label_text=source.capitalize(),
-            css_class="source-badge-tidal",
-            icon_size=10,
-        )
-    else:
-        badge = Gtk.Label(label=source.capitalize())
-        badge.add_css_class("source-badge-local")
-    badge.set_valign(Gtk.Align.CENTER)
-    row_box.append(badge)
-
-    row = Gtk.ListBoxRow()
-    row.set_child(row_box)
-    # Store track reference for context menu
     row._track_data = track  # type: ignore[attr-defined]
     return row
 
@@ -250,6 +221,7 @@ class HomePage(Gtk.ScrolledWindow):
         super().__init__(**kwargs)
 
         self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._drag_scroll = DragScrollHelper(self)
 
         # Album click callback
         self._on_album_clicked: Optional[
@@ -261,6 +233,14 @@ class HomePage(Gtk.ScrolledWindow):
             Callable[[str], None]
         ] = None
 
+        # Album play callback (play button on hover)
+        self._on_play_album: Optional[
+            Callable[[str, str], None]
+        ] = None
+
+        # Track play callback (play button on track rows)
+        self._on_play_track: Optional[Callable] = None
+
         # Context menu callbacks
         self._context_callbacks: Optional[dict] = None
         self._get_playlists: Optional[Callable] = None
@@ -270,16 +250,18 @@ class HomePage(Gtk.ScrolledWindow):
         self._get_album_playlists: Optional[Callable] = None
         self._current_menu: object = None
 
+        self._content_width = 0
+
         # Root container
-        root = Gtk.Box(
+        self._root = root = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=24,
         )
         root.add_css_class("content-view-box")
         root.set_margin_top(24)
         root.set_margin_bottom(24)
-        root.set_margin_start(32)
-        root.set_margin_end(32)
+        root.set_margin_start(16)
+        root.set_margin_end(16)
 
         # ---- 1. Greeting header ----
         self._greeting = Gtk.Label(label=_get_greeting())
@@ -307,11 +289,13 @@ class HomePage(Gtk.ScrolledWindow):
         root.append(filter_box)
 
         # ---- 3. Stats row ----
-        stats_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=16,
-            homogeneous=True,
-        )
+        stats_box = Gtk.FlowBox()
+        stats_box.set_homogeneous(True)
+        stats_box.set_min_children_per_line(1)
+        stats_box.set_max_children_per_line(3)
+        stats_box.set_column_spacing(16)
+        stats_box.set_row_spacing(8)
+        stats_box.set_selection_mode(Gtk.SelectionMode.NONE)
 
         self._total_value_label: Gtk.Label | None = None
         self._tidal_value_label: Gtk.Label | None = None
@@ -351,7 +335,7 @@ class HomePage(Gtk.ScrolledWindow):
 
         self._album_grid = Gtk.FlowBox()
         self._album_grid.set_homogeneous(True)
-        self._album_grid.set_min_children_per_line(2)
+        self._album_grid.set_min_children_per_line(1)
         self._album_grid.set_max_children_per_line(6)
         self._album_grid.set_column_spacing(16)
         self._album_grid.set_row_spacing(16)
@@ -363,6 +347,7 @@ class HomePage(Gtk.ScrolledWindow):
         for title, artist, source in _SAMPLE_ALBUMS:
             card = _make_album_card(title, artist, source)
             self._attach_artist_click_gesture(card)
+            self._attach_play_button(card)
             self._album_grid.append(card)
 
         root.append(self._album_grid)
@@ -394,6 +379,19 @@ class HomePage(Gtk.ScrolledWindow):
         Falls back to keeping placeholder data if the database returns
         empty results.
         """
+        self._home_db = db
+        # Restore persisted filter on first load
+        if not getattr(self, "_filter_restored", False):
+            self._filter_restored = True
+            try:
+                saved = db.get_setting("home_filter")
+                if saved and saved in ("All", "Tidal", "Local"):
+                    for btn in self._filter_buttons:
+                        btn.handler_block_by_func(self._on_filter_toggled)
+                        btn.set_active(btn.get_label() == saved)
+                        btn.handler_unblock_by_func(self._on_filter_toggled)
+            except Exception:
+                pass
         try:
             from auxen.models import Source
 
@@ -411,14 +409,14 @@ class HomePage(Gtk.ScrolledWindow):
             # Fetch more tracks than needed so deduplication still fills 12.
             recently_added = db.get_recently_added(limit=120)
             if recently_added:
-                seen: set[tuple[str, str]] = set()
+                seen: set[tuple[str, str, str]] = set()
                 deduped = []
                 for track in recently_added:
-                    key = (track.album or track.title, track.artist)
+                    key = (track.album or track.title, track.artist, track.source.value)
                     if key not in seen:
                         seen.add(key)
                         deduped.append(track)
-                    if len(deduped) == 12:
+                    if len(deduped) == 24:
                         break
 
                 self._clear_flow_box(self._album_grid)
@@ -430,6 +428,8 @@ class HomePage(Gtk.ScrolledWindow):
                     )
                     self._attach_artist_click_gesture(card)
                     self._attach_album_context_gesture(card)
+                    self._attach_play_button(card)
+                    self._attach_drag_source_to_album_card(card)
                     self._album_grid.append(card)
                     # Load album art asynchronously
                     self.load_album_art_for_card(card, track)
@@ -439,17 +439,36 @@ class HomePage(Gtk.ScrolledWindow):
             if recently_played:
                 self._clear_list_box(self._recent_list)
                 for track in recently_played:
+                    play_cb = None
+                    if self._on_play_track is not None:
+                        play_cb = lambda _td, t=track: self._on_play_track(t)
+                    artist_cb = None
+                    if self._on_artist_clicked is not None:
+                        artist_cb = lambda _a, a=track.artist: self._on_artist_clicked(a)
                     row = _make_recently_played_row(
                         title=track.title,
                         artist=track.artist,
                         duration=_format_duration(track.duration),
                         source=track.source.value,
                         track=track,
+                        on_play_clicked=play_cb,
+                        on_artist_clicked=artist_cb,
                     )
                     self._attach_context_gesture(row, track)
+                    self._attach_drag_source_to_row(row, track)
                     self._recent_list.append(row)
+                    self._load_row_art(row, track)
+            # Re-apply the active filter after rebuilding content
+            self._reapply_active_filter()
         except Exception:
             logger.warning("Failed to refresh home page", exc_info=True)
+
+    def _reapply_active_filter(self) -> None:
+        """Re-apply the currently active filter pill."""
+        for btn in self._filter_buttons:
+            if btn.get_active():
+                self._apply_filter(btn.get_label())
+                return
 
     def update_stats(self, total: int, tidal: int, local: int) -> None:
         """Update the stat card values."""
@@ -484,20 +503,75 @@ class HomePage(Gtk.ScrolledWindow):
         request_token = object()
         child._art_request_token = request_token  # type: ignore[attr-defined]
 
+        # Fetch at logical_size * scale_factor for crisp rendering on HiDPI.
+        scale = child.get_scale_factor() or 1
+        art_px = 160 * scale
+
+        # Fast path: use cached texture immediately (avoids flicker on sort change)
+        cached_texture = art_service.get_texture_for_track(track, art_px, art_px)
+        if cached_texture is not None:
+            art_image.set_from_paintable(cached_texture)
+            art_image.set_visible(True)
+            art_icon.set_visible(False)
+            return
+
         def _on_art_loaded(pixbuf: GdkPixbuf.Pixbuf | None) -> None:
             # Guard: skip if the card was recycled during async fetch
             if getattr(child, "_art_request_token", None) is not request_token:
                 return
             if pixbuf is not None:
-                texture = Gdk.Texture.new_for_pixbuf(pixbuf)
-                art_image.set_from_paintable(texture)
-                art_image.set_visible(True)
-                art_icon.set_visible(False)
+                texture = art_service.get_or_create_texture(track, pixbuf, art_px, art_px)
+                if texture is not None:
+                    art_image.set_from_paintable(texture)
+                    art_image.set_visible(True)
+                    art_icon.set_visible(False)
 
-        # Fetch at logical_size * scale_factor for crisp rendering on HiDPI.
-        scale = child.get_scale_factor() or 1
-        art_px = 160 * scale
         art_service.get_art_async(track, _on_art_loaded, width=art_px, height=art_px)
+
+    def _load_row_art(self, row: Gtk.ListBoxRow, track) -> None:
+        """Load album art asynchronously for a recently-played row."""
+        art_service = getattr(self, "_album_art_service", None)
+        if art_service is None or track is None:
+            return
+
+        art_icon = getattr(row, "_art_icon", None)
+        art_image = getattr(row, "_art_image", None)
+        if art_icon is None or art_image is None:
+            return
+
+        request_token = object()
+        row._art_request_token = request_token  # type: ignore[attr-defined]
+
+        scale = row.get_scale_factor() or 1
+        art_px = 48 * scale
+
+        # Fast path: use cached texture immediately
+        cached_texture = art_service.get_texture_for_track(track, art_px, art_px)
+        if cached_texture is not None:
+            art_image.set_from_paintable(cached_texture)
+            art_image.set_visible(True)
+            art_icon.set_visible(False)
+            art_box = getattr(row, "_art_box", None)
+            if art_box is not None:
+                art_box.remove_css_class("album-art-placeholder")
+            return
+
+        def _on_art_loaded(pixbuf: GdkPixbuf.Pixbuf | None) -> None:
+            if getattr(row, "_art_request_token", None) is not request_token:
+                return
+            if pixbuf is not None:
+                texture = art_service.get_or_create_texture(track, pixbuf, art_px, art_px)
+                if texture is not None:
+                    art_image.set_from_paintable(texture)
+                    art_image.set_visible(True)
+                    art_icon.set_visible(False)
+                    art_box = getattr(row, "_art_box", None)
+                    if art_box is not None:
+                        art_box.remove_css_class("album-art-placeholder")
+
+        art_service.get_art_async(
+            track, _on_art_loaded, width=art_px, height=art_px
+        )
 
     # ---- Internal helpers ----
 
@@ -519,11 +593,15 @@ class HomePage(Gtk.ScrolledWindow):
 
         # Icon in a tinted background box
         icon_box = Gtk.Box(
-            halign=Gtk.Align.CENTER,
+            halign=Gtk.Align.START,
             valign=Gtk.Align.CENTER,
         )
         icon = Gtk.Image.new_from_icon_name(icon_name)
         icon.set_pixel_size(20)
+        icon.set_halign(Gtk.Align.CENTER)
+        icon.set_valign(Gtk.Align.CENTER)
+        icon.set_hexpand(True)
+        icon.set_vexpand(True)
         icon_box.append(icon)
 
         # Apply icon background class based on accent
@@ -575,10 +653,28 @@ class HomePage(Gtk.ScrolledWindow):
                 break
             list_box.remove(row)
 
+    def set_content_width(self, width: int) -> None:
+        """Adjust margins and card sizing based on available content width."""
+        if width == self._content_width:
+            return
+        self._content_width = width
+        if width < 500:
+            self._root.set_margin_start(8)
+            self._root.set_margin_end(8)
+            self._root.set_margin_top(12)
+            self._root.set_spacing(16)
+        else:
+            self._root.set_margin_start(16)
+            self._root.set_margin_end(16)
+            self._root.set_margin_top(24)
+            self._root.set_spacing(24)
+
     def set_callbacks(
         self,
         on_album_clicked: Callable[[str, str], None] | None = None,
         on_artist_clicked: Callable[[str], None] | None = None,
+        on_play_album: Callable[[str, str], None] | None = None,
+        on_play_track: Callable | None = None,
     ) -> None:
         """Set callback functions for user actions.
 
@@ -588,9 +684,28 @@ class HomePage(Gtk.ScrolledWindow):
             Called with (album_name, artist) when an album card is clicked.
         on_artist_clicked:
             Called with (artist_name) when an artist label is clicked.
+        on_play_album:
+            Called with (album_name, artist) when the play button on an
+            album card is clicked.
+        on_play_track:
+            Called with (track) when a track play button is clicked.
         """
         self._on_album_clicked = on_album_clicked
         self._on_artist_clicked = on_artist_clicked
+        self._on_play_album = on_play_album
+        self._on_play_track = on_play_track
+
+    # ------------------------------------------------------------------
+    # Scroll position persistence
+    # ------------------------------------------------------------------
+
+    def get_scroll_position(self) -> float:
+        """Return the current vertical scroll position."""
+        return self.get_vadjustment().get_value()
+
+    def set_scroll_position(self, value: float) -> None:
+        """Restore a previously saved scroll position."""
+        self.get_vadjustment().set_value(value)
 
     def set_context_callbacks(
         self,
@@ -625,6 +740,87 @@ class HomePage(Gtk.ScrolledWindow):
         """
         self._album_context_callbacks = callbacks
         self._get_album_playlists = get_playlists
+
+    def _attach_drag_source_to_row(
+        self, row: Gtk.ListBoxRow, track
+    ) -> None:
+        """Attach a DragSource to a track row for drag-to-playlist."""
+        if track is None:
+            return
+        track_id = getattr(track, "id", None)
+        if track_id is None:
+            return
+
+        drag_source = Gtk.DragSource.new()
+        drag_source.set_actions(Gdk.DragAction.COPY)
+
+        def _on_prepare(_src, _x, _y, tid=track_id):
+            value = GObject.Value(GObject.TYPE_STRING, str(tid))
+            return Gdk.ContentProvider.new_for_value(value)
+
+        drag_source.connect("prepare", _on_prepare)
+        row.add_controller(drag_source)
+
+    def _attach_drag_source_to_album_card(
+        self, child: Gtk.FlowBoxChild
+    ) -> None:
+        """Attach a DragSource to an album card for drag-to-playlist.
+
+        Dragging an album card serializes all track IDs from that album
+        as a comma-separated string. The track IDs are looked up from
+        the database when the drag begins.
+        """
+        album_title = getattr(child, "_album_title", None)
+        album_artist = getattr(child, "_album_artist", None)
+        if album_title is None or album_artist is None:
+            return
+
+        drag_source = Gtk.DragSource.new()
+        drag_source.set_actions(Gdk.DragAction.COPY)
+
+        def _on_prepare(
+            _src, _x, _y, a=album_title, ar=album_artist
+        ):
+            # Look up track IDs from the database
+            db = getattr(self, "_home_db", None)
+            if db is None:
+                return None
+            try:
+                tracks = db.get_tracks_by_album(a, ar)
+                if not tracks:
+                    return None
+                ids_str = ",".join(
+                    str(t.id) for t in tracks if t.id is not None
+                )
+                if not ids_str:
+                    return None
+                value = GObject.Value(GObject.TYPE_STRING, ids_str)
+                return Gdk.ContentProvider.new_for_value(value)
+            except Exception:
+                logger.warning(
+                    "Failed to get album tracks for drag",
+                    exc_info=True,
+                )
+                return None
+
+        drag_source.connect("prepare", _on_prepare)
+        child.add_controller(drag_source)
+
+    def _attach_play_button(self, child: Gtk.FlowBoxChild) -> None:
+        """Wire the play button on an album card to play the album."""
+        play_btn = getattr(child, "_play_btn", None)
+        album_title = getattr(child, "_album_title", None)
+        album_artist = getattr(child, "_album_artist", None)
+        if play_btn is None or album_title is None or album_artist is None:
+            return
+
+        def _on_play_clicked(
+            _btn, a=album_title, ar=album_artist
+        ):
+            if self._on_play_album is not None:
+                self._on_play_album(a, ar)
+
+        play_btn.connect("clicked", _on_play_clicked)
 
     def _attach_artist_click_gesture(self, child: Gtk.FlowBoxChild) -> None:
         """Attach a click gesture to the artist label on an album card."""
@@ -704,6 +900,9 @@ class HomePage(Gtk.ScrolledWindow):
             "on_toggle_favorite": lambda t=track: self._context_callbacks.get("on_toggle_favorite", _noop)(t),
             "on_go_to_album": lambda t=track: self._context_callbacks.get("on_go_to_album", _noop)(t),
             "on_go_to_artist": lambda t=track: self._context_callbacks.get("on_go_to_artist", _noop)(t),
+            "on_track_radio": lambda t=track: self._context_callbacks.get("on_track_radio", _noop)(t),
+            "on_view_lyrics": lambda t=track: self._context_callbacks.get("on_view_lyrics", _noop)(t),
+            "on_credits": lambda t=track: self._context_callbacks.get("on_credits", _noop)(t),
         }
 
         track_data = {
@@ -712,6 +911,7 @@ class HomePage(Gtk.ScrolledWindow):
             "artist": getattr(track, "artist", ""),
             "album": getattr(track, "album", ""),
             "source": getattr(track, "source", None),
+            "source_id": getattr(track, "source_id", None),
             "is_favorite": is_favorite,
         }
 
@@ -778,6 +978,7 @@ class HomePage(Gtk.ScrolledWindow):
             "on_new_playlist": lambda a=album_name, ar=artist: cbs.get("on_new_playlist", _noop)(a, ar),
             "on_add_to_favorites": lambda a=album_name, ar=artist: cbs.get("on_add_to_favorites", _noop)(a, ar),
             "on_go_to_artist": lambda a=album_name, ar=artist: cbs.get("on_go_to_artist", _noop)(a, ar),
+            "on_shuffle_album": lambda a=album_name, ar=artist: cbs.get("on_shuffle_album", _noop)(a, ar),
         }
 
         album_data = {
@@ -793,10 +994,8 @@ class HomePage(Gtk.ScrolledWindow):
         self._current_menu.show(widget, x, y)
 
     def _on_filter_toggled(self, toggled_btn: Gtk.ToggleButton) -> None:
-        """Enforce radio-button behavior: only one filter active at a time."""
+        """Enforce radio-button behavior and apply source filter."""
         if not toggled_btn.get_active():
-            # If the user tries to deactivate the only active button,
-            # re-activate it so there is always one selected.
             any_active = any(b.get_active() for b in self._filter_buttons)
             if not any_active:
                 toggled_btn.set_active(True)
@@ -806,3 +1005,42 @@ class HomePage(Gtk.ScrolledWindow):
         for btn in self._filter_buttons:
             if btn is not toggled_btn and btn.get_active():
                 btn.set_active(False)
+
+        label = toggled_btn.get_label()
+        self._apply_filter(label)
+        # Persist active filter to DB
+        db = getattr(self, "_home_db", None)
+        if db is not None:
+            try:
+                db.set_setting("home_filter", label)
+            except Exception:
+                pass
+
+    def _apply_filter(self, filter_label: str) -> None:
+        """Filter album grid and recently played list by source."""
+        if not hasattr(self, "_album_grid"):
+            return
+        source_key = filter_label.lower()  # "all", "tidal", or "local"
+
+        # Filter album grid via FlowBox filter function
+        if source_key == "all":
+            self._album_grid.set_filter_func(None)
+        else:
+            self._album_grid.set_filter_func(
+                lambda child, s=source_key: getattr(child, "_source", "").lower() == s
+            )
+
+        # Filter recently played rows by visibility
+        row = self._recent_list.get_first_child()
+        while row is not None:
+            next_row = row.get_next_sibling()
+            track = getattr(row, "_track_data", None)
+            if source_key == "all" or track is None:
+                row.set_visible(True)
+            else:
+                track_source = getattr(track, "source", None)
+                if track_source is not None:
+                    row.set_visible(track_source.value.lower() == source_key)
+                else:
+                    row.set_visible(True)
+            row = next_row

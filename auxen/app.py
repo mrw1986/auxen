@@ -103,21 +103,21 @@ class AuxenApp(Adw.Application):
         play_pause_action.connect("activate", self._on_play_pause_action)
         self.add_action(play_pause_action)
         self.set_accels_for_action(
-            "app.play-pause", ["space", "AudioPlay"]
+            "app.play-pause", ["AudioPlay"]
         )
 
         next_action = Gio.SimpleAction.new("next-track", None)
         next_action.connect("activate", self._on_next_action)
         self.add_action(next_action)
         self.set_accels_for_action(
-            "app.next-track", ["n", "AudioNext"]
+            "app.next-track", ["AudioNext"]
         )
 
         prev_action = Gio.SimpleAction.new("previous-track", None)
         prev_action.connect("activate", self._on_previous_action)
         self.add_action(prev_action)
         self.set_accels_for_action(
-            "app.previous-track", ["p", "AudioPrev"]
+            "app.previous-track", ["AudioPrev"]
         )
 
         stop_action = Gio.SimpleAction.new("stop", None)
@@ -128,17 +128,17 @@ class AuxenApp(Adw.Application):
         vol_up_action = Gio.SimpleAction.new("volume-up", None)
         vol_up_action.connect("activate", self._on_volume_up_action)
         self.add_action(vol_up_action)
-        self.set_accels_for_action("app.volume-up", ["plus", "equal"])
+        self.set_accels_for_action("app.volume-up", ["<Control>plus", "<Control>equal"])
 
         vol_down_action = Gio.SimpleAction.new("volume-down", None)
         vol_down_action.connect("activate", self._on_volume_down_action)
         self.add_action(vol_down_action)
-        self.set_accels_for_action("app.volume-down", ["minus"])
+        self.set_accels_for_action("app.volume-down", ["<Control>minus"])
 
         mute_action = Gio.SimpleAction.new("mute-toggle", None)
         mute_action.connect("activate", self._on_mute_action)
         self.add_action(mute_action)
-        self.set_accels_for_action("app.mute-toggle", ["m"])
+        self.set_accels_for_action("app.mute-toggle", ["<Control><Shift>m"])
 
         # --- Navigation shortcuts ---
         nav_home_action = Gio.SimpleAction.new("nav-home", None)
@@ -308,6 +308,9 @@ class AuxenApp(Adw.Application):
                 self.favorites_sync = FavoritesSyncService(
                     db=self.db,
                     tidal_provider=self.tidal_provider,
+                )
+                self.favorites_sync.set_on_auto_sync_complete(
+                    self._on_auto_sync_complete
                 )
             except Exception:
                 logger.warning(
@@ -515,7 +518,7 @@ class AuxenApp(Adw.Application):
                     for track in tracks:
                         track_id = db.insert_track(track)
                         # Also record the local file mapping
-                        if track.source_id:
+                        if track.source_id and track_id:
                             import os
 
                             try:
@@ -526,8 +529,11 @@ class AuxenApp(Adw.Application):
                                     file_size=stat.st_size,
                                     file_modified_at=str(stat.st_mtime),
                                 )
-                            except OSError:
-                                pass
+                            except (OSError, Exception):
+                                logger.debug(
+                                    "insert_local_file failed for %s",
+                                    track.source_id, exc_info=True,
+                                )
                 logger.info("Scanned %d local tracks", len(tracks))
             except Exception:
                 logger.warning("Initial scan failed", exc_info=True)
@@ -554,19 +560,8 @@ class AuxenApp(Adw.Application):
         if self.favorites_sync is None:
             return False
 
-        def _on_sync_result(result) -> None:
-            logger.info(
-                "Tidal favorites sync: added_local=%d, added_tidal=%d, "
-                "already_synced=%d",
-                result.added_local,
-                result.added_tidal,
-                result.already_synced,
-            )
-            if result.errors:
-                for err in result.errors:
-                    logger.warning("Favorites sync error: %s", err)
-
-        self.favorites_sync.sync_async(_on_sync_result)
+        # Use trigger_initial_sync which also starts polling
+        self.favorites_sync.trigger_initial_sync()
         return False  # Don't repeat
 
     def _on_sync_favorites_action(
@@ -584,8 +579,40 @@ class AuxenApp(Adw.Application):
                 result.added_tidal,
                 result.already_synced,
             )
+            self._show_sync_toast(result)
 
         self.favorites_sync.sync_async(_on_result)
+
+    def _on_auto_sync_complete(self, result) -> None:
+        """Handle auto-sync completion with a subtle toast notification."""
+        if result.added_local == 0 and result.added_tidal == 0:
+            return  # No changes, skip notification
+
+        logger.info(
+            "Auto-sync complete: added_local=%d, added_tidal=%d, "
+            "already_synced=%d",
+            result.added_local,
+            result.added_tidal,
+            result.already_synced,
+        )
+        self._show_sync_toast(result)
+
+    def _show_sync_toast(self, result) -> None:
+        """Show a toast notification summarising sync results."""
+        parts = []
+        if result.added_local:
+            parts.append(f"{result.added_local} added locally")
+        if result.added_tidal:
+            parts.append(f"{result.added_tidal} added to Tidal")
+        if not parts:
+            return  # Nothing changed
+
+        summary = "Favorites synced: " + ", ".join(parts)
+        win = self.get_active_window()
+        if win is not None and hasattr(win, "_show_toast"):
+            toast = Adw.Toast.new(summary)
+            toast.set_timeout(3)
+            win._show_toast(toast)
 
     # ------------------------------------------------------------------
     # MPRIS wiring

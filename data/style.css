@@ -114,6 +114,33 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     font-size: 0.75rem;
 }
 
+/* ── Sidebar collapse button ──────────────────────────── */
+
+.sidebar-collapse-row {
+    padding: 4px 12px;
+    border-top: 1px solid alpha(@theme_fg_color, 0.06);
+}
+
+.sidebar-collapse-btn {
+    opacity: 0.5;
+    min-width: 28px;
+    min-height: 28px;
+}
+
+.sidebar-collapse-btn:hover {
+    opacity: 1;
+}
+
+/* ── Collapsed sidebar — reduce padding ─── */
+
+.sidebar-collapsed .sidebar-brand {
+    padding: 16px 8px;
+}
+
+.sidebar-collapsed .sidebar-account {
+    padding: 10px 8px;
+}
+
 /* ── Section Labels ────────────────────────────────────── */
 
 .sidebar-section-label {
@@ -121,7 +148,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     letter-spacing: 1.5px;
     font-weight: 700;
     color: alpha(@theme_fg_color, 0.8);
-    font-size: 0.9rem;
+    font-size: 0.95rem;
 }
 
 /* ── Navigation Sidebar — amber highlight on selection ── */
@@ -168,7 +195,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 
 .navigation-sidebar row label {
     font-weight: 500;
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     color: alpha(@theme_fg_color, 0.6);
 }
 
@@ -326,8 +353,8 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 }
 
 .stat-card-label {
-    font-size: 0.75rem;
-    color: alpha(@theme_fg_color, 0.4);
+    font-size: 0.9rem;
+    color: alpha(@theme_fg_color, 0.6);
     letter-spacing: 0.2px;
 }
 
@@ -342,21 +369,22 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 /* ── Album Cards ───────────────────────────────────────── */
 
 .album-card {
-    min-width: 160px;
+    min-width: 120px;
     border-radius: 8px;
     padding-bottom: 8px;
     transition: all 200ms ease;
 }
 
 .album-card:hover {
-    background-color: rgba(212, 160, 57, 0.06);
+    background-color: rgba(212, 160, 57, 0.08);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
 /* ── Album Art Placeholder ─────────────────────────────── */
 
 .album-art-placeholder {
-    min-width: 160px;
-    min-height: 160px;
+    min-width: 120px;
+    min-height: 120px;
     background-color: alpha(@theme_fg_color, 0.08);
     border-radius: 10px 10px 0 0;
 }
@@ -371,6 +399,27 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 
 .album-card-art-image {
     border-radius: 10px 10px 0 0;
+}
+
+.album-art-mini .album-card-art-image {
+    border-radius: 6px;
+}
+
+/* ── Track Art Play Overlay ───────────────────────────── */
+
+.track-art-play-overlay {
+    background-color: alpha(black, 0.55);
+    border-radius: 9999px;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0;
+    color: white;
+}
+
+.compact-row-play-btn {
+    min-width: 16px;
+    min-height: 16px;
+    padding: 0;
 }
 
 /* ── Source Badges (pill-shaped) ────────────────────────── */
@@ -419,6 +468,10 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     transition: background-color 150ms ease;
 }
 
+.recently-played-row:hover {
+    background-color: alpha(@theme_fg_color, 0.05);
+}
+
 /* ═══════════════════════════════════════════════════════════
    BOXED-LIST / LIBADWAITA LIST STYLING
    ═══════════════════════════════════════════════════════════ */
@@ -450,7 +503,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 }
 
 .boxed-list > row:hover {
-    background-color: alpha(@theme_fg_color, 0.06);
+    background-color: alpha(@theme_fg_color, 0.05);
 }
 
 .boxed-list > row:selected {
@@ -463,9 +516,20 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 
 .now-playing-bar {
     background-color: @headerbar_bg_color;
-    border-top: 1px solid rgba(212, 160, 57, 0.15);
-    padding: 4px 16px;
-    min-height: 64px;
+    border-top: 1px solid rgba(212, 160, 57, 0.2);
+    padding: 4px 8px;
+    min-height: 60px;
+}
+
+/* Idle state: bar stays at same size but controls are dimmed */
+.now-playing-bar.now-playing-idle {
+    opacity: 0.45;
+}
+
+/* Narrow 2-row layout: taller bar with progress below transport */
+.now-playing-bar.now-playing-narrow {
+    min-height: 85px;
+    padding: 4px 8px 2px 8px;
 }
 
 .now-playing-track-title {
@@ -482,11 +546,8 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 .now-playing-art {
     min-width: 48px;
     min-height: 48px;
-    max-width: 48px;
-    max-height: 48px;
     border-radius: 6px;
     background-color: @card_bg_color;
-    overflow: hidden;
 }
 
 /* ── Now-Playing Album Art Image — rounded corners ────── */
@@ -498,12 +559,12 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 /* ── Play Button — circular, amber, slightly larger ────── */
 
 .now-playing-play-btn {
-    min-width: 36px;
-    min-height: 36px;
+    min-width: 30px;
+    min-height: 30px;
     border-radius: 9999px;
     background-color: #d4a039;
     color: #0c0b0f;
-    padding: 0;
+    padding: 2px;
     transition: all 150ms ease;
 }
 
@@ -518,9 +579,10 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 /* ── Transport Buttons — subtle hover brightening ──────── */
 
 .now-playing-control-btn {
-    color: alpha(@theme_fg_color, 0.4);
-    min-width: 28px;
-    min-height: 28px;
+    color: alpha(@theme_fg_color, 0.55);
+    min-width: 22px;
+    min-height: 22px;
+    padding: 2px;
     border-radius: 9999px;
     transition: all 200ms ease;
 }
@@ -564,21 +626,11 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     margin: 0;
 }
 
-.now-playing-progress:hover trough {
-    min-height: 6px;
-}
-
-.now-playing-progress:hover slider {
-    min-width: 14px;
-    min-height: 14px;
-    margin: 0;
-}
-
 .now-playing-time {
     font-size: 0.7rem;
     font-family: monospace;
-    color: alpha(@theme_fg_color, 0.4);
-    min-width: 36px;
+    color: alpha(@theme_fg_color, 0.55);
+    min-width: 24px;
 }
 
 /* ── Spectrum Visualizer ───────────────────────────────── */
@@ -657,21 +709,21 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 }
 
 .search-result-row:hover {
-    background-color: alpha(@theme_fg_color, 0.04);
+    background-color: alpha(@theme_fg_color, 0.05);
 }
 
 .search-empty-state {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     padding: 48px 16px;
 }
 
 .search-empty-state image {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     opacity: 0.3;
 }
 
 .search-album-label {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     font-style: italic;
 }
 
@@ -692,7 +744,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 }
 
 .search-history-row image {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
 }
 
 .search-history-row label {
@@ -704,7 +756,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 }
 
 .search-history-row button {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     min-width: 24px;
     min-height: 24px;
     border-radius: 9999px;
@@ -722,7 +774,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 }
 
 .search-history-clear {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     font-size: 0.85rem;
     font-weight: 500;
     border-radius: 9999px;
@@ -736,28 +788,28 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   FAVORITES VIEW
+   COLLECTION VIEW
    ═══════════════════════════════════════════════════════════ */
 
-.favorites-header {
+.collection-header {
     padding: 4px 0;
 }
 
-.favorites-header-icon {
+.collection-header-icon {
     color: #d4a039;
 }
 
-.favorites-row {
+.collection-row {
     padding: 10px 12px;
     border-radius: 8px;
     transition: background-color 150ms ease;
 }
 
-.favorites-row:hover {
-    background-color: alpha(@theme_fg_color, 0.04);
+.collection-row:hover {
+    background-color: alpha(@theme_fg_color, 0.05);
 }
 
-.favorites-heart-btn {
+.collection-heart-btn {
     color: #d4a039;
     min-width: 32px;
     min-height: 32px;
@@ -765,20 +817,20 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     transition: all 200ms ease;
 }
 
-.favorites-heart-btn:checked {
+.collection-heart-btn:checked {
     color: #d4a039;
 }
 
-.favorites-heart-btn:not(:checked) {
-    color: alpha(@theme_fg_color, 0.4);
+.collection-heart-btn:not(:checked) {
+    color: alpha(@theme_fg_color, 0.55);
 }
 
-.favorites-heart-btn:hover {
+.collection-heart-btn:hover {
     color: #e0b04a;
     background-color: rgba(212, 160, 57, 0.08);
 }
 
-.favorites-quality-badge {
+.collection-quality-badge {
     background-color: rgba(212, 160, 57, 0.2);
     color: #d4a039;
     border-radius: 9999px;
@@ -788,17 +840,17 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     letter-spacing: 0.3px;
 }
 
-.favorites-empty-state {
-    color: alpha(@theme_fg_color, 0.4);
+.collection-empty-state {
+    color: alpha(@theme_fg_color, 0.55);
     padding: 48px 16px;
 }
 
-.favorites-empty-state image {
-    color: alpha(@theme_fg_color, 0.4);
+.collection-empty-state image {
+    color: alpha(@theme_fg_color, 0.55);
     opacity: 0.3;
 }
 
-.favorites-sort-dropdown {
+.collection-sort-dropdown {
     background-color: @card_bg_color;
     color: @theme_fg_color;
     border-radius: 8px;
@@ -807,7 +859,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     padding: 4px 8px;
 }
 
-.favorites-sort-dropdown:hover {
+.collection-sort-dropdown:hover {
     border-color: alpha(@theme_fg_color, 0.15);
 }
 
@@ -833,7 +885,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 }
 
 .settings-rescan-btn {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     transition: color 200ms ease;
 }
 
@@ -850,7 +902,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 }
 
 .caption.dim-label {
-    color: alpha(@theme_fg_color, 0.5);
+    color: alpha(@theme_fg_color, 0.6);
 }
 
 /* Track row subtitle — slightly larger than default caption */
@@ -934,7 +986,11 @@ button.flat:hover {
 }
 
 .library-artist-row:hover {
-    background-color: alpha(@theme_fg_color, 0.04);
+    background-color: alpha(@theme_fg_color, 0.05);
+}
+
+.artist-row-image {
+    border-radius: 50%;
 }
 
 /* -- Track list row -- */
@@ -946,13 +1002,13 @@ button.flat:hover {
 }
 
 .library-track-row:hover {
-    background-color: alpha(@theme_fg_color, 0.04);
+    background-color: alpha(@theme_fg_color, 0.05);
 }
 
 /* -- Dim count text -- */
 
 .library-track-count {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     font-size: 0.8rem;
 }
 
@@ -1010,7 +1066,7 @@ button.flat:hover {
 
 .album-detail-meta {
     font-size: 0.8rem;
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     letter-spacing: 0.2px;
 }
 
@@ -1043,14 +1099,14 @@ button.flat:hover {
 }
 
 .album-detail-track-row:hover {
-    background-color: alpha(@theme_fg_color, 0.04);
+    background-color: alpha(@theme_fg_color, 0.05);
 }
 
 /* -- Track number (dim, fixed width) -- */
 
 .album-detail-track-number {
     font-size: 0.85rem;
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     font-weight: 500;
     min-width: 32px;
     font-variant-numeric: tabular-nums;
@@ -1098,6 +1154,10 @@ button.flat:hover {
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 
+.artist-detail-photo {
+    border-radius: 9999px;
+}
+
 /* -- Large artist name -- */
 
 .artist-detail-name {
@@ -1115,6 +1175,28 @@ button.flat:hover {
 
 .artist-detail-albums-row scrollbar {
     background-color: transparent;
+}
+
+/* -- Artist biography -- */
+
+.artist-bio-text {
+    line-height: 1.6;
+    opacity: 0.85;
+}
+
+/* -- Similar artists -- */
+
+.similar-artist-card {
+    padding: 8px;
+}
+
+.similar-artist-image-box {
+    background-color: alpha(@theme_fg_color, 0.08);
+    border-radius: 9999px;
+}
+
+.similar-artist-photo {
+    border-radius: 9999px;
 }
 
 /* =============================================================
@@ -1153,13 +1235,13 @@ button.flat:hover {
 }
 
 .playlist-track-row:hover {
-    background-color: alpha(@theme_fg_color, 0.06);
+    background-color: alpha(@theme_fg_color, 0.05);
 }
 
 /* -- Small remove (x) button, red on hover -- */
 
 .playlist-remove-btn {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     min-width: 28px;
     min-height: 28px;
     border-radius: 9999px;
@@ -1185,12 +1267,12 @@ button.flat:hover {
 /* -- Centered empty state -- */
 
 .playlist-empty-state {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     padding: 48px 16px;
 }
 
 .playlist-empty-state image {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     opacity: 0.3;
 }
 
@@ -1198,12 +1280,28 @@ button.flat:hover {
    LYRICS PANEL
    ============================================================= */
 
+/* -- Resize handle on panel left edge -- */
+
+.panel-resize-handle {
+    background-color: alpha(@theme_fg_color, 0.06);
+    border-right: 1px solid alpha(@theme_fg_color, 0.08);
+    transition: background-color 200ms ease;
+}
+
+.panel-resize-handle:hover {
+    background-color: alpha(@theme_fg_color, 0.15);
+}
+
 /* -- Panel container — dark side panel with left border -- */
 
 .lyrics-panel {
-    background-color: @headerbar_bg_color;
+    background: @headerbar_bg_color;
     border-left: 1px solid alpha(@theme_fg_color, 0.06);
-    min-width: 300px;
+    min-width: 320px;
+}
+
+.lyrics-panel.panel-fullwidth {
+    min-width: unset;
 }
 
 /* -- Header row with title and close button -- */
@@ -1214,7 +1312,7 @@ button.flat:hover {
 }
 
 .lyrics-close-btn {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     min-width: 28px;
     min-height: 28px;
     border-radius: 9999px;
@@ -1240,7 +1338,7 @@ button.flat:hover {
 
 .lyrics-info-artist {
     font-size: 0.75rem;
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
 }
 
 /* -- Lyrics text area — secondary color, good line height -- */
@@ -1254,12 +1352,12 @@ button.flat:hover {
 /* -- Empty state — centred icon + message -- */
 
 .lyrics-empty-state {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     padding: 48px 16px;
 }
 
 .lyrics-empty-state image {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     opacity: 0.3;
 }
 
@@ -1329,6 +1427,18 @@ button.flat:hover {
     color: #00c4cc;
 }
 
+.explore-genre-pill-active {
+    background-color: rgba(0, 196, 204, 0.2);
+    color: #00c4cc;
+    border-color: rgba(0, 196, 204, 0.5);
+    box-shadow: 0 0 0 1px rgba(0, 196, 204, 0.2);
+}
+
+.explore-genre-pill-active:hover {
+    background-color: rgba(0, 196, 204, 0.25);
+    border-color: rgba(0, 196, 204, 0.6);
+}
+
 /* -- Track row in top tracks list -- */
 
 .explore-track-row {
@@ -1338,7 +1448,7 @@ button.flat:hover {
 }
 
 .explore-track-row:hover {
-    background-color: alpha(@theme_fg_color, 0.04);
+    background-color: alpha(@theme_fg_color, 0.05);
 }
 
 /* =============================================================
@@ -1444,9 +1554,13 @@ button.flat:hover {
 /* -- Panel container — dark side panel with left border -- */
 
 .queue-panel {
-    background-color: @headerbar_bg_color;
+    background: @headerbar_bg_color;
     border-left: 1px solid alpha(@theme_fg_color, 0.06);
     min-width: 320px;
+}
+
+.queue-panel.panel-fullwidth {
+    min-width: unset;
 }
 
 /* -- Header row with title, count, and close button -- */
@@ -1457,7 +1571,7 @@ button.flat:hover {
 }
 
 .queue-close-btn {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     min-width: 28px;
     min-height: 28px;
     border-radius: 9999px;
@@ -1484,7 +1598,7 @@ button.flat:hover {
     transition: background-color 150ms ease;
 }
 .queue-track-row:hover {
-    background-color: alpha(@theme_fg_color, 0.04);
+    background-color: alpha(@theme_fg_color, 0.05);
 }
 
 /* -- Amber highlight for the currently playing track -- */
@@ -1518,14 +1632,14 @@ button.flat:hover {
 
 .queue-track-artist {
     font-size: 0.75rem;
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
 }
 
 /* -- Queue position number -- */
 
 .queue-track-number {
     font-size: 0.8rem;
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     font-weight: 500;
     font-variant-numeric: tabular-nums;
 }
@@ -1535,14 +1649,14 @@ button.flat:hover {
 .queue-track-duration {
     font-size: 0.75rem;
     font-family: monospace;
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     min-width: 36px;
 }
 
 /* -- Move up/down buttons -- */
 
 .queue-move-btn {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     min-width: 24px;
     min-height: 24px;
     border-radius: 9999px;
@@ -1557,7 +1671,7 @@ button.flat:hover {
 /* -- Small remove (x) button, red on hover -- */
 
 .queue-remove-btn {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     min-width: 24px;
     min-height: 24px;
     border-radius: 9999px;
@@ -1572,7 +1686,7 @@ button.flat:hover {
 /* -- Clear queue button at the bottom -- */
 
 .queue-clear-btn {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     font-size: 0.85rem;
     font-weight: 500;
     border-radius: 9999px;
@@ -1588,12 +1702,12 @@ button.flat:hover {
 /* -- Centered empty state -- */
 
 .queue-empty-state {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     padding: 48px 16px;
 }
 
 .queue-empty-state image {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     opacity: 0.3;
 }
 
@@ -1608,7 +1722,7 @@ button.flat:hover {
 }
 
 .drag-handle:hover {
-    color: alpha(@theme_fg_color, 0.5);
+    color: alpha(@theme_fg_color, 0.6);
 }
 
 /* -- Row being actively dragged -- */
@@ -1648,14 +1762,16 @@ button.flat:hover {
 /* -- Dark popover menu styling -- */
 
 .context-menu {
+    background-color: transparent;
+    border: none;
+    border-radius: 12px;
+    padding: 0;
+}
+
+.context-menu > contents {
     background-color: @popover_bg_color;
     border: 1px solid alpha(@theme_fg_color, 0.1);
     border-radius: 12px;
-    padding: 4px;
-}
-
-.context-menu contents {
-    background-color: transparent;
     padding: 4px;
 }
 
@@ -1730,7 +1846,7 @@ button.flat:hover {
 .equalizer-band-label {
     font-size: 0.7rem;
     font-weight: 600;
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     letter-spacing: 0.3px;
 }
 
@@ -1818,12 +1934,12 @@ button.flat:hover {
 /* -- Empty state -- */
 
 .stats-empty-state {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     padding: 48px 16px;
 }
 
 .stats-empty-state image {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     opacity: 0.3;
 }
 
@@ -1969,7 +2085,7 @@ button.flat:hover {
 /* -- Control buttons (next, close, maximize) -- */
 
 .mini-player-controls {
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     min-width: 24px;
     min-height: 24px;
     border-radius: 9999px;
@@ -2042,7 +2158,7 @@ button.flat:hover {
 .mini-player-time {
     font-size: 0.65rem;
     font-family: monospace;
-    color: alpha(@theme_fg_color, 0.4);
+    color: alpha(@theme_fg_color, 0.55);
     min-width: 30px;
 }
 
@@ -2064,10 +2180,7 @@ button.flat:hover {
     border-right: 1px solid rgba(212, 160, 57, 0.12);
 }
 
-/* ── Now-playing bar — amber glow line on top ────────── */
-.now-playing-bar {
-    border-top: 1px solid rgba(212, 160, 57, 0.2);
-}
+/* (now-playing-bar amber border is set in the main definition above) */
 
 /* ── Stat card icon accent rings ────────────────────── */
 .stat-icon-amber {
@@ -2094,10 +2207,48 @@ button.flat:hover {
     min-height: 40px;
 }
 
-/* ── Album card hover lift effect ──────────────────── */
-.album-card:hover {
-    background-color: rgba(212, 160, 57, 0.08);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+/* ── Album card hover overlay (darkens art, reveals play button) ── */
+.album-card-hover-overlay {
+    background-color: rgba(0, 0, 0, 0.5);
+    border-radius: 10px 10px 0 0;
+    opacity: 0;
+    transition: opacity 250ms ease;
+}
+
+.album-card:hover .album-card-hover-overlay {
+    opacity: 1;
+}
+
+.album-card-play-btn {
+    background-color: #d4a039;
+    color: #0c0b0f;
+    border-radius: 9999px;
+    min-width: 48px;
+    min-height: 48px;
+    padding: 0;
+    box-shadow: 0 4px 16px rgba(212, 160, 57, 0.4);
+    transition: all 200ms ease;
+    opacity: 0;
+}
+
+.album-card:hover .album-card-play-btn {
+    opacity: 1;
+}
+
+.album-card-play-btn:hover {
+    background-color: #e0b04a;
+    box-shadow: 0 6px 24px rgba(212, 160, 57, 0.5);
+}
+
+/* ── Drag-and-drop highlight on sidebar playlist rows ── */
+.playlist-drop-highlight {
+    background-color: rgba(212, 160, 57, 0.15);
+    border: 1px dashed rgba(212, 160, 57, 0.5);
+    border-radius: 8px;
+}
+
+.playlist-drop-highlight label {
+    color: #d4a039;
 }
 
 /* ── Login prompt button — larger, pill-shaped ─────── */
@@ -2134,16 +2285,96 @@ switch:checked slider {
 }
 
 /* ── Popover menus — theme-adaptive ────────────────── */
-popover contents {
+popover:not(.context-menu) contents {
     background-color: @popover_bg_color;
     border: 1px solid alpha(@theme_fg_color, 0.08);
     border-radius: 12px;
 }
 
+/* Context-menu popover contents: single border, themed background */
+popover.context-menu > contents {
+    background-color: @popover_bg_color;
+    border: 1px solid alpha(@theme_fg_color, 0.1);
+    border-radius: 12px;
+    padding: 4px;
+}
+
 /* ── Tooltip styling ───────────────────────────────── */
 tooltip {
-    background-color: alpha(@theme_fg_color, 0.08);
-    color: @theme_fg_color;
-    border: 1px solid alpha(@theme_fg_color, 0.1);
+    background-color: rgba(40, 40, 40, 0.95);
+    color: #f0f0f0;
+    border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 8px;
+    padding: 4px 8px;
+}
+
+tooltip label {
+    color: #f0f0f0;
+}
+
+tooltip.background {
+    background-color: rgba(40, 40, 40, 0.95);
+}
+
+/* ── View Mode Toggle ─────────────────────────────── */
+
+.view-mode-toggle {
+    border-radius: 8px;
+    background-color: alpha(@theme_fg_color, 0.04);
+    padding: 2px;
+}
+
+.view-mode-btn {
+    min-width: 28px;
+    min-height: 28px;
+    padding: 4px;
+    border-radius: 6px;
+}
+
+.view-mode-btn:checked {
+    background-color: rgba(212, 160, 57, 0.25);
+    color: #d4a039;
+}
+
+.view-mode-btn:checked image {
+    color: #d4a039;
+}
+
+/* ── Compact Track Row ────────────────────────────── */
+
+.compact-track-row {
+    padding: 2px 8px;
+    min-height: 28px;
+}
+
+/* ── Standard Track Row ───────────────────────────── */
+
+.standard-track-row {
+    padding: 4px 8px;
+}
+
+.standard-track-row:hover {
+    background-color: alpha(@theme_fg_color, 0.04);
+}
+
+/* ── Grid Mode Album Card ─────────────────────────── */
+
+.grid-album-card {
+    padding: 8px;
+    border-radius: 12px;
+    transition: background-color 200ms ease;
+}
+
+.grid-album-card:hover {
+    background-color: alpha(@theme_fg_color, 0.06);
+}
+
+.grid-album-card-art {
+    border-radius: 8px;
+    background-color: alpha(@theme_fg_color, 0.06);
+}
+
+.grid-album-card-count {
+    font-size: 0.75rem;
+    opacity: 0.5;
 }

@@ -9,16 +9,17 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, Gdk, GLib, Gtk
 
 from auxen.album_art import AlbumArtService
+from auxen.artist_image import ArtistImageService
 from auxen.equalizer import Equalizer
 from auxen.lyrics import LyricsService
 from auxen.views.album_detail import AlbumDetailView
 from auxen.views.artist_detail import ArtistDetailView
 from auxen.views.equalizer_dialog import EqualizerDialog
 from auxen.views.explore import ExploreView
-from auxen.views.favorites import FavoritesView
+from auxen.views.collection import CollectionView
 from auxen.views.home import HomePage
 from auxen.views.library import LibraryView
 from auxen.views.lyrics_panel import LyricsPanel
@@ -36,6 +37,22 @@ from auxen.views.stats import StatsView
 
 logger = logging.getLogger(__name__)
 
+
+class _ResponsiveBox(Gtk.Box):
+    """Box that tracks its allocated width and fires a callback on change."""
+
+    def __init__(self, on_width_change, **kw):
+        super().__init__(**kw)
+        self._on_width_change = on_width_change
+        self._last_width = 0
+
+    def do_size_allocate(self, w, h, b):
+        super().do_size_allocate(w, h, b)
+        if w != self._last_width:
+            self._last_width = w
+            GLib.idle_add(self._on_width_change, w)
+
+
 # Page definitions: (name, display_title)
 _PAGES: list[tuple[str, str]] = [
     ("home", "Home"),
@@ -43,7 +60,7 @@ _PAGES: list[tuple[str, str]] = [
     ("library", "Library"),
     ("explore", "Explore"),
     ("mixes", "Mixes"),
-    ("favorites", "Favorites"),
+    ("collection", "Collection"),
     ("stats", "Stats"),
 ]
 
@@ -56,11 +73,14 @@ class AuxenWindow(Adw.ApplicationWindow):
 
         self.set_title("Auxen")
         self.set_default_size(1100, 700)
+        self.set_size_request(360, 400)
 
         self._app_ref = None
         self._previous_page: str = "home"
+        self._scroll_positions: dict[str, float] = {}
         self._lyrics_service = LyricsService()
         self._album_art_service = AlbumArtService()
+        self._artist_image_service = ArtistImageService()
         self._current_track = None
         self._equalizer: Equalizer | None = None
         self._mini_player: MiniPlayerWindow | None = None
@@ -74,6 +94,9 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._nav_programmatic: bool = False
 
         split_view = Adw.NavigationSplitView()
+        split_view.set_min_sidebar_width(180)
+        split_view.set_max_sidebar_width(260)
+        self._split_view = split_view
 
         self._smart_playlist_service = None
 
@@ -85,6 +108,13 @@ class AuxenWindow(Adw.ApplicationWindow):
             on_smart_playlist_selected=self._on_smart_playlist_selected,
         )
         self._sidebar.on_tidal_login = self._start_tidal_login
+        self._sidebar.on_drop_track_to_playlist = (
+            self._on_drop_track_to_playlist
+        )
+        self._sidebar.on_sidebar_play_playlist = (
+            self._on_sidebar_play_playlist
+        )
+        self._sidebar.on_collapse_changed = self._on_sidebar_collapse_changed
         sidebar_page = Adw.NavigationPage.new(self._sidebar, "Sidebar")
         split_view.set_sidebar(sidebar_page)
 
@@ -98,6 +128,10 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._stack.set_transition_duration(200)
         self._stack.set_vexpand(True)
         self._stack.set_hexpand(True)
+        # Allow stack to size based on visible page only, so wide pages
+        # (like Stats with 4-column stat cards) don't force a wide minimum.
+        self._stack.set_hhomogeneous(False)
+        self._stack.set_vhomogeneous(False)
 
         for name, title in _PAGES:
             if name == "home":
@@ -125,9 +159,9 @@ class AuxenWindow(Adw.ApplicationWindow):
                 self._stack.add_named(self._mixes_view, name)
                 continue
 
-            if name == "favorites":
-                self._favorites_view = FavoritesView()
-                self._stack.add_named(self._favorites_view, name)
+            if name == "collection":
+                self._collection_view = CollectionView()
+                self._stack.add_named(self._collection_view, name)
                 continue
 
             if name == "stats":
@@ -168,6 +202,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             on_play_all=self._on_artist_play_all,
             on_back=self._on_artist_back,
             on_album_clicked=self._on_album_clicked,
+            on_similar_artist_clicked=self._on_artist_clicked,
         )
         self._stack.add_named(self._artist_detail, "artist-detail")
 
@@ -176,6 +211,9 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._playlist_view.on_play_track = self._on_playlist_play_track
         self._playlist_view.on_play_all = self._on_playlist_play_all
         self._playlist_view.on_back = self._on_playlist_back
+        self._playlist_view.on_playlist_changed = (
+            lambda: self._sidebar.refresh_playlists()
+        )
         self._playlist_view._on_artist_clicked = self._navigate_to_artist
         self._playlist_view._on_album_clicked = self._navigate_to_album
         self._stack.add_named(self._playlist_view, "playlist-detail")
@@ -198,6 +236,8 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._home_page.set_callbacks(
             on_album_clicked=self._on_album_clicked,
             on_artist_clicked=self._navigate_to_artist,
+            on_play_album=self._on_home_play_album,
+            on_play_track=self._on_context_play,
         )
 
         # ---- Lyrics Panel (right side, hidden by default) ----
@@ -218,15 +258,38 @@ class AuxenWindow(Adw.ApplicationWindow):
             on_move=self._on_queue_move,
         )
 
-        # Horizontal box: content stack + side panels (only one visible)
-        content_hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        content_hbox.set_vexpand(True)
-        self._stack.set_hexpand(True)
-        content_hbox.append(self._stack)
-        content_hbox.append(self._lyrics_panel)
-        content_hbox.append(self._queue_panel)
+        # Responsive content width tracking
+        self._content_width = 0
 
-        content_box.append(content_hbox)
+        # Paned: stack (start, resizable) + panel (end, shrinkable)
+        # Gtk.Paned with shrink_end_child=True lets the user drag the panel
+        # smaller than its natural content minimum — unlike a plain Gtk.Box.
+        # We swap which panel is the end child based on which is visible.
+        self._paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self._paned.set_vexpand(True)
+        self._paned.set_start_child(self._stack)
+        self._paned.set_resize_start_child(True)
+        self._paned.set_shrink_start_child(False)
+        # End child starts as None — set when a panel is shown
+        self._paned.set_end_child(Gtk.Box())  # placeholder
+        self._paned.set_resize_end_child(False)
+        self._paned.set_shrink_end_child(False)
+        self._paned.set_wide_handle(False)
+        # Default position: panel gets 320px from the right
+        self._paned.set_position(9999)  # start with handle at far right (no panel)
+        self._panel_visible = False
+        self._min_panel_width = 320
+        self._paned.connect("notify::position", self._on_paned_position)
+
+        # Width tracking wrapper
+        content_wrapper = _ResponsiveBox(
+            on_width_change=self._on_content_width_changed,
+            orientation=Gtk.Orientation.VERTICAL,
+        )
+        content_wrapper.set_vexpand(True)
+        content_wrapper.append(self._paned)
+
+        content_box.append(content_wrapper)
 
         # ---- Now Playing Bar (pinned at bottom of content area) ----
         self._now_playing = NowPlayingBar(
@@ -236,7 +299,8 @@ class AuxenWindow(Adw.ApplicationWindow):
         )
         self._now_playing.on_artist_clicked = self._navigate_to_artist
         self._now_playing.on_album_clicked = self._navigate_to_album
-        self._now_playing.set_visible(False)
+        # Keep the bar always visible to avoid layout reflow; start in idle state.
+        self._now_playing.set_idle(True)
         content_box.append(self._now_playing)
 
         self._toast_overlay = Adw.ToastOverlay()
@@ -259,6 +323,9 @@ class AuxenWindow(Adw.ApplicationWindow):
             "on_toggle_favorite": self._on_context_toggle_favorite,
             "on_go_to_album": self._on_context_go_to_album,
             "on_go_to_artist": self._on_context_go_to_artist,
+            "on_track_radio": self._on_context_track_radio,
+            "on_view_lyrics": self._on_context_view_lyrics,
+            "on_credits": self._on_context_credits,
         }
 
         self._home_page.set_context_callbacks(
@@ -270,7 +337,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._search_view.set_context_callbacks(
             context_callbacks, self._get_playlists
         )
-        self._favorites_view.set_context_callbacks(
+        self._collection_view.set_context_callbacks(
             context_callbacks, self._get_playlists
         )
         self._album_detail.set_context_callbacks(
@@ -285,10 +352,17 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._smart_playlist_view.set_context_callbacks(
             context_callbacks, self._get_playlists
         )
+        self._stats_view.set_context_callbacks(
+            context_callbacks, self._get_playlists
+        )
+        self._explore_view.set_context_callbacks(
+            context_callbacks, self._get_playlists
+        )
 
         # Wire album context menu callbacks for views with album cards
         album_context_callbacks = {
             "on_play_album": self._on_context_play_album,
+            "on_shuffle_album": self._on_context_shuffle_album,
             "on_play_album_next": self._on_context_play_album_next,
             "on_add_album_to_queue": self._on_context_add_album_to_queue,
             "on_add_to_playlist": self._on_context_add_album_to_playlist,
@@ -302,14 +376,30 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._library_view.set_album_context_callbacks(
             album_context_callbacks, self._get_playlists
         )
+        self._explore_view.set_album_context_callbacks(
+            album_context_callbacks, self._get_playlists
+        )
+        self._collection_view.set_album_context_callbacks(
+            album_context_callbacks, self._get_playlists
+        )
+        self._artist_detail.set_album_context_callbacks(
+            album_context_callbacks, self._get_playlists
+        )
 
-        # Wire artist context menu callbacks for library artist rows
+        # Wire artist context menu callbacks for library/collection artist rows
         artist_context_callbacks = {
             "on_play_all": self._on_context_play_all_by_artist,
             "on_add_all_to_queue": self._on_context_add_all_by_artist,
             "on_view_artist": self._on_context_view_artist,
+            "on_artist_radio": self._on_context_artist_radio,
+            "on_follow_artist": self._on_context_follow_artist,
+            "on_unfollow_artist": self._on_context_unfollow_artist,
+            "on_shuffle_artist": self._on_context_shuffle_artist,
         }
         self._library_view.set_artist_context_callbacks(
+            artist_context_callbacks
+        )
+        self._collection_view.set_artist_context_callbacks(
             artist_context_callbacks
         )
 
@@ -331,6 +421,12 @@ class AuxenWindow(Adw.ApplicationWindow):
             Gtk.CallbackAction.new(lambda _w, _d: self._nav_forward()),
         )
         self.add_shortcut(forward_shortcut)
+
+        # Bare-key shortcuts that must not fire when a text entry has focus.
+        bare_key_ctrl = Gtk.EventControllerKey()
+        bare_key_ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        bare_key_ctrl.connect("key-pressed", self._on_bare_key_pressed)
+        self.add_controller(bare_key_ctrl)
 
         # Show home by default
         self._stack.set_visible_child_name("home")
@@ -385,13 +481,19 @@ class AuxenWindow(Adw.ApplicationWindow):
                 tidal_provider=app.tidal_provider,
             )
 
-        # --- Favorites View -> Database + Tidal ---
+        # --- Collection View -> Database + Tidal ---
         if app.db is not None:
-            self._favorites_view.set_database(app.db)
+            self._collection_view.set_database(app.db)
+            self._collection_view.set_callbacks(
+                on_album_clicked=self._on_album_clicked,
+                on_artist_clicked=self._on_artist_clicked,
+                on_play_album=self._on_context_play_album,
+                on_play_track=self._on_collection_play_track,
+            )
         if app.tidal_provider is not None:
-            self._favorites_view.set_tidal_provider(app.tidal_provider)
-        self._favorites_view.on_favorite_changed = self._on_favorites_view_changed
-        self._favorites_view.on_tidal_login = self._start_tidal_login
+            self._collection_view.set_tidal_provider(app.tidal_provider)
+        self._collection_view.on_favorite_changed = self._on_favorites_view_changed
+        self._collection_view.on_tidal_login = self._start_tidal_login
 
         # --- Library View -> Database + callbacks ---
         if app.db is not None:
@@ -400,6 +502,7 @@ class AuxenWindow(Adw.ApplicationWindow):
                 on_album_clicked=self._on_album_clicked,
                 on_play_track=self._on_library_play_track,
                 on_artist_clicked=self._on_artist_clicked,
+                on_play_album=self._on_context_play_album,
             )
 
         # --- Explore View -> Tidal Provider ---
@@ -419,19 +522,43 @@ class AuxenWindow(Adw.ApplicationWindow):
                 on_login=self._on_mixes_login,
             )
 
+        # --- Smart Playlist View -> Database (view mode persistence) ---
+        if app.db is not None:
+            self._smart_playlist_view.set_database(app.db)
+
         # --- Sidebar -> Database (playlists) ---
         if app.db is not None:
             self._sidebar.set_database(app.db)
 
-        # --- Stats View -> Database ---
+        # --- Stats View -> Database + Callbacks ---
         if app.db is not None:
             self._stats_view.set_database(app.db)
+            self._stats_view.set_callbacks(
+                on_artist_clicked=self._navigate_to_artist,
+                on_track_clicked=self._on_stats_track_clicked,
+            )
 
         # --- Home Page -> Album Art Service ---
         self._home_page.set_album_art_service(self._album_art_service)
 
-        # --- Library View -> Album Art Service ---
+        # --- Artist Image Service -> Tidal Provider ---
+        if app.tidal_provider is not None:
+            self._artist_image_service.set_tidal_provider(app.tidal_provider)
+
+        # --- Library View -> Album Art Service + Artist Images + Favorite Callback ---
         self._library_view.set_album_art_service(self._album_art_service)
+        self._library_view.set_artist_image_service(self._artist_image_service)
+        self._library_view.on_favorite_toggled = self._on_context_toggle_favorite
+
+        # --- Collection View -> Album Art Service + Artist Images ---
+        self._collection_view.set_album_art_service(self._album_art_service)
+        self._collection_view.set_artist_image_service(self._artist_image_service)
+
+        # --- Explore View -> Album Art Service ---
+        self._explore_view.set_album_art_service(self._album_art_service)
+
+        # --- Search View -> Album Art Service ---
+        self._search_view.set_album_art_service(self._album_art_service)
 
         # --- Smart Playlists -> Service ---
         if hasattr(app, "smart_playlist_service") and app.smart_playlist_service is not None:
@@ -439,6 +566,10 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._sidebar.set_smart_playlist_service(
                 app.smart_playlist_service
             )
+
+        # --- Lyrics Service -> Tidal Provider ---
+        if app.tidal_provider is not None:
+            self._lyrics_service.set_tidal_provider(app.tidal_provider)
 
         # --- Sidebar account info from Tidal ---
         self._update_sidebar_account()
@@ -547,8 +678,9 @@ class AuxenWindow(Adw.ApplicationWindow):
                 )
             return
 
-        # Top-level pages — refresh data.
+        # Top-level pages — refresh data and restore scroll position.
         self._refresh_page(page)
+        GLib.timeout_add(300, self._restore_scroll_position, page)
 
     def _reload_detail_page(self, page: str, detail_key: str) -> None:
         """Reload a detail page from its stored key.
@@ -559,48 +691,18 @@ class AuxenWindow(Adw.ApplicationWindow):
         """
         db = self._app_ref.db if self._app_ref else None
 
-        if page == "album-detail" and db is not None:
+        if page == "album-detail":
             parts = detail_key.split("\x00", 1)
             album_name = parts[0]
             artist = parts[1] if len(parts) > 1 else ""
             if album_name:
-                tracks = db.get_tracks_by_album(album_name, artist=artist)
-                source = tracks[0].source.value if tracks else "local"
-                self._album_detail.show_album(
-                    album_name=album_name,
-                    artist=artist,
-                    tracks=tracks,
-                    source=source,
-                )
-                # Reload album art (mirrors _on_album_clicked logic).
-                if tracks:
-                    expected = (album_name, artist)
-                    scale = self.get_scale_factor() or 1
-                    detail_px = 200 * scale
+                # Reuse _on_album_clicked which already has Tidal fallback
+                self._on_album_clicked(album_name, artist)
 
-                    def _on_art(pixbuf, _key=expected):
-                        current = (
-                            self._album_detail._title_label.get_label(),
-                            self._album_detail._artist_label.get_label(),
-                        )
-                        if current == _key:
-                            self._album_detail.set_album_art(pixbuf)
-
-                    self._album_art_service.get_art_async(
-                        tracks[0], _on_art, width=detail_px, height=detail_px
-                    )
-
-        elif page == "artist-detail" and db is not None:
+        elif page == "artist-detail":
             if detail_key:
-                albums = db.get_artist_albums(detail_key)
-                tracks = db.get_artist_tracks(detail_key)
-                source = tracks[0].source.value if tracks else "local"
-                self._artist_detail.show_artist(
-                    artist_name=detail_key,
-                    albums=albums,
-                    tracks=tracks,
-                    source=source,
-                )
+                # Reuse _on_artist_clicked which already has Tidal fallback
+                self._on_artist_clicked(detail_key)
 
         elif page == "playlist-detail" and db is not None:
             try:
@@ -634,7 +736,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         """Update the now-playing bar when the current track changes."""
         if track is None:
             self._current_track = None
-            self._now_playing.set_visible(False)
+            self._now_playing.set_idle(True)
             self._now_playing.update_track(title="", artist="", album="")
             self._now_playing.set_album_art(None)
             self._now_playing.set_favorite_active(False)
@@ -644,8 +746,11 @@ class AuxenWindow(Adw.ApplicationWindow):
                 self._mini_player.set_album_art(None)
             return
         if track is not None:
-            self._now_playing.set_visible(True)
+            self._now_playing.set_idle(False)
             self._current_track = track
+            # Reset progress bar immediately to avoid stale position flash
+            # during gapless transitions
+            self._now_playing.update_position(0, 0)
             self._now_playing.update_track(
                 title=track.title,
                 artist=track.artist,
@@ -661,14 +766,14 @@ class AuxenWindow(Adw.ApplicationWindow):
                 if self._current_track is _track:
                     self._now_playing.set_album_art(pixbuf)
 
-            # Fetch at logical_size * scale_factor for HiDPI crispness
+            # Fetch at 64 × scale_factor for HiDPI source quality
             scale = self.get_scale_factor() or 1
-            art_48 = 48 * scale
+            art_64 = 64 * scale
             self._album_art_service.get_art_async(
                 track,
                 _on_art,
-                width=art_48,
-                height=art_48,
+                width=art_64,
+                height=art_64,
             )
             # Update the favorite button state for the new track
             if self._app_ref and self._app_ref.db is not None and track.id is not None:
@@ -705,6 +810,8 @@ class AuxenWindow(Adw.ApplicationWindow):
                     if self._current_track is _track:
                         self._mini_player.set_album_art(pixbuf)
 
+                scale = self.get_scale_factor() or 1
+                art_48 = 48 * scale
                 self._album_art_service.get_art_async(
                     track,
                     _on_mini_art,
@@ -781,8 +888,8 @@ class AuxenWindow(Adw.ApplicationWindow):
 
             # Refresh the favorites view if it is currently visible
             visible = self._stack.get_visible_child_name()
-            if visible == "favorites":
-                self._favorites_view.refresh()
+            if visible == "collection":
+                self._collection_view.refresh()
         except Exception:
             logger.warning(
                 "Failed to toggle favorite from now-playing bar",
@@ -820,7 +927,9 @@ class AuxenWindow(Adw.ApplicationWindow):
     # Album detail navigation
     # ------------------------------------------------------------------
 
-    def _on_album_clicked(self, album_name: str, artist: str) -> None:
+    def _on_album_clicked(
+        self, album_name: str, artist: str, tidal_id: str | None = None,
+    ) -> None:
         """Handle an album card click from the home page."""
         # Store current page for back navigation
         visible = self._stack.get_visible_child_name()
@@ -838,6 +947,31 @@ class AuxenWindow(Adw.ApplicationWindow):
             except Exception:
                 logger.warning(
                     "Failed to fetch album tracks", exc_info=True
+                )
+
+        # If local DB returned no tracks, try Tidal API
+        if (
+            not tracks
+            and self._app_ref
+            and self._app_ref.tidal_provider is not None
+            and self._app_ref.tidal_provider.is_logged_in
+        ):
+            try:
+                # Prefer direct ID lookup when available
+                if tidal_id:
+                    api_tracks = self._app_ref.tidal_provider.get_album_tracks_by_id(
+                        tidal_id
+                    )
+                else:
+                    api_tracks = self._app_ref.tidal_provider.get_album_tracks(
+                        album_name, artist
+                    )
+                if api_tracks:
+                    tracks = api_tracks
+            except Exception:
+                logger.debug(
+                    "Failed to fetch album tracks from Tidal API",
+                    exc_info=True,
                 )
 
         if tracks:
@@ -926,6 +1060,9 @@ class AuxenWindow(Adw.ApplicationWindow):
         albums: list[dict] = []
         tracks: list = []
         source = "local"
+        artist_image_url: str | None = None
+        bio: str | None = None
+        similar_artists: list[dict] = []
 
         if self._app_ref and self._app_ref.db is not None:
             try:
@@ -936,6 +1073,65 @@ class AuxenWindow(Adw.ApplicationWindow):
                     "Failed to fetch artist data", exc_info=True
                 )
 
+        # Enrich local albums with cover_url from track data
+        album_art_map: dict[str, str] = {}
+        for t in tracks:
+            art_url = getattr(t, "album_art_url", None)
+            if art_url and t.album and t.album not in album_art_map:
+                album_art_map[t.album] = art_url
+        for alb in albums:
+            if "cover_url" not in alb:
+                alb["cover_url"] = album_art_map.get(alb["album"])
+
+        # Enrich with Tidal data if available
+        if (
+            self._app_ref
+            and self._app_ref.tidal_provider is not None
+            and self._app_ref.tidal_provider.is_logged_in
+        ):
+            try:
+                info = self._app_ref.tidal_provider.get_artist_info(
+                    artist_name
+                )
+                if info:
+                    artist_image_url = info.get("image_url")
+                    bio = info.get("bio")
+                    similar_artists = info.get("similar_artists", [])
+                    # Merge Tidal albums with local, dedup by exact name
+                    seen_names: set[str] = {
+                        a["album"].lower() for a in albums
+                    }
+                    for tidal_alb in info.get("albums", []):
+                        key = tidal_alb["title"].lower()
+                        if key not in seen_names:
+                            seen_names.add(key)
+                            albums.append({
+                                "album": tidal_alb["title"],
+                                "track_count": tidal_alb.get("num_tracks", 0),
+                                "year": None,
+                                "source": "tidal",
+                                "cover_url": tidal_alb.get("cover_url"),
+                                "tidal_id": tidal_alb.get("tidal_id"),
+                            })
+                    # Use Tidal top tracks first (popularity order),
+                    # then append any unique local tracks after
+                    tidal_top = info.get("tracks", [])
+                    if tidal_top:
+                        tidal_ids = {
+                            getattr(t, "source_id", None)
+                            for t in tidal_top
+                            if getattr(t, "source_id", None)
+                        }
+                        local_extras = [
+                            t for t in tracks
+                            if getattr(t, "source_id", None) not in tidal_ids
+                        ]
+                        tracks = list(tidal_top) + local_extras
+            except Exception:
+                logger.debug(
+                    "Failed to enrich artist from Tidal", exc_info=True
+                )
+
         if tracks:
             source = tracks[0].source.value
 
@@ -944,6 +1140,9 @@ class AuxenWindow(Adw.ApplicationWindow):
             albums=albums,
             tracks=tracks,
             source=source,
+            image_url=artist_image_url,
+            bio=bio,
+            similar_artists=similar_artists,
         )
         self._stack.set_visible_child_name("artist-detail")
         self._push_nav("artist-detail", artist_name)
@@ -969,6 +1168,44 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._nav_back()
 
     # ------------------------------------------------------------------
+    # Stats page callbacks
+    # ------------------------------------------------------------------
+
+    def _on_stats_track_clicked(
+        self, track_id: int, title: str, artist: str
+    ) -> None:
+        """Play a track from the stats view using its database ID."""
+        if self._app_ref is None or self._app_ref.player is None:
+            return
+        if self._app_ref.db is None:
+            return
+        try:
+            # Primary lookup: by track ID (exact match)
+            track = self._app_ref.db.get_track(track_id)
+            if track is not None:
+                self._app_ref.player.play_queue(
+                    [track], start_index=0
+                )
+                return
+            # Fallback: search by title + artist
+            tracks = self._app_ref.db.get_artist_tracks(artist)
+            for t in tracks:
+                if t.title == title:
+                    self._app_ref.player.play_queue(
+                        [t], start_index=0
+                    )
+                    return
+            if tracks:
+                self._app_ref.player.play_queue(
+                    [tracks[0]], start_index=0
+                )
+        except Exception:
+            logger.warning(
+                "Failed to play stats track id=%s %s - %s",
+                track_id, title, artist, exc_info=True,
+            )
+
+    # ------------------------------------------------------------------
     # Explore page callbacks
     # ------------------------------------------------------------------
 
@@ -985,7 +1222,9 @@ class AuxenWindow(Adw.ApplicationWindow):
     # Mixes page callbacks
     # ------------------------------------------------------------------
 
-    def _on_mixes_play_mix(self, tidal_id: str, name: str) -> None:
+    def _on_mixes_play_mix(
+        self, tidal_id: str, name: str, is_playlist: bool = True,
+    ) -> None:
         """Handle a mix/playlist card click from the mixes view."""
         if (
             self._app_ref
@@ -996,9 +1235,11 @@ class AuxenWindow(Adw.ApplicationWindow):
 
             def _load_and_play() -> None:
                 try:
-                    tracks = self._app_ref.tidal_provider.get_playlist_tracks(
-                        tidal_id
-                    )
+                    tp = self._app_ref.tidal_provider
+                    if is_playlist:
+                        tracks = tp.get_playlist_tracks(tidal_id)
+                    else:
+                        tracks = tp.get_mix_tracks(tidal_id)
                     if tracks:
                         GLib.idle_add(
                             self._app_ref.player.play_queue,
@@ -1091,6 +1332,12 @@ class AuxenWindow(Adw.ApplicationWindow):
                         self._update_sidebar_account()
                         # Refresh the current view
                         self._refresh_tidal_views()
+                        # Trigger auto-sync on login success
+                        if (
+                            self._app_ref is not None
+                            and self._app_ref.favorites_sync is not None
+                        ):
+                            self._app_ref.favorites_sync.trigger_initial_sync()
                     else:
                         toast = Adw.Toast.new("Tidal login failed")
                         toast.set_timeout(5)
@@ -1136,7 +1383,9 @@ class AuxenWindow(Adw.ApplicationWindow):
         try:
             session = provider._session
             user = session.user
-            username = getattr(user, "name", None) or str(getattr(user, "id", "User"))
+            first = getattr(user, "first_name", None) or ""
+            last = getattr(user, "last_name", None) or ""
+            username = f"{first} {last}".strip() or str(getattr(user, "id", "User"))
             sub = getattr(session, "subscription", None)
             plan = getattr(sub, "subscription", {}).get("type", "Tidal") if sub and hasattr(sub, "subscription") else "Tidal"
             if plan == "Tidal":
@@ -1148,25 +1397,23 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._sidebar.update_account(username="Tidal User", plan="Connected")
 
     def _refresh_tidal_views(self) -> None:
-        """Refresh Explore, Mixes, and Favorites views after login."""
-        visible = self._stack.get_visible_child_name()
-        if visible == "explore":
-            self._explore_view.refresh()
-        elif visible == "mixes":
-            self._mixes_view.refresh()
-        elif visible == "favorites":
-            self._favorites_view.refresh()
-        else:
-            # Refresh whichever one the user navigates to next
-            # by triggering a refresh on all tidal views
+        """Refresh all Tidal-dependent views after login or logout.
+
+        This refreshes Explore, Mixes, Favorites, and Library so that
+        stale Tidal content is cleared (on logout) or loaded (on login).
+        """
+        for view_name, view in [
+            ("explore", self._explore_view),
+            ("mixes", self._mixes_view),
+            ("collection", self._collection_view),
+            ("library", self._library_view),
+        ]:
             try:
-                self._explore_view.refresh()
+                view.refresh()
             except Exception:
-                pass
-            try:
-                self._mixes_view.refresh()
-            except Exception:
-                pass
+                logger.debug(
+                    "Failed to refresh %s view", view_name, exc_info=True
+                )
 
     # ------------------------------------------------------------------
     # Playlist detail navigation
@@ -1210,6 +1457,18 @@ class AuxenWindow(Adw.ApplicationWindow):
         if self._app_ref and self._app_ref.db is not None:
             self._sidebar.refresh_playlists()
         self._nav_back()
+
+    def _on_collection_play_track(self, track) -> None:
+        """Play a single track from the collection view."""
+        if self._app_ref and self._app_ref.player is not None:
+            self._app_ref.player.play_queue([track], start_index=0)
+
+    def _on_sidebar_play_playlist(self, playlist_id: int) -> None:
+        """Play all tracks in a playlist (triggered from sidebar context menu)."""
+        if self._app_ref and self._app_ref.db is not None:
+            tracks = self._app_ref.db.get_playlist_tracks(playlist_id)
+            if tracks and self._app_ref.player is not None:
+                self._app_ref.player.play_queue(tracks, start_index=0)
 
     # ------------------------------------------------------------------
     # Smart playlist detail navigation
@@ -1307,6 +1566,68 @@ class AuxenWindow(Adw.ApplicationWindow):
         dialog.present()
 
     # ------------------------------------------------------------------
+    # Sidebar collapse
+    # ------------------------------------------------------------------
+
+    def _on_sidebar_collapse_changed(self, collapsed: bool) -> None:
+        """Adjust split view sidebar width when sidebar collapses/expands."""
+        if collapsed:
+            self._split_view.set_min_sidebar_width(56)
+            self._split_view.set_max_sidebar_width(56)
+        else:
+            self._split_view.set_min_sidebar_width(180)
+            self._split_view.set_max_sidebar_width(260)
+
+    # ------------------------------------------------------------------
+    # Responsive layout
+    # ------------------------------------------------------------------
+
+    def _on_content_width_changed(self, width: int) -> bool:
+        """Called when the content overlay width changes."""
+        self._content_width = width
+        self._update_panel_layout()
+        # Propagate content width to views that need it
+        for view in (
+            self._home_page,
+            self._library_view,
+            self._collection_view,
+            self._explore_view,
+        ):
+            if hasattr(view, "set_content_width"):
+                view.set_content_width(width)
+        return False  # Remove idle callback
+
+    def _on_paned_position(self, paned, _pspec) -> None:
+        """Clamp the paned handle so the panel never shrinks below minimum."""
+        if not self._panel_visible:
+            return
+        total = paned.get_allocated_width()
+        max_pos = total - self._min_panel_width
+        if max_pos > 0 and paned.get_position() > max_pos:
+            paned.set_position(max_pos)
+
+    def _show_panel(self, panel: Gtk.Widget) -> None:
+        """Show a side panel in the paned end-child slot."""
+        self._panel_visible = True
+        total = self._paned.get_allocated_width()
+        self._paned.set_end_child(panel)
+        panel.set_visible(True)
+        # Position the handle to give the panel ~320px
+        if total > 320:
+            self._paned.set_position(total - 320)
+
+    def _hide_panel(self) -> None:
+        """Hide whatever panel is showing — replace with empty placeholder."""
+        self._panel_visible = False
+        self._lyrics_panel.set_visible(False)
+        self._queue_panel.set_visible(False)
+        placeholder = Gtk.Box()
+        placeholder.set_visible(False)
+        self._paned.set_end_child(placeholder)
+        # Push handle to far right so no space is taken
+        self._paned.set_position(self._paned.get_allocated_width())
+
+    # ------------------------------------------------------------------
     # Lyrics panel
     # ------------------------------------------------------------------
 
@@ -1315,15 +1636,16 @@ class AuxenWindow(Adw.ApplicationWindow):
         if active:
             # Hide queue panel if visible (mutual exclusion)
             if self._queue_panel.get_visible():
-                self._queue_panel.set_visible(False)
                 self._now_playing.set_queue_active(False)
-        self._lyrics_panel.set_visible(active)
-        if active and self._current_track is not None:
-            self._fetch_and_show_lyrics(self._current_track)
+            self._show_panel(self._lyrics_panel)
+            if self._current_track is not None:
+                self._fetch_and_show_lyrics(self._current_track)
+        else:
+            self._hide_panel()
 
     def _on_lyrics_panel_close(self) -> None:
         """Handle the lyrics panel close button."""
-        self._lyrics_panel.set_visible(False)
+        self._hide_panel()
         self._now_playing.set_lyrics_active(False)
 
     def _fetch_and_show_lyrics(self, track) -> None:
@@ -1351,14 +1673,15 @@ class AuxenWindow(Adw.ApplicationWindow):
         if active:
             # Hide lyrics panel if visible (mutual exclusion)
             if self._lyrics_panel.get_visible():
-                self._lyrics_panel.set_visible(False)
                 self._now_playing.set_lyrics_active(False)
             self._refresh_queue_panel()
-        self._queue_panel.set_visible(active)
+            self._show_panel(self._queue_panel)
+        else:
+            self._hide_panel()
 
     def _on_queue_panel_close(self) -> None:
         """Handle the queue panel close button."""
-        self._queue_panel.set_visible(False)
+        self._hide_panel()
         self._now_playing.set_queue_active(False)
 
     def _refresh_queue_panel(self) -> None:
@@ -1412,12 +1735,55 @@ class AuxenWindow(Adw.ApplicationWindow):
         """Switch the content stack to the requested page."""
         if not hasattr(self, "_stack"):
             return
+
+        # Save scroll position of the current page before switching
+        current_page = self._stack.get_visible_child_name()
+        if current_page:
+            self._save_scroll_position(current_page)
+
         child = self._stack.get_child_by_name(page_name)
         if child:
             self._stack.set_visible_child_name(page_name)
             self._push_nav(page_name)
 
         self._refresh_page(page_name)
+
+        # Restore scroll position after a short delay so widgets are laid out
+        GLib.timeout_add(300, self._restore_scroll_position, page_name)
+
+    def _save_scroll_position(self, page_name: str) -> None:
+        """Save the scroll position of the given page."""
+        view = self._get_scrollable_view(page_name)
+        if view is None:
+            return
+        try:
+            pos = view.get_scroll_position()
+            self._scroll_positions[page_name] = pos
+        except Exception:
+            pass
+
+    def _restore_scroll_position(self, page_name: str) -> bool:
+        """Restore a previously saved scroll position for the given page."""
+        pos = self._scroll_positions.get(page_name, 0.0)
+        if pos <= 0.0:
+            return GLib.SOURCE_REMOVE
+        view = self._get_scrollable_view(page_name)
+        if view is None:
+            return GLib.SOURCE_REMOVE
+        try:
+            view.set_scroll_position(pos)
+        except Exception:
+            pass
+        return GLib.SOURCE_REMOVE
+
+    def _get_scrollable_view(self, page_name: str):
+        """Return the view object for a page that supports scroll persistence."""
+        view_map = {
+            "home": getattr(self, "_home_page", None),
+            "library": getattr(self, "_library_view", None),
+            "collection": getattr(self, "_collection_view", None),
+        }
+        return view_map.get(page_name)
 
     def _refresh_page(self, page_name: str) -> None:
         """Refresh the data for *page_name* if it has a refresh method."""
@@ -1429,8 +1795,8 @@ class AuxenWindow(Adw.ApplicationWindow):
             "library": lambda: (
                 self._library_view.refresh() if db is not None else None
             ),
-            "favorites": lambda: (
-                self._favorites_view.refresh() if db is not None else None
+            "collection": lambda: (
+                self._collection_view.refresh() if db is not None else None
             ),
             "explore": lambda: self._explore_view.refresh(),
             "mixes": lambda: self._mixes_view.refresh(),
@@ -1446,6 +1812,50 @@ class AuxenWindow(Adw.ApplicationWindow):
                 logger.warning(
                     "Failed to refresh %s page", page_name, exc_info=True
                 )
+
+    # ------------------------------------------------------------------
+    # Bare-key shortcuts (focus-aware)
+    # ------------------------------------------------------------------
+
+    def _on_bare_key_pressed(
+        self,
+        controller: Gtk.EventControllerKey,
+        keyval: int,
+        keycode: int,
+        state: Gdk.ModifierType,
+    ) -> bool:
+        """Handle bare-key shortcuts only when focus is NOT on a text entry."""
+        # If any modifier (Ctrl, Alt, Shift) is held, let GTK handle it.
+        mods = state & (
+            Gdk.ModifierType.CONTROL_MASK
+            | Gdk.ModifierType.ALT_MASK
+            | Gdk.ModifierType.SHIFT_MASK
+        )
+        if mods:
+            return False
+
+        # Skip if focus is on a text-editing widget.
+        focus = self.get_focus()
+        if isinstance(focus, (Gtk.Entry, Gtk.SearchEntry, Gtk.Text)):
+            return False
+
+        app = self.get_application()
+        if app is None or app.player is None:
+            return False
+
+        if keyval == Gdk.KEY_space:
+            app.player.play_pause()
+            return True
+        if keyval == Gdk.KEY_n:
+            app.player.next_track()
+            return True
+        if keyval == Gdk.KEY_p:
+            app.player.previous_track()
+            return True
+        if keyval == Gdk.KEY_m:
+            self.toggle_mute()
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Keyboard shortcut helpers (called from app actions)
@@ -1629,7 +2039,12 @@ class AuxenWindow(Adw.ApplicationWindow):
     def _on_context_add_to_queue(self, track) -> None:
         """Append a track to the end of the play queue."""
         if self._app_ref and self._app_ref.player is not None:
-            self._app_ref.player.queue.add(track)
+            player = self._app_ref.player
+            was_empty = len(player.queue) == 0
+            player.queue.add(track)
+            # Auto-start playback if queue was empty
+            if was_empty:
+                player.play()
             if self._queue_panel.get_visible():
                 self._refresh_queue_panel()
 
@@ -1649,22 +2064,61 @@ class AuxenWindow(Adw.ApplicationWindow):
                 )
 
     def _on_context_new_playlist_with_track(self, track) -> None:
-        """Create a new playlist and add the given track to it."""
-        if self._app_ref and self._app_ref.db is not None:
-            try:
-                playlist_id = self._app_ref.db.create_playlist(
-                    f"Playlist"
-                )
-                if track.id is not None:
-                    self._app_ref.db.add_track_to_playlist(
-                        playlist_id, track.id
+        """Prompt for a name, create a new playlist, and add the track."""
+        self._show_new_playlist_dialog(
+            default_name=track.title or "New Playlist",
+            tracks=[track],
+        )
+
+    def _show_new_playlist_dialog(
+        self,
+        default_name: str = "New Playlist",
+        tracks: list | None = None,
+    ) -> None:
+        """Show a dialog prompting the user for a playlist name."""
+        dialog = Adw.AlertDialog()
+        dialog.set_heading("New Playlist")
+        dialog.set_body("Enter a name for the new playlist:")
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("create", "Create")
+        dialog.set_response_appearance(
+            "create", Adw.ResponseAppearance.SUGGESTED
+        )
+        dialog.set_default_response("create")
+        dialog.set_close_response("cancel")
+
+        entry = Gtk.Entry()
+        entry.set_text(default_name)
+        entry.set_activates_default(True)
+        entry.select_region(0, -1)
+        entry.set_margin_top(8)
+        dialog.set_extra_child(entry)
+
+        def on_response(_dialog, response):
+            if response != "create":
+                return
+            name = entry.get_text().strip()
+            if not name:
+                dialog.set_body("Please enter a playlist name:")
+                entry.grab_focus()
+                dialog.present(self)
+                return
+            if self._app_ref and self._app_ref.db is not None:
+                try:
+                    playlist_id = self._app_ref.db.create_playlist(name)
+                    for t in (tracks or []):
+                        if t.id is not None:
+                            self._app_ref.db.add_track_to_playlist(
+                                playlist_id, t.id
+                            )
+                    self._sidebar.refresh_playlists()
+                except Exception:
+                    logger.warning(
+                        "Failed to create playlist", exc_info=True,
                     )
-                self._sidebar.refresh_playlists()
-            except Exception:
-                logger.warning(
-                    "Failed to create playlist from context menu",
-                    exc_info=True,
-                )
+
+        dialog.connect("response", on_response)
+        dialog.present(self)
 
     def _on_context_toggle_favorite(self, track) -> None:
         """Toggle the favorite state of a track.
@@ -1688,8 +2142,8 @@ class AuxenWindow(Adw.ApplicationWindow):
 
                     # Refresh the favorites view if visible
                     visible = self._stack.get_visible_child_name()
-                    if visible == "favorites":
-                        self._favorites_view.refresh()
+                    if visible == "collection":
+                        self._collection_view.refresh()
 
                     # Sync the toggle to Tidal in a background thread
                     if (
@@ -1739,18 +2193,44 @@ class AuxenWindow(Adw.ApplicationWindow):
     def _get_album_tracks(
         self, album_name: str, artist: str
     ) -> list:
-        """Fetch tracks for an album from the database."""
+        """Fetch tracks for an album from the database or Tidal API."""
+        tracks = []
         if self._app_ref and self._app_ref.db is not None:
             try:
-                return self._app_ref.db.get_tracks_by_album(
+                tracks = self._app_ref.db.get_tracks_by_album(
                     album_name, artist=artist
                 )
             except Exception:
                 logger.warning(
-                    "Failed to fetch album tracks for context menu",
+                    "Failed to fetch album tracks from DB",
                     exc_info=True,
                 )
-        return []
+        # Try Tidal API if the DB result looks incomplete (any Tidal tracks
+        # present, or no tracks at all and Tidal is available).
+        if (
+            self._app_ref
+            and self._app_ref.tidal_provider is not None
+            and self._app_ref.tidal_provider.is_logged_in
+        ):
+            try:
+                from auxen.models import Source
+                has_tidal = not tracks or any(
+                    t.source == Source.TIDAL for t in tracks
+                )
+                if has_tidal:
+                    api_tracks = (
+                        self._app_ref.tidal_provider.get_album_tracks(
+                            album_name, artist
+                        )
+                    )
+                    if api_tracks and len(api_tracks) > len(tracks):
+                        return api_tracks
+            except Exception:
+                logger.debug(
+                    "Failed to fetch album tracks from Tidal API",
+                    exc_info=True,
+                )
+        return tracks
 
     def _on_context_play_album(
         self, album_name: str, artist: str
@@ -1777,8 +2257,13 @@ class AuxenWindow(Adw.ApplicationWindow):
         """Append all album tracks to the end of the play queue."""
         tracks = self._get_album_tracks(album_name, artist)
         if tracks and self._app_ref and self._app_ref.player is not None:
+            player = self._app_ref.player
+            was_empty = len(player.queue) == 0
             for track in tracks:
-                self._app_ref.player.queue.add(track)
+                player.queue.add(track)
+            # Auto-start playback if queue was empty
+            if was_empty:
+                player.play()
             if self._queue_panel.get_visible():
                 self._refresh_queue_panel()
 
@@ -1803,24 +2288,13 @@ class AuxenWindow(Adw.ApplicationWindow):
     def _on_context_new_playlist_with_album(
         self, album_name: str, artist: str
     ) -> None:
-        """Create a new playlist and add all album tracks to it."""
+        """Prompt for a name, create a playlist, and add album tracks."""
         tracks = self._get_album_tracks(album_name, artist)
-        if tracks and self._app_ref and self._app_ref.db is not None:
-            try:
-                playlist_id = self._app_ref.db.create_playlist(
-                    album_name
-                )
-                for track in tracks:
-                    if track.id is not None:
-                        self._app_ref.db.add_track_to_playlist(
-                            playlist_id, track.id
-                        )
-                self._sidebar.refresh_playlists()
-            except Exception:
-                logger.warning(
-                    "Failed to create playlist from album context menu",
-                    exc_info=True,
-                )
+        if tracks:
+            self._show_new_playlist_dialog(
+                default_name=album_name,
+                tracks=tracks,
+            )
 
     def _on_context_add_album_to_favorites(
         self, album_name: str, artist: str
@@ -1846,8 +2320,8 @@ class AuxenWindow(Adw.ApplicationWindow):
                     self._now_playing.set_favorite_active(is_fav)
                 # Refresh favorites view if visible
                 visible = self._stack.get_visible_child_name()
-                if visible == "favorites":
-                    self._favorites_view.refresh()
+                if visible == "collection":
+                    self._collection_view.refresh()
             except Exception:
                 logger.warning(
                     "Failed to add album to favorites", exc_info=True
@@ -1865,16 +2339,38 @@ class AuxenWindow(Adw.ApplicationWindow):
     # ------------------------------------------------------------------
 
     def _get_artist_tracks(self, artist_name: str) -> list:
-        """Fetch all tracks by an artist from the database."""
+        """Fetch all tracks by an artist from DB + Tidal search."""
+        tracks: list = []
         if self._app_ref and self._app_ref.db is not None:
             try:
-                return self._app_ref.db.get_artist_tracks(artist_name)
+                tracks = self._app_ref.db.get_artist_tracks(artist_name)
             except Exception:
                 logger.warning(
                     "Failed to fetch artist tracks for context menu",
                     exc_info=True,
                 )
-        return []
+        # If no local tracks found, try Tidal search
+        if (
+            not tracks
+            and self._app_ref
+            and self._app_ref.tidal_provider is not None
+            and self._app_ref.tidal_provider.is_logged_in
+        ):
+            try:
+                tidal_tracks = self._app_ref.tidal_provider.search(
+                    artist_name, limit=50
+                )
+                # Filter to tracks that match the artist name
+                tracks = [
+                    t for t in tidal_tracks
+                    if t.artist and t.artist.lower() == artist_name.lower()
+                ]
+            except Exception:
+                logger.warning(
+                    "Failed to fetch Tidal artist tracks",
+                    exc_info=True,
+                )
+        return tracks
 
     def _on_context_play_all_by_artist(
         self, artist_name: str
@@ -1898,3 +2394,264 @@ class AuxenWindow(Adw.ApplicationWindow):
     def _on_context_view_artist(self, artist_name: str) -> None:
         """Navigate to the artist detail page."""
         self._navigate_to_artist(artist_name)
+
+    def _on_context_artist_radio(self, artist_name: str) -> None:
+        """Fetch and play artist radio tracks from Tidal."""
+        if (
+            not self._app_ref
+            or self._app_ref.tidal_provider is None
+            or not self._app_ref.tidal_provider.is_logged_in
+        ):
+            return
+        import threading
+
+        tidal = self._app_ref.tidal_provider
+
+        def _fetch():
+            try:
+                radio_tracks = tidal.get_artist_radio(artist_name, limit=50)
+                if radio_tracks and self._app_ref and self._app_ref.player:
+                    def _play():
+                        self._app_ref.player.play_queue(radio_tracks, 0)
+                        return False
+                    GLib.idle_add(_play)
+            except Exception:
+                logger.warning(
+                    "Failed to fetch artist radio", exc_info=True
+                )
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _on_context_follow_artist(self, artist_name: str) -> None:
+        """Follow an artist on Tidal in a background thread."""
+        if (
+            not self._app_ref
+            or self._app_ref.tidal_provider is None
+            or not self._app_ref.tidal_provider.is_logged_in
+        ):
+            return
+        import threading
+
+        tidal = self._app_ref.tidal_provider
+
+        def _follow():
+            try:
+                tidal.follow_artist(artist_name)
+            except Exception:
+                logger.warning(
+                    "Failed to follow artist", exc_info=True
+                )
+
+        threading.Thread(target=_follow, daemon=True).start()
+
+    def _on_context_unfollow_artist(self, artist_name: str) -> None:
+        """Unfollow an artist on Tidal in a background thread."""
+        if (
+            not self._app_ref
+            or self._app_ref.tidal_provider is None
+            or not self._app_ref.tidal_provider.is_logged_in
+        ):
+            return
+        import threading
+
+        tidal = self._app_ref.tidal_provider
+
+        def _unfollow():
+            try:
+                tidal.unfollow_artist(artist_name)
+            except Exception:
+                logger.warning(
+                    "Failed to unfollow artist", exc_info=True
+                )
+
+        threading.Thread(target=_unfollow, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # Track context menu extras (Track Radio, Credits)
+    # ------------------------------------------------------------------
+
+    def _on_context_track_radio(self, track) -> None:
+        """Fetch and play track radio from Tidal."""
+        if (
+            not self._app_ref
+            or self._app_ref.tidal_provider is None
+            or not self._app_ref.tidal_provider.is_logged_in
+        ):
+            logger.warning("Track radio: not logged in or no tidal provider")
+            return
+        source_id = getattr(track, "source_id", None)
+        if not source_id:
+            logger.warning("Track radio: no source_id on track %s", track)
+            return
+        import threading
+
+        tidal = self._app_ref.tidal_provider
+
+        def _fetch():
+            try:
+                radio_tracks = tidal.get_track_radio(str(source_id), limit=50)
+                if radio_tracks and self._app_ref and self._app_ref.player:
+                    def _play():
+                        self._app_ref.player.play_queue(radio_tracks, 0)
+                        return False
+                    GLib.idle_add(_play)
+                else:
+                    logger.warning(
+                        "Track radio: no tracks returned for %s", source_id
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to fetch track radio", exc_info=True
+                )
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _on_context_view_lyrics(self, track) -> None:
+        """Show lyrics panel with lyrics for the right-clicked track."""
+        # Open the lyrics panel
+        if not self._lyrics_panel.get_visible():
+            # Hide queue panel if visible (mutual exclusion)
+            if self._queue_panel.get_visible():
+                self._queue_panel.set_visible(False)
+                self._now_playing.set_queue_active(False)
+            self._lyrics_panel.set_visible(True)
+            self._now_playing.set_lyrics_active(True)
+        # Fetch lyrics for this specific track (no current-track guard)
+        title = track.title
+        artist = track.artist
+
+        def _on_result(lyrics_text):
+            if lyrics_text:
+                self._lyrics_panel.show_lyrics(title, artist, lyrics_text)
+            else:
+                self._lyrics_panel.show_no_lyrics(title, artist)
+
+        self._lyrics_service.get_lyrics_async(track, _on_result)
+
+    def _on_context_credits(self, track) -> None:
+        """Show credits dialog for a Tidal track."""
+        if (
+            not self._app_ref
+            or self._app_ref.tidal_provider is None
+            or not self._app_ref.tidal_provider.is_logged_in
+        ):
+            return
+        source_id = getattr(track, "source_id", None)
+        if not source_id:
+            return
+        import threading
+
+        tidal = self._app_ref.tidal_provider
+
+        def _fetch():
+            try:
+                credits = tidal.get_track_credits(str(source_id))
+                GLib.idle_add(self._show_credits_dialog, track, credits)
+            except Exception:
+                logger.warning(
+                    "Failed to fetch track credits", exc_info=True
+                )
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _show_credits_dialog(self, track, credits) -> bool:
+        """Display a credits dialog for the given track."""
+        dialog = Adw.AlertDialog()
+        dialog.set_heading(f"Credits \u2014 {track.title}")
+
+        if not credits:
+            dialog.set_body("No credits available for this track.")
+        else:
+            lines: list[str] = []
+            for credit in credits:
+                credit_type = credit.get("type", "")
+                contributors = ", ".join(credit.get("contributors", []))
+                if credit_type:
+                    lines.append(f"<b>{credit_type}</b>: {contributors}")
+                else:
+                    lines.append(contributors)
+            dialog.set_body("\n".join(lines))
+            dialog.set_body_use_markup(True)
+
+        dialog.add_response("close", "Close")
+        dialog.set_default_response("close")
+        dialog.set_close_response("close")
+        dialog.present(self)
+        return GLib.SOURCE_REMOVE
+
+    # ------------------------------------------------------------------
+    # Shuffle album
+    # ------------------------------------------------------------------
+
+    def _on_context_shuffle_album(
+        self, album_name: str, artist: str
+    ) -> None:
+        """Shuffle and play all tracks in the album."""
+        import random
+
+        tracks = self._get_album_tracks(album_name, artist)
+        if tracks and self._app_ref and self._app_ref.player is not None:
+            shuffled = list(tracks)
+            random.shuffle(shuffled)
+            self._app_ref.player.play_queue(shuffled, start_index=0)
+
+    def _on_context_shuffle_artist(self, artist_name: str) -> None:
+        """Shuffle and play all tracks by the artist."""
+        import random
+
+        tracks = self._get_artist_tracks(artist_name)
+        if tracks and self._app_ref and self._app_ref.player is not None:
+            shuffled = list(tracks)
+            random.shuffle(shuffled)
+            self._app_ref.player.play_queue(shuffled, start_index=0)
+
+    # ------------------------------------------------------------------
+    # Album play button (hover overlay)
+    # ------------------------------------------------------------------
+
+    def _on_home_play_album(
+        self, album_name: str, artist: str
+    ) -> None:
+        """Play all tracks in an album from the home page play button."""
+        self._on_context_play_album(album_name, artist)
+
+    # ------------------------------------------------------------------
+    # Drag-and-drop: track to playlist
+    # ------------------------------------------------------------------
+
+    def _on_drop_track_to_playlist(
+        self, track_ids: list[int], playlist_id: int
+    ) -> None:
+        """Handle track(s) dropped onto a sidebar playlist row."""
+        if self._app_ref is None or self._app_ref.db is None:
+            return
+        db = self._app_ref.db
+        added = 0
+        try:
+            for track_id in track_ids:
+                if db.add_track_to_playlist(playlist_id, track_id):
+                    added += 1
+        except Exception:
+            logger.warning(
+                "Failed to add tracks to playlist via drag-and-drop",
+                exc_info=True,
+            )
+        if added > 0:
+            # Refresh sidebar playlist counts
+            self._sidebar.refresh_playlists()
+            # If the playlist view is currently showing this playlist,
+            # refresh it
+            if (
+                self._stack.get_visible_child_name() == "playlist-detail"
+                and hasattr(self._playlist_view, "_playlist_id")
+                and getattr(self._playlist_view, "_playlist_id", None)
+                == playlist_id
+            ):
+                self._playlist_view.show_playlist(playlist_id, db)
+            # Show a toast notification
+            track_word = "track" if added == 1 else "tracks"
+            toast = Adw.Toast.new(
+                f"Added {added} {track_word} to playlist"
+            )
+            toast.set_timeout(2)
+            self._show_toast(toast)

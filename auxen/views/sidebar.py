@@ -10,26 +10,26 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gdk, GObject, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 
 from auxen.views.playlist_view import PLAYLIST_COLORS
-from auxen.views.widgets import make_tidal_source_badge
+from auxen.views.widgets import DragScrollHelper, make_tidal_source_badge
 
 logger = logging.getLogger(__name__)
 
 
-# Navigation items: (page_name, icon_name, display_label, badge_text, badge_class)
-_BROWSE_ITEMS: list[tuple[str, str, str, str | None, str | None]] = [
-    ("home", "go-home-symbolic", "Home", None, None),
-    ("search", "system-search-symbolic", "Search", None, None),
-    ("library", "folder-music-symbolic", "Library", "Local", "nav-badge-local"),
-    ("favorites", "starred-symbolic", "Favorites", None, None),
-    ("stats", "utilities-system-monitor-symbolic", "Stats", None, None),
+# Navigation items: (page_name, icon_name, display_label, badge_text, badge_class, tooltip)
+_BROWSE_ITEMS: list[tuple[str, str, str, str | None, str | None, str | None]] = [
+    ("home", "go-home-symbolic", "Home", None, None, "Go to Home"),
+    ("search", "system-search-symbolic", "Search", None, None, "Search music"),
+    ("library", "folder-music-symbolic", "Library", "Local", "nav-badge-local", "Browse local music library"),
+    ("collection", "emblem-favorite-symbolic", "Collection", None, None, "View your collection"),
+    ("stats", "utilities-system-monitor-symbolic", "Stats", None, None, "Listening statistics"),
 ]
 
-_TIDAL_ITEMS: list[tuple[str, str, str, str | None, str | None]] = [
-    ("explore", "compass-symbolic", "Explore", "Tidal", "nav-badge-tidal"),
-    ("mixes", "media-playlist-shuffle-symbolic", "Mixes", None, None),
+_TIDAL_ITEMS: list[tuple[str, str, str, str | None, str | None, str | None]] = [
+    ("explore", "compass-symbolic", "Explore", "Tidal", "nav-badge-tidal", "Explore Tidal music"),
+    ("mixes", "media-playlist-shuffle-symbolic", "Mixes", None, None, "Tidal curated mixes"),
 ]
 
 # Fallback playlists shown when no database is connected
@@ -46,6 +46,7 @@ def _make_nav_row(
     label_text: str,
     badge_text: str | None,
     badge_class: str | None,
+    tooltip: str | None = None,
 ) -> Gtk.ListBoxRow:
     """Build a single navigation row with icon, label, and optional badge."""
     row_box = Gtk.Box(
@@ -80,6 +81,8 @@ def _make_nav_row(
 
     row = Gtk.ListBoxRow()
     row.set_child(row_box)
+    if tooltip:
+        row.set_tooltip_text(tooltip)
     return row
 
 
@@ -215,11 +218,25 @@ class AuxenSidebar(Gtk.Box):
         self._on_playlist_selected = on_playlist_selected
         self._on_smart_playlist_selected = on_smart_playlist_selected
         self.on_tidal_login: Callable[[], None] | None = None
+        # Callback: on_drop_track_to_playlist(track_ids: list[int], playlist_id: int)
+        self.on_drop_track_to_playlist: (
+            Callable[[list[int], int], None] | None
+        ) = None
         self._page_names: list[str] = []
         self._db = None
         self._playlist_ids: list[int] = []
         self._smart_playlist_ids: list[str] = []
         self._smart_playlist_service = None
+        # Context menu state
+        self._ctx_menu: Gtk.PopoverMenu | None = None
+        self._ctx_action_group: Gio.SimpleActionGroup | None = None
+        self._ctx_parent: Gtk.Widget | None = None
+        # Sidebar playlist callbacks
+        self.on_sidebar_play_playlist: Callable[[int], None] | None = None
+        # Collapse callback: on_collapse_changed(collapsed: bool)
+        self.on_collapse_changed: Callable[[bool], None] | None = None
+        # Collapse state
+        self._collapsed = False
 
         # ---- Brand section ----
         brand_box = Gtk.Box(
@@ -228,10 +245,10 @@ class AuxenSidebar(Gtk.Box):
         )
         brand_box.add_css_class("sidebar-brand")
 
-        brand_icon = Gtk.Image.new_from_icon_name("audio-headphones-symbolic")
-        brand_icon.set_pixel_size(32)
-        brand_icon.add_css_class("accent")
-        brand_box.append(brand_icon)
+        self._brand_icon = Gtk.Image.new_from_icon_name("audio-headphones-symbolic")
+        self._brand_icon.set_pixel_size(32)
+        self._brand_icon.add_css_class("accent")
+        brand_box.append(self._brand_icon)
 
         brand_text_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -249,12 +266,15 @@ class AuxenSidebar(Gtk.Box):
         brand_text_box.append(brand_subtitle)
 
         brand_box.append(brand_text_box)
+        self._brand_text_box = brand_text_box
+        self._brand_box = brand_box
         self.append(brand_box)
 
         # ---- Scrollable middle area ----
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._drag_scroll = DragScrollHelper(scroll)
 
         middle_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -262,19 +282,31 @@ class AuxenSidebar(Gtk.Box):
         )
 
         # ---- Browse section ----
-        middle_box.append(_make_section_label("BROWSE"))
+        self._browse_label = _make_section_label("BROWSE")
+        middle_box.append(self._browse_label)
 
         self._browse_list = Gtk.ListBox()
         self._browse_list.add_css_class("navigation-sidebar")
         self._browse_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
 
-        for page_name, icon, label, badge, badge_cls in _BROWSE_ITEMS:
-            row = _make_nav_row(icon, label, badge, badge_cls)
+        for page_name, icon, label, badge, badge_cls, tooltip in _BROWSE_ITEMS:
+            row = _make_nav_row(icon, label, badge, badge_cls, tooltip)
             self._browse_list.append(row)
             self._page_names.append(page_name)
 
         self._browse_list.connect("row-selected", self._on_row_selected, 0)
         middle_box.append(self._browse_list)
+
+        # ---- Collapsed-only separator between Browse and Tidal ----
+        self._collapsed_sep_browse = Gtk.Separator(
+            orientation=Gtk.Orientation.HORIZONTAL
+        )
+        self._collapsed_sep_browse.set_margin_top(6)
+        self._collapsed_sep_browse.set_margin_bottom(6)
+        self._collapsed_sep_browse.set_margin_start(8)
+        self._collapsed_sep_browse.set_margin_end(8)
+        self._collapsed_sep_browse.set_visible(False)
+        middle_box.append(self._collapsed_sep_browse)
 
         # ---- Tidal section ----
         tidal_section_box = Gtk.Box(
@@ -301,14 +333,15 @@ class AuxenSidebar(Gtk.Box):
         tidal_section_label.add_css_class("sidebar-section-label")
         tidal_section_box.append(tidal_section_label)
 
+        self._tidal_section_box = tidal_section_box
         middle_box.append(tidal_section_box)
 
         self._tidal_list = Gtk.ListBox()
         self._tidal_list.add_css_class("navigation-sidebar")
         self._tidal_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
 
-        for page_name, icon, label, badge, badge_cls in _TIDAL_ITEMS:
-            row = _make_nav_row(icon, label, badge, badge_cls)
+        for page_name, icon, label, badge, badge_cls, tooltip in _TIDAL_ITEMS:
+            row = _make_nav_row(icon, label, badge, badge_cls, tooltip)
             self._tidal_list.append(row)
             self._page_names.append(page_name)
 
@@ -317,8 +350,35 @@ class AuxenSidebar(Gtk.Box):
         )
         middle_box.append(self._tidal_list)
 
+        # ---- Collapsed-only separator between Tidal and Playlists ----
+        self._collapsed_sep_tidal = Gtk.Separator(
+            orientation=Gtk.Orientation.HORIZONTAL
+        )
+        self._collapsed_sep_tidal.set_margin_top(6)
+        self._collapsed_sep_tidal.set_margin_bottom(6)
+        self._collapsed_sep_tidal.set_margin_start(8)
+        self._collapsed_sep_tidal.set_margin_end(8)
+        self._collapsed_sep_tidal.set_visible(False)
+        middle_box.append(self._collapsed_sep_tidal)
+
+        # ---- Collapsed playlists nav button (only visible when collapsed) ----
+        self._collapsed_playlists_row = _make_nav_row(
+            "playlist-symbolic", "Playlists", None, None, "View playlists"
+        )
+        self._collapsed_playlists_row.set_visible(False)  # hidden by default (expanded mode)
+        self._collapsed_playlists_list = Gtk.ListBox()
+        self._collapsed_playlists_list.add_css_class("navigation-sidebar")
+        self._collapsed_playlists_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._collapsed_playlists_list.append(self._collapsed_playlists_row)
+        self._collapsed_playlists_list.set_visible(False)
+        self._collapsed_playlists_list.connect(
+            "row-activated", self._on_collapsed_playlists_clicked
+        )
+        middle_box.append(self._collapsed_playlists_list)
+
         # ---- Playlists section ----
-        middle_box.append(_make_section_label("PLAYLISTS"))
+        self._playlists_label = _make_section_label("PLAYLISTS")
+        middle_box.append(self._playlists_label)
 
         self._playlist_list = Gtk.ListBox()
         self._playlist_list.add_css_class("navigation-sidebar")
@@ -335,7 +395,8 @@ class AuxenSidebar(Gtk.Box):
         middle_box.append(self._playlist_list)
 
         # ---- Smart Playlists section ----
-        middle_box.append(_make_section_label("SMART PLAYLISTS"))
+        self._smart_playlists_label = _make_section_label("SMART PLAYLISTS")
+        middle_box.append(self._smart_playlists_label)
 
         self._smart_playlist_list = Gtk.ListBox()
         self._smart_playlist_list.add_css_class("navigation-sidebar")
@@ -351,12 +412,35 @@ class AuxenSidebar(Gtk.Box):
         scroll.set_child(middle_box)
         self.append(scroll)
 
-        # ---- Account section (pinned at bottom) ----
+        # ---- Bottom section (pinned at bottom): collapse btn + account ----
+        bottom_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=0,
+        )
+
+        # Collapse / expand toggle
+        collapse_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+        )
+        collapse_row.add_css_class("sidebar-collapse-row")
+        collapse_btn = Gtk.Button.new_from_icon_name("sidebar-show-symbolic")
+        collapse_btn.add_css_class("flat")
+        collapse_btn.add_css_class("sidebar-collapse-btn")
+        collapse_btn.set_tooltip_text("Collapse sidebar")
+        collapse_btn.set_hexpand(True)
+        collapse_btn.set_halign(Gtk.Align.END)
+        collapse_btn.connect("clicked", self._on_collapse_clicked)
+        self._collapse_btn = collapse_btn
+        collapse_row.append(collapse_btn)
+        bottom_box.append(collapse_row)
+
+        # Account section
         account_box = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=10,
         )
         account_box.add_css_class("sidebar-account")
+        self._account_box = account_box
 
         self._avatar_label = Gtk.Label(label="?")
         self._avatar_label.add_css_class("sidebar-avatar")
@@ -387,32 +471,130 @@ class AuxenSidebar(Gtk.Box):
 
         account_text.append(self._plan_label)
 
+        self._account_text = account_text
         account_box.append(account_text)
 
-        settings_btn = Gtk.Button.new_from_icon_name(
+        self._settings_btn = Gtk.Button.new_from_icon_name(
             "emblem-system-symbolic"
         )
-        settings_btn.add_css_class("flat")
-        settings_btn.set_valign(Gtk.Align.CENTER)
+        self._settings_btn.add_css_class("flat")
+        self._settings_btn.set_valign(Gtk.Align.CENTER)
+        self._settings_btn.set_tooltip_text("Settings")
         if self._on_settings:
-            settings_btn.connect("clicked", lambda *_: self._on_settings())
-        account_box.append(settings_btn)
+            self._settings_btn.connect(
+                "clicked", lambda *_: self._on_settings()
+            )
+        account_box.append(self._settings_btn)
 
-        about_btn = Gtk.Button.new_from_icon_name(
+        self._about_btn = Gtk.Button.new_from_icon_name(
             "help-about-symbolic"
         )
-        about_btn.add_css_class("flat")
-        about_btn.set_valign(Gtk.Align.CENTER)
-        about_btn.set_tooltip_text("About Auxen")
-        about_btn.connect("clicked", self._on_about_clicked)
-        account_box.append(about_btn)
+        self._about_btn.add_css_class("flat")
+        self._about_btn.set_valign(Gtk.Align.CENTER)
+        self._about_btn.set_tooltip_text("About Auxen")
+        self._about_btn.connect("clicked", self._on_about_clicked)
+        account_box.append(self._about_btn)
 
-        self.append(account_box)
+        bottom_box.append(account_box)
+        self.append(bottom_box)
 
         # ---- Select "Home" by default ----
         first_row = self._browse_list.get_row_at_index(0)
         if first_row:
             self._browse_list.select_row(first_row)
+
+    # ---- Collapse / Expand ----
+
+    def _on_collapse_clicked(self, _btn: Gtk.Button) -> None:
+        """Toggle sidebar between expanded and collapsed (icon-only) mode."""
+        self._collapsed = not self._collapsed
+        self._apply_collapsed_state()
+
+    def _apply_collapsed_state(self) -> None:
+        """Show or hide text elements based on collapsed state."""
+        visible = not self._collapsed
+
+        # Brand text + icon centering
+        self._brand_text_box.set_visible(visible)
+        if self._collapsed:
+            self._brand_icon.set_halign(Gtk.Align.CENTER)
+            self._brand_icon.set_hexpand(True)
+        else:
+            self._brand_icon.set_halign(Gtk.Align.FILL)
+            self._brand_icon.set_hexpand(False)
+
+        # Section labels
+        self._browse_label.set_visible(visible)
+        self._tidal_section_box.set_visible(visible)
+        self._playlists_label.set_visible(visible)
+        self._smart_playlists_label.set_visible(visible)
+
+        # Account text (username, plan)
+        self._account_text.set_visible(visible)
+
+        # Hide playlists and smart playlists sections entirely when collapsed
+        # but show the collapsed playlists icon button instead
+        self._playlist_list.set_visible(visible)
+        self._smart_playlist_list.set_visible(visible)
+        self._collapsed_playlists_list.set_visible(self._collapsed)
+        self._collapsed_playlists_row.set_visible(self._collapsed)
+        self._collapsed_sep_browse.set_visible(self._collapsed)
+        self._collapsed_sep_tidal.set_visible(self._collapsed)
+
+        # Hide labels and badges in nav rows, keep icons
+        for listbox in (self._browse_list, self._tidal_list, self._collapsed_playlists_list):
+            idx = 0
+            while True:
+                row = listbox.get_row_at_index(idx)
+                if row is None:
+                    break
+                row_box = row.get_child()
+                if row_box is not None:
+                    # Children: icon, label, [badge]
+                    child = row_box.get_first_child()
+                    first = True
+                    while child is not None:
+                        nxt = child.get_next_sibling()
+                        if first:
+                            first = False  # keep the icon
+                        else:
+                            child.set_visible(visible)
+                        child = nxt
+                idx += 1
+
+        # Switch account box orientation: vertical when collapsed, horizontal when expanded
+        if self._collapsed:
+            self._account_box.set_orientation(Gtk.Orientation.VERTICAL)
+            self._account_box.set_spacing(6)
+            self._avatar_label.set_halign(Gtk.Align.CENTER)
+            self._settings_btn.set_halign(Gtk.Align.CENTER)
+            self._about_btn.set_halign(Gtk.Align.CENTER)
+        else:
+            self._account_box.set_orientation(Gtk.Orientation.HORIZONTAL)
+            self._account_box.set_spacing(10)
+            self._avatar_label.set_halign(Gtk.Align.FILL)
+            self._settings_btn.set_halign(Gtk.Align.FILL)
+            self._about_btn.set_halign(Gtk.Align.FILL)
+
+        # Toggle button icon and alignment
+        if self._collapsed:
+            self._collapse_btn.set_icon_name("sidebar-show-right-symbolic")
+            self._collapse_btn.set_halign(Gtk.Align.CENTER)
+        else:
+            self._collapse_btn.set_icon_name("sidebar-show-symbolic")
+            self._collapse_btn.set_halign(Gtk.Align.END)
+        self._collapse_btn.set_tooltip_text(
+            "Expand sidebar" if self._collapsed else "Collapse sidebar"
+        )
+
+        # Update CSS class and notify parent (window) to adjust split view
+        if self._collapsed:
+            self.add_css_class("sidebar-collapsed")
+        else:
+            self.remove_css_class("sidebar-collapsed")
+
+        if self.on_collapse_changed is not None:
+            self.on_collapse_changed(self._collapsed)
 
     # ---- Public API ----
 
@@ -445,6 +627,10 @@ class AuxenSidebar(Gtk.Box):
                         pl["name"],
                         pl["color"] or "#d4a039",
                         playlist_id=pl["id"],
+                    )
+                    self._attach_drop_target(row, pl["id"])
+                    self._attach_playlist_context_gesture(
+                        row, pl["id"], pl["name"]
                     )
                     self._playlist_list.append(row)
                     self._playlist_ids.append(pl["id"])
@@ -485,6 +671,51 @@ class AuxenSidebar(Gtk.Box):
                     exc_info=True,
                 )
 
+    # ---- Drag-and-drop support ----
+
+    def _attach_drop_target(
+        self, row: Gtk.ListBoxRow, playlist_id: int
+    ) -> None:
+        """Attach a DropTarget to a playlist row so tracks can be dropped.
+
+        Accepts strings containing one or more comma-separated track IDs.
+        When a drag hovers over the row, a highlight CSS class is applied.
+        """
+        drop_target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.COPY)
+
+        def _on_drop(_target, value: str, _x, _y, pid=playlist_id):
+            if not value:
+                return False
+            try:
+                track_ids = [
+                    int(tid.strip())
+                    for tid in value.split(",")
+                    if tid.strip().isdigit()
+                ]
+            except (ValueError, AttributeError):
+                return False
+            if not track_ids:
+                return False
+            if self.on_drop_track_to_playlist is not None:
+                self.on_drop_track_to_playlist(track_ids, pid)
+            return True
+
+        def _on_enter(_target, _x, _y):
+            row_child = row.get_child()
+            if row_child is not None:
+                row_child.add_css_class("playlist-drop-highlight")
+            return Gdk.DragAction.COPY
+
+        def _on_leave(_target):
+            row_child = row.get_child()
+            if row_child is not None:
+                row_child.remove_css_class("playlist-drop-highlight")
+
+        drop_target.connect("drop", _on_drop)
+        drop_target.connect("enter", _on_enter)
+        drop_target.connect("leave", _on_leave)
+        row.add_controller(drop_target)
+
     # ---- Internal handlers ----
 
     def _on_row_selected(
@@ -508,6 +739,13 @@ class AuxenSidebar(Gtk.Box):
             page = self._page_names[index]
             if self._on_navigate:
                 self._on_navigate(page)
+
+    def _on_collapsed_playlists_clicked(
+        self, _listbox: Gtk.ListBox, _row: Gtk.ListBoxRow
+    ) -> None:
+        """Expand the sidebar when the collapsed playlists button is clicked."""
+        self._collapsed = False
+        self._apply_collapsed_state()
 
     def _on_playlist_row_activated(
         self, _listbox: Gtk.ListBox, row: Gtk.ListBoxRow
@@ -543,68 +781,279 @@ class AuxenSidebar(Gtk.Box):
                 self._on_smart_playlist_selected(smart_id)
 
     def _create_new_playlist(self) -> None:
-        """Create a new playlist via the database."""
+        """Show a name prompt dialog, then create the playlist."""
         if self._db is None:
             return
-        try:
-            playlist_id = self._db.create_playlist("New Playlist")
-            self.refresh_playlists()
-            # Optionally navigate to the new playlist
-            if self._on_playlist_selected:
-                self._on_playlist_selected(playlist_id)
-        except Exception:
-            logger.warning(
-                "Failed to create new playlist", exc_info=True
+
+        dialog = Adw.AlertDialog()
+        dialog.set_heading("New Playlist")
+        dialog.set_body("Enter a name for the new playlist:")
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("create", "Create")
+        dialog.set_response_appearance(
+            "create", Adw.ResponseAppearance.SUGGESTED
+        )
+        dialog.set_default_response("create")
+        dialog.set_close_response("cancel")
+
+        entry = Gtk.Entry()
+        entry.set_text("New Playlist")
+        entry.set_activates_default(True)
+        entry.select_region(0, -1)
+        entry.set_margin_top(8)
+        dialog.set_extra_child(entry)
+
+        def _on_response(_dialog, response):
+            if response != "create":
+                return
+            name = entry.get_text().strip()
+            if not name:
+                dialog.set_body("Please enter a playlist name:")
+                entry.grab_focus()
+                dialog.present(self.get_root())
+                return
+            try:
+                playlist_id = self._db.create_playlist(name)
+                self.refresh_playlists()
+                if self._on_playlist_selected:
+                    self._on_playlist_selected(playlist_id)
+            except Exception:
+                logger.warning(
+                    "Failed to create new playlist", exc_info=True
+                )
+
+        dialog.connect("response", _on_response)
+        dialog.present(self.get_root())
+
+    def _attach_playlist_context_gesture(
+        self,
+        row: Gtk.ListBoxRow,
+        playlist_id: int,
+        playlist_name: str,
+    ) -> None:
+        """Attach a right-click gesture to a sidebar playlist row."""
+        gesture = Gtk.GestureClick.new()
+        gesture.set_button(3)
+        gesture.connect(
+            "pressed",
+            self._on_playlist_right_click,
+            row,
+            playlist_id,
+            playlist_name,
+        )
+        row.add_controller(gesture)
+
+    def _cleanup_ctx_menu(self) -> None:
+        """Clean up any active context menu."""
+        if self._ctx_menu is not None:
+            self._ctx_menu.popdown()
+            self._ctx_menu.unparent()
+            self._ctx_menu = None
+        if self._ctx_parent is not None and self._ctx_action_group is not None:
+            self._ctx_parent.insert_action_group("plctx", None)
+        self._ctx_action_group = None
+        self._ctx_parent = None
+
+    def _on_playlist_right_click(
+        self,
+        _gesture: Gtk.GestureClick,
+        _n_press: int,
+        x: float,
+        y: float,
+        row: Gtk.ListBoxRow,
+        playlist_id: int,
+        playlist_name: str,
+    ) -> None:
+        """Show a context menu when right-clicking a playlist row."""
+        if self._db is None:
+            return
+
+        self._cleanup_ctx_menu()
+
+        menu = Gio.Menu()
+        section = Gio.Menu()
+        section.append("Play All", "plctx.play")
+        section.append("Rename", "plctx.rename")
+        section.append("Change Color", "plctx.color")
+        menu.append_section(None, section)
+        danger = Gio.Menu()
+        danger.append("Delete", "plctx.delete")
+        menu.append_section(None, danger)
+
+        group = Gio.SimpleActionGroup()
+
+        play_act = Gio.SimpleAction.new("play", None)
+        play_act.connect(
+            "activate",
+            lambda *_: self._ctx_play_playlist(playlist_id),
+        )
+        group.add_action(play_act)
+
+        rename_act = Gio.SimpleAction.new("rename", None)
+        rename_act.connect(
+            "activate",
+            lambda *_: self._ctx_rename_playlist(playlist_id, playlist_name),
+        )
+        group.add_action(rename_act)
+
+        color_act = Gio.SimpleAction.new("color", None)
+        color_act.connect(
+            "activate",
+            lambda *_: self._ctx_change_color(row, playlist_id),
+        )
+        group.add_action(color_act)
+
+        delete_act = Gio.SimpleAction.new("delete", None)
+        delete_act.connect(
+            "activate",
+            lambda *_: self._ctx_delete_playlist(playlist_id, playlist_name),
+        )
+        group.add_action(delete_act)
+
+        row.insert_action_group("plctx", group)
+        self._ctx_action_group = group
+        self._ctx_parent = row
+
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.set_parent(row)
+        popover.set_has_arrow(False)
+        popover.add_css_class("context-menu")
+
+        from auxen.views.context_menu import Gdk_Rectangle
+
+        popover.set_pointing_to(Gdk_Rectangle(x, y))
+        popover.connect("closed", self._on_ctx_menu_closed, row)
+        self._ctx_menu = popover
+        popover.popup()
+
+    def _on_ctx_menu_closed(
+        self, popover: Gtk.PopoverMenu, row: Gtk.Widget
+    ) -> None:
+        """Defer cleanup so action signals can fire first."""
+        GLib.idle_add(self._deferred_ctx_cleanup, row, popover)
+
+    def _deferred_ctx_cleanup(
+        self, row: Gtk.Widget, popover: Gtk.PopoverMenu
+    ) -> bool:
+        if popover is self._ctx_menu:
+            self._cleanup_ctx_menu()
+        else:
+            popover.unparent()
+        return False
+
+    def _ctx_play_playlist(self, playlist_id: int) -> None:
+        """Play all tracks in a playlist."""
+        if self.on_sidebar_play_playlist is not None:
+            self.on_sidebar_play_playlist(playlist_id)
+
+    def _ctx_rename_playlist(
+        self, playlist_id: int, current_name: str
+    ) -> None:
+        """Show a rename dialog for a playlist."""
+        if self._db is None:
+            return
+
+        root = self.get_root()
+        dialog = Adw.AlertDialog.new("Rename Playlist", None)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("rename", "Rename")
+        dialog.set_response_appearance(
+            "rename", Adw.ResponseAppearance.SUGGESTED
+        )
+        dialog.set_default_response("rename")
+        dialog.set_close_response("cancel")
+
+        entry = Gtk.Entry()
+        entry.set_text(current_name)
+        entry.set_activates_default(True)
+        dialog.set_extra_child(entry)
+
+        def _on_response(_dlg, response):
+            if response == "rename":
+                new_name = entry.get_text().strip()
+                if new_name and new_name != current_name:
+                    self._db.rename_playlist(playlist_id, new_name)
+                    self.refresh_playlists()
+
+        dialog.connect("response", _on_response)
+        dialog.present(root)
+
+    def _ctx_change_color(
+        self, row: Gtk.ListBoxRow, playlist_id: int
+    ) -> None:
+        """Show a color picker popover anchored to the playlist row."""
+        if self._db is None:
+            return
+
+        popover = Gtk.Popover()
+        popover.set_parent(row)
+
+        color_grid = Gtk.FlowBox()
+        color_grid.set_max_children_per_line(4)
+        color_grid.set_selection_mode(Gtk.SelectionMode.NONE)
+        color_grid.set_margin_top(8)
+        color_grid.set_margin_bottom(8)
+        color_grid.set_margin_start(8)
+        color_grid.set_margin_end(8)
+        color_grid.set_column_spacing(8)
+        color_grid.set_row_spacing(8)
+
+        for color in PLAYLIST_COLORS:
+            btn = Gtk.Button()
+            btn.set_size_request(32, 32)
+            css = Gtk.CssProvider()
+            css.load_from_string(
+                f"button {{ background-color: {color}; "
+                f"border-radius: 9999px; min-width: 32px; "
+                f"min-height: 32px; }}"
+            )
+            btn.get_style_context().add_provider(
+                css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1
             )
 
-    def _show_playlist_context_menu(
-        self, playlist_id: int, x: float, y: float
+            def _pick(_b, c=color, pop=popover):
+                self._db.update_playlist_color(playlist_id, c)
+                pop.popdown()
+                pop.unparent()
+                self.refresh_playlists()
+
+            btn.connect("clicked", _pick)
+            color_grid.insert(btn, -1)
+
+        popover.set_child(color_grid)
+        popover.popup()
+
+    def _ctx_delete_playlist(
+        self, playlist_id: int, playlist_name: str
     ) -> None:
-        """Show a context menu for a playlist row."""
+        """Show a confirmation dialog before deleting a playlist."""
         if self._db is None:
             return
 
-        menu = Gtk.PopoverMenu()
-        menu_model = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=4,
+        root = self.get_root()
+        dialog = Adw.AlertDialog.new(
+            "Delete Playlist?",
+            f'Permanently delete "{playlist_name}"? '
+            "Your tracks will not be affected.",
         )
-        menu_model.set_margin_top(4)
-        menu_model.set_margin_bottom(4)
-        menu_model.set_margin_start(4)
-        menu_model.set_margin_end(4)
-
-        rename_btn = Gtk.Button(label="Rename")
-        rename_btn.add_css_class("flat")
-        rename_btn.connect(
-            "clicked",
-            lambda _b, pid=playlist_id: self._rename_playlist(pid),
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("delete", "Delete")
+        dialog.set_response_appearance(
+            "delete", Adw.ResponseAppearance.DESTRUCTIVE
         )
-        menu_model.append(rename_btn)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
 
-        delete_btn = Gtk.Button(label="Delete")
-        delete_btn.add_css_class("flat")
-        delete_btn.add_css_class("destructive-action")
-        delete_btn.connect(
-            "clicked",
-            lambda _b, pid=playlist_id: self._delete_playlist(pid),
-        )
-        menu_model.append(delete_btn)
+        def _on_response(_dlg, response):
+            if response == "delete":
+                self._db.delete_playlist(playlist_id)
+                self.refresh_playlists()
+                # Navigate to Home so user isn't stuck on the deleted playlist
+                if self._on_navigate:
+                    self._on_navigate("home")
 
-    def _rename_playlist(self, playlist_id: int) -> None:
-        """Rename a playlist (placeholder for dialog)."""
-        if self._db is None:
-            return
-        # Simple rename for now
-        self._db.rename_playlist(playlist_id, "Renamed Playlist")
-        self.refresh_playlists()
-
-    def _delete_playlist(self, playlist_id: int) -> None:
-        """Delete a playlist."""
-        if self._db is None:
-            return
-        self._db.delete_playlist(playlist_id)
-        self.refresh_playlists()
+        dialog.connect("response", _on_response)
+        dialog.present(root)
 
     def _on_plan_label_clicked(
         self,

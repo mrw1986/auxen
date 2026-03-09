@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from datetime import datetime
+from typing import Callable, Optional
 
 import gi
 
@@ -11,6 +12,8 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
 from gi.repository import Gtk, Pango
+
+from auxen.views.widgets import DragScrollHelper
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +40,23 @@ class StatsView(Gtk.ScrolledWindow):
         super().__init__(**kwargs)
 
         self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._drag_scroll = DragScrollHelper(self)
 
         self._db = None
+
+        # Callbacks for click navigation
+        self._on_artist_clicked: Optional[Callable[[str], None]] = None
+        self._on_track_clicked: Optional[Callable] = None
+
+        # Context menu callbacks
+        self._context_callbacks: Optional[dict] = None
+        self._get_playlists: Optional[Callable] = None
+        self._current_menu = None
+
+        # Store raw data for click handlers
+        self._top_artists_data: list[tuple[str, int]] = []
+        self._top_tracks_data: list[tuple[int, str, str, int]] = []
+        self._daily_chart_data: list[tuple[str, int]] = []
 
         # Root container
         root = Gtk.Box(
@@ -71,12 +89,14 @@ class StatsView(Gtk.ScrolledWindow):
 
         root.append(header_box)
 
-        # ---- 2. Stat cards row ----
-        stats_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=16,
-            homogeneous=True,
-        )
+        # ---- 2. Stat cards (two rows) ----
+        stats_row_1 = Gtk.FlowBox()
+        stats_row_1.set_homogeneous(True)
+        stats_row_1.set_min_children_per_line(1)
+        stats_row_1.set_max_children_per_line(4)
+        stats_row_1.set_column_spacing(16)
+        stats_row_1.set_row_spacing(8)
+        stats_row_1.set_selection_mode(Gtk.SelectionMode.NONE)
 
         (
             total_card,
@@ -87,7 +107,7 @@ class StatsView(Gtk.ScrolledWindow):
             label="Total Played",
             accent_class="stats-accent-amber",
         )
-        stats_box.append(total_card)
+        stats_row_1.append(total_card)
 
         (
             time_card,
@@ -98,7 +118,7 @@ class StatsView(Gtk.ScrolledWindow):
             label="Listen Time",
             accent_class="stats-accent-amber",
         )
-        stats_box.append(time_card)
+        stats_row_1.append(time_card)
 
         (
             daily_card,
@@ -109,14 +129,88 @@ class StatsView(Gtk.ScrolledWindow):
             label="Daily Average",
             accent_class="stats-accent-amber",
         )
-        stats_box.append(daily_card)
+        stats_row_1.append(daily_card)
 
-        root.append(stats_box)
+        (
+            streak_card,
+            self._streak_label,
+        ) = self._make_stat_card(
+            icon_name="emblem-ok-symbolic",
+            value="0",
+            label="Day Streak",
+            accent_class="stats-accent-amber",
+        )
+        stats_row_1.append(streak_card)
 
-        # ---- 3. Most Active Hour ----
+        root.append(stats_row_1)
+
+        stats_row_2 = Gtk.FlowBox()
+        stats_row_2.set_homogeneous(True)
+        stats_row_2.set_min_children_per_line(1)
+        stats_row_2.set_max_children_per_line(4)
+        stats_row_2.set_column_spacing(16)
+        stats_row_2.set_row_spacing(8)
+        stats_row_2.set_selection_mode(Gtk.SelectionMode.NONE)
+
+        (
+            artists_card,
+            self._unique_artists_label,
+        ) = self._make_stat_card(
+            icon_name="system-users-symbolic",
+            value="0",
+            label="Unique Artists",
+            accent_class="stats-accent-amber",
+        )
+        stats_row_2.append(artists_card)
+
+        (
+            albums_card,
+            self._unique_albums_label,
+        ) = self._make_stat_card(
+            icon_name="media-optical-symbolic",
+            value="0",
+            label="Unique Albums",
+            accent_class="stats-accent-amber",
+        )
+        stats_row_2.append(albums_card)
+
+        (
+            avg_len_card,
+            self._avg_track_len_label,
+        ) = self._make_stat_card(
+            icon_name="document-open-recent-symbolic",
+            value="0:00",
+            label="Avg Track Length",
+            accent_class="stats-accent-amber",
+        )
+        stats_row_2.append(avg_len_card)
+
+        (
+            source_card,
+            self._source_split_label,
+        ) = self._make_stat_card(
+            icon_name="network-server-symbolic",
+            value="--",
+            label="Tidal / Local",
+            accent_class="stats-accent-amber",
+        )
+        stats_row_2.append(source_card)
+
+        root.append(stats_row_2)
+
+        # ---- 3. Most Active Hour + 7-Day Chart (side by side) ----
+        activity_row = Gtk.FlowBox()
+        activity_row.set_homogeneous(True)
+        activity_row.set_min_children_per_line(1)
+        activity_row.set_max_children_per_line(2)
+        activity_row.set_column_spacing(16)
+        activity_row.set_row_spacing(8)
+        activity_row.set_selection_mode(Gtk.SelectionMode.NONE)
+
+        # Left: Most Active Hour card (vertical layout matching stat cards)
         active_hour_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=12,
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=8,
         )
         active_hour_box.add_css_class("stats-card")
         active_hour_box.set_margin_top(4)
@@ -129,24 +223,39 @@ class StatsView(Gtk.ScrolledWindow):
         ah_icon.add_css_class("stats-accent-amber")
         active_hour_box.append(ah_icon)
 
-        ah_text_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=2,
-        )
-        ah_text_box.set_hexpand(True)
+        self._active_hour_label = Gtk.Label(label="--")
+        self._active_hour_label.add_css_class("stat-card-value")
+        active_hour_box.append(self._active_hour_label)
 
         ah_title = Gtk.Label(label="Most Active Hour")
-        ah_title.set_xalign(0)
-        ah_title.add_css_class("body")
-        ah_text_box.append(ah_title)
+        ah_title.add_css_class("stat-card-label")
+        active_hour_box.append(ah_title)
 
-        self._active_hour_label = Gtk.Label(label="--")
-        self._active_hour_label.set_xalign(0)
-        self._active_hour_label.add_css_class("stats-card-value")
-        ah_text_box.append(self._active_hour_label)
+        activity_row.append(active_hour_box)
 
-        active_hour_box.append(ah_text_box)
-        root.append(active_hour_box)
+        # Right: 7-Day Listening Activity chart card
+        chart_card = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=8,
+        )
+        chart_card.add_css_class("stats-card")
+        chart_card.set_margin_top(4)
+        chart_card.set_margin_bottom(4)
+
+        chart_title = Gtk.Label(label="7-Day Activity")
+        chart_title.set_xalign(0)
+        chart_title.add_css_class("body")
+        chart_card.append(chart_title)
+
+        self._chart_area = Gtk.DrawingArea()
+        self._chart_area.set_size_request(-1, 120)
+        self._chart_area.set_hexpand(True)
+        self._chart_area.set_vexpand(True)
+        self._chart_area.set_draw_func(self._draw_daily_chart)
+        chart_card.append(self._chart_area)
+
+        activity_row.append(chart_card)
+        root.append(activity_row)
 
         # ---- 4. Top Artists ----
         artists_header = Gtk.Label(label="Top Artists")
@@ -209,6 +318,43 @@ class StatsView(Gtk.ScrolledWindow):
         """Wire the view to a database instance."""
         self._db = db
 
+    def set_callbacks(
+        self,
+        on_artist_clicked: Callable[[str], None],
+        on_track_clicked: Callable,
+    ) -> None:
+        """Set navigation callbacks for clickable items.
+
+        Parameters
+        ----------
+        on_artist_clicked:
+            Called with (artist_name) when an artist row is left-clicked.
+        on_track_clicked:
+            Called with (track_id, title, artist) when a track row is
+            left-clicked.  ``track_id`` is the database primary key.
+        """
+        self._on_artist_clicked = on_artist_clicked
+        self._on_track_clicked = on_track_clicked
+
+    def set_context_callbacks(
+        self,
+        callbacks: dict,
+        get_playlists: Callable,
+    ) -> None:
+        """Set callback functions for right-click context menus.
+
+        Parameters
+        ----------
+        callbacks:
+            Dict with keys: on_play, on_play_next, on_add_to_queue,
+            on_add_to_playlist, on_new_playlist, on_toggle_favorite,
+            on_go_to_album, on_go_to_artist.
+        get_playlists:
+            Callable that returns list of playlist dicts for context menu.
+        """
+        self._context_callbacks = callbacks
+        self._get_playlists = get_playlists
+
     def refresh(self) -> None:
         """Reload stats from the database."""
         if self._db is None:
@@ -228,14 +374,50 @@ class StatsView(Gtk.ScrolledWindow):
         active_hour = stats.get("most_active_hour")
         top_artists = stats.get("top_artists", [])
         top_tracks = stats.get("top_tracks", [])
+        unique_artists = stats.get("unique_artists", 0)
+        unique_albums = stats.get("unique_albums", 0)
+        avg_track_secs = stats.get("avg_track_seconds", 0)
+        current_streak = stats.get("current_streak", 0)
+        source_counts = stats.get("source_counts", {})
 
-        # Update stat cards
+        # Store raw data for click handlers
+        self._top_artists_data = top_artists
+        self._top_tracks_data = top_tracks
+
+        # Update stat cards — row 1
         self._total_played_label.set_label(str(total))
         self._listen_time_label.set_label(f"{hours}h")
         self._daily_avg_label.set_label(str(avg))
+        self._streak_label.set_label(
+            f"{current_streak}d" if current_streak else "0"
+        )
         self._active_hour_label.set_label(
             _format_hour(active_hour)
         )
+
+        # Update stat cards — row 2
+        self._unique_artists_label.set_label(str(unique_artists))
+        self._unique_albums_label.set_label(str(unique_albums))
+        mins = avg_track_secs // 60
+        secs = avg_track_secs % 60
+        self._avg_track_len_label.set_label(f"{mins}:{secs:02d}")
+        tidal_ct = source_counts.get("tidal", 0)
+        local_ct = source_counts.get("local", 0)
+        self._source_split_label.set_label(f"{tidal_ct} / {local_ct}")
+
+        # Load 7-day chart data
+        try:
+            self._daily_chart_data = self._db.get_daily_listening_stats(
+                days=7
+            )
+        except Exception:
+            logger.warning(
+                "Failed to load daily listening stats", exc_info=True
+            )
+            self._daily_chart_data = []
+
+        # Redraw the chart
+        self._chart_area.queue_draw()
 
         # Toggle empty state
         has_data = total > 0
@@ -245,21 +427,429 @@ class StatsView(Gtk.ScrolledWindow):
         self._clear_list_box(self._artists_list)
         if top_artists:
             max_count = top_artists[0][1] if top_artists else 1
-            for artist, count in top_artists:
+            for _idx, (artist, count) in enumerate(top_artists):
                 row = self._make_artist_row(
                     artist, count, max_count
                 )
+                self._attach_artist_click(row, artist)
+                self._attach_artist_context_gesture(row, artist)
                 self._artists_list.append(row)
 
         # Rebuild top tracks
         self._clear_list_box(self._tracks_list)
         if top_tracks:
-            max_count = top_tracks[0][2] if top_tracks else 1
-            for title, artist, count in top_tracks:
+            max_count = top_tracks[0][3] if top_tracks else 1
+            for _idx, (track_id, title, artist, count) in enumerate(
+                top_tracks
+            ):
                 row = self._make_track_row(
                     title, artist, count, max_count
                 )
+                self._attach_track_click(row, track_id, title, artist)
+                self._attach_track_context_gesture(
+                    row, track_id, title, artist
+                )
                 self._tracks_list.append(row)
+
+    # ---- Click handlers ----
+
+    def _attach_artist_click(
+        self, row: Gtk.ListBoxRow, artist: str
+    ) -> None:
+        """Attach a left-click gesture to navigate to an artist."""
+        if self._on_artist_clicked is None:
+            return
+
+        gesture = Gtk.GestureClick(button=1)
+
+        def _on_click(_g, _n_press, _x, _y, a=artist):
+            if self._on_artist_clicked is not None:
+                self._on_artist_clicked(a)
+
+        gesture.connect("pressed", _on_click)
+        row.add_controller(gesture)
+        # Visual hint that the row is clickable
+        row.set_cursor_from_name("pointer")
+
+    def _attach_track_click(
+        self,
+        row: Gtk.ListBoxRow,
+        track_id: int,
+        title: str,
+        artist: str,
+    ) -> None:
+        """Attach a left-click gesture to play a track."""
+        if self._on_track_clicked is None:
+            return
+
+        gesture = Gtk.GestureClick(button=1)
+
+        def _on_click(
+            _g, _n_press, _x, _y, tid=track_id, t=title, a=artist
+        ):
+            if self._on_track_clicked is not None:
+                self._on_track_clicked(tid, t, a)
+
+        gesture.connect("pressed", _on_click)
+        row.add_controller(gesture)
+        row.set_cursor_from_name("pointer")
+
+    # ---- Context menu handlers ----
+
+    def _attach_artist_context_gesture(
+        self, row: Gtk.ListBoxRow, artist: str
+    ) -> None:
+        """Attach a right-click gesture for artist context menu."""
+        if self._context_callbacks is None:
+            return
+
+        gesture = Gtk.GestureClick(button=3)
+
+        def _on_right_click(g, n_press, x, y, a=artist):
+            if n_press != 1:
+                return
+            self._show_artist_context_menu(row, x, y, a)
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
+
+        gesture.connect("pressed", _on_right_click)
+        row.add_controller(gesture)
+
+    def _show_artist_context_menu(
+        self,
+        widget: Gtk.Widget,
+        x: float,
+        y: float,
+        artist: str,
+    ) -> None:
+        """Create and display a context menu for an artist."""
+        if self._context_callbacks is None:
+            return
+
+        from auxen.views.context_menu import ArtistContextMenu
+
+        _noop = lambda *_args: None
+        callbacks = {
+            "on_play_all": lambda a=artist: (
+                self._play_all_by_artist(a)
+            ),
+            "on_add_all_to_queue": lambda a=artist: (
+                self._add_all_by_artist_to_queue(a)
+            ),
+            "on_view_artist": lambda a=artist: (
+                self._on_artist_clicked(a)
+                if self._on_artist_clicked is not None
+                else None
+            ),
+            "on_artist_radio": lambda a=artist: self._context_callbacks.get("on_artist_radio", _noop)(a),
+            "on_follow_artist": lambda a=artist: self._context_callbacks.get("on_follow_artist", _noop)(a),
+            "on_unfollow_artist": lambda a=artist: self._context_callbacks.get("on_unfollow_artist", _noop)(a),
+            "on_shuffle_artist": lambda a=artist: self._context_callbacks.get("on_shuffle_artist", _noop)(a),
+        }
+
+        self._current_menu = ArtistContextMenu(
+            artist_data={"artist": artist},
+            callbacks=callbacks,
+        )
+        self._current_menu.show(widget, x, y)
+
+    def _attach_track_context_gesture(
+        self,
+        row: Gtk.ListBoxRow,
+        track_id: int,
+        title: str,
+        artist: str,
+    ) -> None:
+        """Attach a right-click gesture for track context menu."""
+        if self._context_callbacks is None:
+            return
+
+        gesture = Gtk.GestureClick(button=3)
+
+        def _on_right_click(
+            g, n_press, x, y, tid=track_id, t=title, a=artist
+        ):
+            if n_press != 1:
+                return
+            self._show_track_context_menu(row, x, y, tid, t, a)
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
+
+        gesture.connect("pressed", _on_right_click)
+        row.add_controller(gesture)
+
+    def _show_track_context_menu(
+        self,
+        widget: Gtk.Widget,
+        x: float,
+        y: float,
+        track_id: int,
+        title: str,
+        artist: str,
+    ) -> None:
+        """Create and display a context menu for a track."""
+        if self._context_callbacks is None:
+            return
+
+        from auxen.views.context_menu import TrackContextMenu
+
+        # Lookup the actual track object by ID first, fall back to
+        # title/artist matching
+        track = self._find_track_by_id(track_id)
+        if track is None:
+            track = self._find_track(title, artist)
+        if track is None:
+            return
+
+        playlists = []
+        if self._get_playlists is not None:
+            playlists = self._get_playlists()
+
+        _noop = lambda *_args: None
+        callbacks = {
+            "on_play": lambda t=track: self._context_callbacks.get(
+                "on_play", _noop
+            )(t),
+            "on_play_next": lambda t=track: self._context_callbacks.get(
+                "on_play_next", _noop
+            )(t),
+            "on_add_to_queue": lambda t=track: self._context_callbacks.get(
+                "on_add_to_queue", _noop
+            )(t),
+            "on_add_to_playlist": lambda pid, t=track: (
+                self._context_callbacks.get(
+                    "on_add_to_playlist", _noop
+                )(t, pid)
+            ),
+            "on_new_playlist": lambda t=track: (
+                self._context_callbacks.get(
+                    "on_new_playlist", _noop
+                )(t)
+            ),
+            "on_toggle_favorite": lambda t=track: (
+                self._context_callbacks.get(
+                    "on_toggle_favorite", _noop
+                )(t)
+            ),
+            "on_go_to_album": lambda t=track: (
+                self._context_callbacks.get(
+                    "on_go_to_album", _noop
+                )(t)
+            ),
+            "on_go_to_artist": lambda t=track: (
+                self._context_callbacks.get(
+                    "on_go_to_artist", _noop
+                )(t)
+            ),
+            "on_track_radio": lambda t=track: (
+                self._context_callbacks.get(
+                    "on_track_radio", _noop
+                )(t)
+            ),
+            "on_view_lyrics": lambda t=track: (
+                self._context_callbacks.get(
+                    "on_view_lyrics", _noop
+                )(t)
+            ),
+            "on_credits": lambda t=track: (
+                self._context_callbacks.get(
+                    "on_credits", _noop
+                )(t)
+            ),
+        }
+
+        is_fav = False
+        if self._db is not None and track.id is not None:
+            try:
+                is_fav = self._db.is_favorite(track.id)
+            except Exception:
+                pass
+
+        track_data = {
+            "id": getattr(track, "id", None),
+            "title": getattr(track, "title", ""),
+            "artist": getattr(track, "artist", ""),
+            "album": getattr(track, "album", ""),
+            "source": getattr(track, "source", None),
+            "source_id": getattr(track, "source_id", None),
+            "is_favorite": is_fav,
+        }
+
+        self._current_menu = TrackContextMenu(
+            track_data=track_data,
+            callbacks=callbacks,
+            playlists=playlists,
+        )
+        self._current_menu.show(widget, x, y)
+
+    def _play_all_by_artist(self, artist: str) -> None:
+        """Play all tracks by the given artist using the DB."""
+        if self._db is None:
+            return
+        try:
+            tracks = self._db.get_artist_tracks(artist)
+            if not tracks:
+                return
+            # Walk up the widget tree to find the window with player
+            widget = self
+            while widget is not None:
+                if hasattr(widget, "_app_ref"):
+                    app_ref = widget._app_ref
+                    if app_ref and app_ref.player is not None:
+                        app_ref.player.play_queue(
+                            tracks, start_index=0
+                        )
+                    return
+                widget = widget.get_parent()
+        except Exception:
+            logger.warning(
+                "Failed to play all tracks by %s", artist,
+                exc_info=True,
+            )
+
+    def _add_all_by_artist_to_queue(self, artist: str) -> None:
+        """Add all tracks by the given artist to the play queue."""
+        if self._db is None:
+            return
+        try:
+            tracks = self._db.get_artist_tracks(artist)
+            if not tracks:
+                return
+            # Walk up the widget tree to find the window with player
+            widget = self
+            while widget is not None:
+                if hasattr(widget, "_app_ref"):
+                    app_ref = widget._app_ref
+                    if app_ref and app_ref.player is not None:
+                        for track in tracks:
+                            app_ref.player.queue.add(track)
+                    return
+                widget = widget.get_parent()
+        except Exception:
+            logger.warning(
+                "Failed to add all tracks by %s to queue", artist,
+                exc_info=True,
+            )
+
+    def _find_track_by_id(self, track_id: int):
+        """Look up a Track object from the database by its primary key."""
+        if self._db is None:
+            return None
+        try:
+            return self._db.get_track(track_id)
+        except Exception:
+            logger.warning(
+                "Failed to find track by id %s", track_id,
+                exc_info=True,
+            )
+            return None
+
+    def _find_track(self, title: str, artist: str):
+        """Look up a Track object from the database by title and artist."""
+        if self._db is None:
+            return None
+        try:
+            tracks = self._db.get_artist_tracks(artist)
+            for t in tracks:
+                if t.title == title:
+                    return t
+            # Fallback: return first track by that artist if exact
+            # title match fails (e.g. truncation differences)
+            return tracks[0] if tracks else None
+        except Exception:
+            logger.warning(
+                "Failed to find track %s by %s", title, artist,
+                exc_info=True,
+            )
+            return None
+
+    # ---- 7-Day Chart Drawing ----
+
+    def _draw_daily_chart(
+        self, area: Gtk.DrawingArea, cr, width: int, height: int
+    ) -> None:
+        """Draw the 7-day listening activity bar chart using Cairo."""
+        data = self._daily_chart_data
+        if not data or width <= 0 or height <= 0:
+            # Draw placeholder text
+            cr.set_source_rgba(0.6, 0.6, 0.6, 0.5)
+            cr.select_font_face(
+                "sans-serif", 0, 0  # NORMAL, NORMAL
+            )
+            cr.set_font_size(12)
+            text = "No listening data"
+            extents = cr.text_extents(text)
+            cr.move_to(
+                (width - extents.width) / 2,
+                (height + extents.height) / 2,
+            )
+            cr.show_text(text)
+            return
+
+        n_bars = len(data)
+        max_count = max((c for _, c in data), default=1)
+        if max_count == 0:
+            max_count = 1
+
+        # Layout constants
+        top_margin = 20  # space for count labels above bars
+        bottom_margin = 20  # space for day labels below bars
+        side_margin = 10
+        bar_spacing = 8
+        available_width = width - 2 * side_margin
+        available_height = height - top_margin - bottom_margin
+        bar_width = max(
+            8, (available_width - (n_bars - 1) * bar_spacing) / n_bars
+        )
+
+        # Amber color #d4a039
+        r, g, b = 0xD4 / 255, 0xA0 / 255, 0x39 / 255
+
+        for i, (date_str, count) in enumerate(data):
+            bar_x = side_margin + i * (bar_width + bar_spacing)
+            bar_height = (
+                (count / max_count) * available_height
+                if max_count > 0
+                else 0
+            )
+            bar_y = top_margin + available_height - bar_height
+
+            # Draw bar
+            cr.set_source_rgba(r, g, b, 0.85)
+            cr.rectangle(
+                bar_x,
+                bar_y,
+                bar_width,
+                bar_height,
+            )
+            cr.fill()
+
+            # Draw count label above bar
+            cr.set_source_rgba(0.83, 0.83, 0.83, 1.0)
+            cr.select_font_face("sans-serif", 0, 0)
+            cr.set_font_size(10)
+            count_text = str(count)
+            extents = cr.text_extents(count_text)
+            cr.move_to(
+                bar_x + (bar_width - extents.width) / 2,
+                bar_y - 4,
+            )
+            cr.show_text(count_text)
+
+            # Draw day label below bar
+            # Parse the date string to get day abbreviation
+            try:
+                dt = datetime.strptime(date_str, "%Y-%m-%d")
+                day_label = dt.strftime("%a")
+            except (ValueError, TypeError):
+                day_label = date_str[-2:] if date_str else "?"
+
+            cr.set_source_rgba(0.6, 0.6, 0.6, 1.0)
+            cr.set_font_size(9)
+            extents = cr.text_extents(day_label)
+            cr.move_to(
+                bar_x + (bar_width - extents.width) / 2,
+                height - 4,
+            )
+            cr.show_text(day_label)
 
     # ---- Internal helpers ----
 

@@ -10,11 +10,12 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
+gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import GLib, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, GLib, GObject, Gtk, Pango
 
 from auxen.views.context_menu import TrackContextMenu
-from auxen.views.widgets import make_tidal_source_badge
+from auxen.views.widgets import DragScrollHelper, format_duration, make_standard_track_row, make_tidal_source_badge
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +56,7 @@ _SAMPLE_DURATIONS = [
 
 def _format_duration(seconds: float | None) -> str:
     """Format seconds as M:SS."""
-    if seconds is None or seconds <= 0:
-        return "0:00"
-    total = int(seconds)
-    minutes = total // 60
-    secs = total % 60
-    return f"{minutes}:{secs:02d}"
+    return format_duration(seconds)
 
 
 def _make_result_row(
@@ -71,95 +67,25 @@ def _make_result_row(
     duration: str,
     track=None,
 ) -> Gtk.ListBoxRow:
-    """Build a single search result row."""
-    row_box = Gtk.Box(
-        orientation=Gtk.Orientation.HORIZONTAL,
-        spacing=12,
+    """Build a single search result row using the shared widget."""
+    # Build a dict-like track for the shared function
+    track_dict = {
+        "title": title,
+        "artist": artist,
+        "album": album,
+        "source": source,
+        "duration": duration,
+    }
+    row = make_standard_track_row(
+        track_dict,
+        show_art=True,
+        show_source_badge=True,
+        show_quality_badge=False,
+        show_duration=True,
+        art_size=40,
+        css_class="search-result-row",
     )
-    row_box.add_css_class("search-result-row")
-    row_box.set_margin_top(4)
-    row_box.set_margin_bottom(4)
-    row_box.set_margin_start(8)
-    row_box.set_margin_end(8)
-
-    # -- Album art placeholder (40x40) --
-    art_box = Gtk.Box(
-        orientation=Gtk.Orientation.VERTICAL,
-        halign=Gtk.Align.CENTER,
-        valign=Gtk.Align.CENTER,
-    )
-    art_box.add_css_class("album-art-placeholder")
-    art_box.add_css_class("album-art-mini")
-    art_box.set_size_request(40, 40)
-
-    art_icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
-    art_icon.set_pixel_size(18)
-    art_icon.set_opacity(0.4)
-    art_icon.set_halign(Gtk.Align.CENTER)
-    art_icon.set_valign(Gtk.Align.CENTER)
-    art_icon.set_vexpand(True)
-    art_box.append(art_icon)
-    row_box.append(art_box)
-
-    # -- Title + Artist column --
-    text_box = Gtk.Box(
-        orientation=Gtk.Orientation.VERTICAL,
-        spacing=2,
-    )
-    text_box.set_hexpand(True)
-    text_box.set_valign(Gtk.Align.CENTER)
-
-    title_label = Gtk.Label(label=title)
-    title_label.set_xalign(0)
-    title_label.set_ellipsize(Pango.EllipsizeMode.END)
-    title_label.set_max_width_chars(40)
-    title_label.add_css_class("body")
-    title_label.set_markup(f"<b>{GLib.markup_escape_text(title)}</b>")
-    text_box.append(title_label)
-
-    artist_label = Gtk.Label(label=artist)
-    artist_label.set_xalign(0)
-    artist_label.set_ellipsize(Pango.EllipsizeMode.END)
-    artist_label.set_max_width_chars(30)
-    artist_label.add_css_class("caption")
-    artist_label.add_css_class("dim-label")
-    text_box.append(artist_label)
-
-    row_box.append(text_box)
-
-    # -- Album name (right-aligned, dim) --
-    album_label = Gtk.Label(label=album)
-    album_label.set_ellipsize(Pango.EllipsizeMode.END)
-    album_label.set_max_width_chars(25)
-    album_label.add_css_class("caption")
-    album_label.add_css_class("search-album-label")
-    album_label.set_valign(Gtk.Align.CENTER)
-    album_label.set_halign(Gtk.Align.END)
-    row_box.append(album_label)
-
-    # -- Source badge --
-    if source == "tidal":
-        badge = make_tidal_source_badge(
-            label_text=source.capitalize(),
-            css_class="source-badge-tidal",
-            icon_size=10,
-        )
-    else:
-        badge = Gtk.Label(label=source.capitalize())
-        badge.add_css_class("source-badge-local")
-    badge.set_valign(Gtk.Align.CENTER)
-    row_box.append(badge)
-
-    # -- Duration --
-    dur_label = Gtk.Label(label=duration)
-    dur_label.add_css_class("caption")
-    dur_label.add_css_class("dim-label")
-    dur_label.set_valign(Gtk.Align.CENTER)
-    row_box.append(dur_label)
-
-    row = Gtk.ListBoxRow()
-    row.set_child(row_box)
-    # Store track reference for context menu
+    # Store the real track object for context menu use
     row._track_data = track  # type: ignore[attr-defined]
     return row
 
@@ -197,13 +123,25 @@ class SearchView(Gtk.Box):
         entry_box.set_margin_start(32)
         entry_box.set_margin_end(32)
 
-        self._search_entry = Gtk.SearchEntry()
+        self._search_entry = Gtk.Entry()
         self._search_entry.set_placeholder_text(
             "Search tracks, albums, artists..."
         )
+        self._search_entry.set_icon_from_icon_name(
+            Gtk.EntryIconPosition.PRIMARY, "system-search-symbolic"
+        )
+        self._search_entry.set_icon_from_icon_name(
+            Gtk.EntryIconPosition.SECONDARY, "edit-clear-symbolic"
+        )
         self._search_entry.add_css_class("search-entry")
         self._search_entry.set_hexpand(True)
-        self._search_entry.connect("search-changed", self._on_search_changed)
+        self._search_entry.connect("changed", self._on_search_changed)
+        self._search_entry.connect("icon-press", self._on_icon_press)
+
+        # Escape key clears the entry
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_entry_key_pressed)
+        self._search_entry.add_controller(key_controller)
 
         # Track focus to show/hide history
         focus_controller = Gtk.EventControllerFocus()
@@ -220,6 +158,7 @@ class SearchView(Gtk.Box):
             Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
         )
         self._scroll.set_vexpand(True)
+        self._drag_scroll = DragScrollHelper(self._scroll)
 
         # Container that switches between results list and empty state.
         self._results_stack = Gtk.Stack()
@@ -288,6 +227,10 @@ class SearchView(Gtk.Box):
         self._db = db
         self._tidal_provider = tidal_provider
 
+    def set_album_art_service(self, art_service) -> None:
+        """Set the AlbumArtService instance for loading album art."""
+        self._album_art_service = art_service
+
     def set_context_callbacks(
         self,
         callbacks: dict,
@@ -296,6 +239,29 @@ class SearchView(Gtk.Box):
         """Set callback functions for the right-click context menu."""
         self._context_callbacks = callbacks
         self._get_playlists = get_playlists
+
+    # ---- Drag source helpers ----
+
+    @staticmethod
+    def _attach_drag_source_to_row(
+        row: Gtk.ListBoxRow, track
+    ) -> None:
+        """Attach a DragSource to a track row for drag-to-playlist."""
+        if track is None:
+            return
+        track_id = getattr(track, "id", None)
+        if track_id is None:
+            return
+
+        drag_source = Gtk.DragSource.new()
+        drag_source.set_actions(Gdk.DragAction.COPY)
+
+        def _on_prepare(_src, _x, _y, tid=track_id):
+            value = GObject.Value(GObject.TYPE_STRING, str(tid))
+            return Gdk.ContentProvider.new_for_value(value)
+
+        drag_source.connect("prepare", _on_prepare)
+        row.add_controller(drag_source)
 
     # ---- Context menu helpers ----
 
@@ -338,6 +304,9 @@ class SearchView(Gtk.Box):
             "on_toggle_favorite": lambda t=track: self._context_callbacks.get("on_toggle_favorite", _noop)(t),
             "on_go_to_album": lambda t=track: self._context_callbacks.get("on_go_to_album", _noop)(t),
             "on_go_to_artist": lambda t=track: self._context_callbacks.get("on_go_to_artist", _noop)(t),
+            "on_track_radio": lambda t=track: self._context_callbacks.get("on_track_radio", _noop)(t),
+            "on_view_lyrics": lambda t=track: self._context_callbacks.get("on_view_lyrics", _noop)(t),
+            "on_credits": lambda t=track: self._context_callbacks.get("on_credits", _noop)(t),
         }
 
         track_data = {
@@ -346,6 +315,7 @@ class SearchView(Gtk.Box):
             "artist": getattr(track, "artist", ""),
             "album": getattr(track, "album", ""),
             "source": getattr(track, "source", None),
+            "source_id": getattr(track, "source_id", None),
             "is_favorite": False,
         }
 
@@ -552,9 +522,31 @@ class SearchView(Gtk.Box):
             self._db.clear_search_history()
         self._refresh_history()
 
+    # ---- Entry event handlers ----
+
+    def _on_icon_press(
+        self, entry: Gtk.Entry, icon_pos: Gtk.EntryIconPosition
+    ) -> None:
+        """Clear the entry when the secondary (clear) icon is clicked."""
+        if icon_pos == Gtk.EntryIconPosition.SECONDARY:
+            entry.set_text("")
+
+    def _on_entry_key_pressed(
+        self,
+        controller: Gtk.EventControllerKey,
+        keyval: int,
+        keycode: int,
+        state: Gdk.ModifierType,
+    ) -> bool:
+        """Handle Escape key to clear the search entry."""
+        if keyval == Gdk.KEY_Escape:
+            self._search_entry.set_text("")
+            return True
+        return False
+
     # ---- Debounced search ----
 
-    def _on_search_changed(self, entry: Gtk.SearchEntry) -> None:
+    def _on_search_changed(self, entry: Gtk.Entry) -> None:
         """Handle search entry text changes with debounce."""
         # Cancel any pending debounce timeout.
         if self._debounce_id is not None:
@@ -637,9 +629,43 @@ class SearchView(Gtk.Box):
                 track=track,
             )
             self._attach_context_gesture(row, track)
+            self._attach_drag_source_to_row(row, track)
             self._results_list.append(row)
+            self._load_row_art(row, track)
 
         self._results_stack.set_visible_child_name("results")
+
+    def _load_row_art(self, row: Gtk.ListBoxRow, track) -> None:
+        """Load album art asynchronously for a search result row."""
+        art_service = getattr(self, "_album_art_service", None)
+        if art_service is None or track is None:
+            return
+
+        art_icon = getattr(row, "_art_icon", None)
+        art_image = getattr(row, "_art_image", None)
+        if art_icon is None or art_image is None:
+            return
+
+        request_token = object()
+        row._art_request_token = request_token  # type: ignore[attr-defined]
+
+        def _on_art_loaded(pixbuf: GdkPixbuf.Pixbuf | None) -> None:
+            if getattr(row, "_art_request_token", None) is not request_token:
+                return
+            if pixbuf is not None:
+                texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                art_image.set_from_paintable(texture)
+                art_image.set_visible(True)
+                art_icon.set_visible(False)
+                art_box = getattr(row, "_art_box", None)
+                if art_box is not None:
+                    art_box.remove_css_class("album-art-placeholder")
+
+        scale = row.get_scale_factor() or 1
+        art_px = 48 * scale
+        art_service.get_art_async(
+            track, _on_art_loaded, width=art_px, height=art_px
+        )
 
     # ---- Search logic ----
 

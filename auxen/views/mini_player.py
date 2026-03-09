@@ -108,6 +108,7 @@ class MiniPlayerWindow(Gtk.Window):
         )
         art_box.add_css_class("mini-player-art")
         art_box.set_size_request(48, 48)
+        art_box.set_vexpand(False)
 
         self._art_placeholder = Gtk.Image.new_from_icon_name(
             "audio-x-generic-symbolic"
@@ -140,14 +141,14 @@ class MiniPlayerWindow(Gtk.Window):
         self._title_label = Gtk.Label(label="No Track Playing")
         self._title_label.set_xalign(0)
         self._title_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self._title_label.set_max_width_chars(25)
+        self._title_label.set_hexpand(True)
         self._title_label.add_css_class("mini-player-title")
         text_box.append(self._title_label)
 
         self._artist_label = Gtk.Label(label="")
         self._artist_label.set_xalign(0)
         self._artist_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self._artist_label.set_max_width_chars(25)
+        self._artist_label.set_hexpand(True)
         self._artist_label.add_css_class("mini-player-artist")
         text_box.append(self._artist_label)
 

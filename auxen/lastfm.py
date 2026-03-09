@@ -99,18 +99,18 @@ class LastFmService:
 
         # Load keys: constructor args > database > defaults
         if api_key is not None:
-            self._api_key = api_key
+            self._api_key = api_key.strip()
         elif db is not None:
             stored = db.get_setting("lastfm_api_key")
-            self._api_key = stored if stored else _DEFAULT_API_KEY
+            self._api_key = stored.strip() if stored else _DEFAULT_API_KEY
         else:
             self._api_key = _DEFAULT_API_KEY
 
         if api_secret is not None:
-            self._api_secret = api_secret
+            self._api_secret = api_secret.strip()
         elif db is not None:
             stored = db.get_setting("lastfm_api_secret")
-            self._api_secret = stored if stored else _DEFAULT_API_SECRET
+            self._api_secret = stored.strip() if stored else _DEFAULT_API_SECRET
         else:
             self._api_secret = _DEFAULT_API_SECRET
 
@@ -118,6 +118,7 @@ class LastFmService:
         self._session_key: str | None = None
         self._username: str | None = None
         self._enabled: bool = False
+        self._auth_token: str | None = None
 
         # Restore session from database
         if db is not None:
@@ -135,9 +136,93 @@ class LastFmService:
     # Authentication
     # ------------------------------------------------------------------
 
-    def get_auth_url(self) -> str:
-        """Return the URL the user should visit to authorize Auxen."""
+    def get_auth_token(self) -> str | None:
+        """Request an auth token from Last.fm (step 1 of desktop auth).
+
+        Returns the token string on success, or ``None`` on failure.
+        The token is stored internally for ``complete_auth_from_token()``.
+        """
+        params = {
+            "method": "auth.getToken",
+            "api_key": self._api_key,
+            "format": "json",
+        }
+        try:
+            data = self._api_call(params)
+            token = data.get("token")
+            if token:
+                self._auth_token = token
+            return token
+        except Exception:
+            logger.warning("Failed to get Last.fm auth token", exc_info=True)
+            return None
+
+    def get_auth_url(self, token: str | None = None) -> str:
+        """Return the URL the user should visit to authorize Auxen.
+
+        Parameters
+        ----------
+        token:
+            An auth token from ``get_auth_token()``.  When provided, the
+            URL uses the token-based desktop auth flow which does not
+            require a callback URL.  When ``None``, falls back to the
+            basic auth URL.
+        """
+        if token:
+            return (
+                f"{_AUTH_URL}?api_key={self._api_key}"
+                f"&token={token}"
+            )
         return f"{_AUTH_URL}?api_key={self._api_key}"
+
+    def validate_api_key(self) -> tuple[bool, str]:
+        """Check whether the configured API key is valid.
+
+        Returns ``(True, "")`` on success, or ``(False, error_message)``
+        on failure.
+        """
+        key = self._api_key
+        if not key or len(key) != 32:
+            return False, (
+                f"API key must be exactly 32 hex characters "
+                f"(current length: {len(key)})"
+            )
+
+        # Test the key with a lightweight API call
+        params = {
+            "method": "auth.getToken",
+            "api_key": key,
+            "format": "json",
+        }
+        try:
+            self._api_call(params)
+            return True, ""
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            if exc.code == 403 or "invalid api key" in body.lower():
+                return False, (
+                    "Invalid API key. Please register your own Last.fm "
+                    "API application at https://www.last.fm/api/account/create "
+                    "and enter your API Key and Shared Secret in Settings."
+                )
+            return False, f"HTTP {exc.code}: {body[:200]}"
+        except Exception as exc:
+            return False, f"Connection error: {exc}"
+
+    def complete_auth_from_token(self) -> bool:
+        """Complete auth using the internally stored token (step 3).
+
+        Call this after the user has authorized the token in their
+        browser.  Returns ``True`` on success.
+        """
+        if not self._auth_token:
+            logger.warning("No auth token available for completion")
+            return False
+        return self.complete_auth(self._auth_token)
 
     def complete_auth(self, token: str) -> bool:
         """Exchange an auth *token* for a session key.
@@ -166,7 +251,18 @@ class LastFmService:
                     self._db.set_setting(
                         "lastfm_username", self._username
                     )
+            self._auth_token = None  # Clear after use
             return bool(self._session_key)
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            logger.warning(
+                "Last.fm auth failed (HTTP %s): %s", exc.code, body[:300]
+            )
+            return False
         except Exception:
             logger.warning("Last.fm auth failed", exc_info=True)
             return False
@@ -187,6 +283,48 @@ class LastFmService:
     def username(self) -> str | None:
         """The authenticated Last.fm username, or ``None``."""
         return self._username
+
+    @property
+    def api_key(self) -> str:
+        """The currently configured Last.fm API key."""
+        return self._api_key
+
+    @property
+    def api_secret(self) -> str:
+        """The currently configured Last.fm API secret."""
+        return self._api_secret
+
+    @property
+    def uses_default_credentials(self) -> bool:
+        """Return ``True`` if using the built-in (placeholder) credentials."""
+        return (
+            self._api_key == _DEFAULT_API_KEY
+            and self._api_secret == _DEFAULT_API_SECRET
+        )
+
+    def update_api_credentials(
+        self, api_key: str, api_secret: str
+    ) -> None:
+        """Update the Last.fm API key and secret.
+
+        Persists to the database and clears any existing session, since
+        the old session key is tied to the old credentials.
+        """
+        api_key = api_key.strip()
+        api_secret = api_secret.strip()
+
+        self._api_key = api_key
+        self._api_secret = api_secret
+
+        # Clear session since it's tied to the old credentials
+        self._session_key = None
+        self._username = None
+
+        if self._db is not None:
+            self._db.set_setting("lastfm_api_key", api_key)
+            self._db.set_setting("lastfm_api_secret", api_secret)
+            self._db.set_setting("lastfm_session_key", "")
+            self._db.set_setting("lastfm_username", "")
 
     # ------------------------------------------------------------------
     # Enabled toggle

@@ -7,11 +7,12 @@ from typing import Callable, Optional
 
 import gi
 
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, GObject, Gtk, Pango
 
 from auxen.models import Source
 from auxen.views.context_menu import (
@@ -19,59 +20,78 @@ from auxen.views.context_menu import (
     ArtistContextMenu,
     TrackContextMenu,
 )
-from auxen.views.widgets import make_tidal_source_badge
+from auxen.views.view_mode import ViewMode, make_view_mode_toggle, set_active_mode
+from auxen.views.widgets import (
+    DragScrollHelper,
+    make_compact_track_row,
+    make_source_badge,
+    make_standard_track_row,
+    make_tidal_source_badge,
+)
 
 logger = logging.getLogger(__name__)
 
 # Sort options for each view mode
 _SORT_OPTIONS_ALBUMS = [
     "Recently Added",
-    "Name (A-Z)",
-    "Name (Z-A)",
+    "Name",
     "Artist",
 ]
 
 _SORT_OPTIONS_ARTISTS = [
-    "Name (A-Z)",
-    "Name (Z-A)",
+    "Name",
     "Track Count",
+    "Recently Added",
 ]
 
 _SORT_OPTIONS_TRACKS = [
     "Recently Added",
-    "Name (A-Z)",
-    "Name (Z-A)",
+    "Name",
     "Artist",
 ]
 
 
-def _format_duration(seconds: float | None) -> str:
-    """Format seconds as M:SS."""
-    if seconds is None or seconds <= 0:
-        return "0:00"
-    total = int(seconds)
-    minutes = total // 60
-    secs = total % 60
-    return f"{minutes}:{secs:02d}"
-
-
 def _make_source_badge(source: str) -> Gtk.Widget:
     """Create a small pill badge indicating the track source."""
-    if source == "tidal":
-        badge = make_tidal_source_badge(
-            label_text=source.capitalize(),
-            css_class="source-badge-tidal",
-            icon_size=10,
-        )
-    else:
-        badge = Gtk.Label(label=source.capitalize())
-        badge.add_css_class("source-badge-local")
-    badge.set_valign(Gtk.Align.CENTER)
-    return badge
+    return make_source_badge(source)
+
+
+def _make_clickable_artist_label(
+    artist: str,
+    on_artist_clicked: Callable | None = None,
+    css_classes: list[str] | None = None,
+    max_chars: int = 18,
+    margin_start: int = 6,
+    margin_end: int = 6,
+) -> Gtk.Label:
+    """Create an artist label, optionally clickable for navigation."""
+    lbl = Gtk.Label(label=artist)
+    lbl.set_xalign(0)
+    lbl.set_ellipsize(Pango.EllipsizeMode.END)
+    lbl.set_max_width_chars(max_chars)
+    for cls in (css_classes or ["caption", "dim-label"]):
+        lbl.add_css_class(cls)
+    lbl.set_margin_start(margin_start)
+    lbl.set_margin_end(margin_end)
+    if on_artist_clicked is not None:
+        lbl.add_css_class("track-nav-link")
+        g = Gtk.GestureClick.new()
+        g.set_button(1)
+
+        def _on_click(gest, n_press, _x, _y, _cb=on_artist_clicked, _a=artist):
+            if n_press != 1:
+                return
+            gest.set_state(Gtk.EventSequenceState.CLAIMED)
+            _cb(_a)
+
+        g.connect("released", _on_click)
+        lbl.add_controller(g)
+    return lbl
 
 
 def _make_album_card(
-    album: str, artist: str, source: str
+    album: str, artist: str, source: str,
+    on_artist_clicked: Callable | None = None,
 ) -> Gtk.FlowBoxChild:
     """Build a single album card for the library grid."""
     card = Gtk.Box(
@@ -90,6 +110,7 @@ def _make_album_card(
     )
     art_box.add_css_class("album-art-placeholder")
     art_box.set_size_request(160, 160)
+    art_box.set_vexpand(False)
 
     art_icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
     art_icon.set_pixel_size(48)
@@ -116,14 +137,33 @@ def _make_album_card(
             css_class="source-badge-tidal",
             icon_size=10,
         )
+        badge.set_tooltip_text("Streaming from Tidal")
     else:
         badge = Gtk.Label(label=source.capitalize())
         badge.add_css_class("source-badge-local")
-    badge.set_halign(Gtk.Align.START)
+        badge.set_tooltip_text("Local library file")
+    badge.set_halign(Gtk.Align.END)
     badge.set_valign(Gtk.Align.START)
     badge.set_margin_top(8)
-    badge.set_margin_start(8)
+    badge.set_margin_end(8)
     overlay.add_overlay(badge)
+
+    # -- Hover overlay (darkens art) --
+    hover_overlay = Gtk.Box()
+    hover_overlay.add_css_class("album-card-hover-overlay")
+    hover_overlay.set_halign(Gtk.Align.FILL)
+    hover_overlay.set_valign(Gtk.Align.FILL)
+    overlay.add_overlay(hover_overlay)
+
+    # -- Play button (centered, revealed on hover) --
+    play_btn = Gtk.Button.new_from_icon_name(
+        "media-playback-start-symbolic"
+    )
+    play_btn.add_css_class("album-card-play-btn")
+    play_btn.set_halign(Gtk.Align.CENTER)
+    play_btn.set_valign(Gtk.Align.CENTER)
+    play_btn.set_tooltip_text(f"Play {album}")
+    overlay.add_overlay(play_btn)
 
     card.append(overlay)
 
@@ -133,19 +173,14 @@ def _make_album_card(
     title_label.set_ellipsize(Pango.EllipsizeMode.END)
     title_label.set_max_width_chars(18)
     title_label.add_css_class("body")
-    title_label.set_margin_start(4)
-    title_label.set_margin_end(4)
+    title_label.set_margin_start(6)
+    title_label.set_margin_end(6)
     card.append(title_label)
 
-    # Artist
-    artist_label = Gtk.Label(label=artist)
-    artist_label.set_xalign(0)
-    artist_label.set_ellipsize(Pango.EllipsizeMode.END)
-    artist_label.set_max_width_chars(18)
-    artist_label.add_css_class("caption")
-    artist_label.add_css_class("dim-label")
-    artist_label.set_margin_start(4)
-    artist_label.set_margin_end(4)
+    # Artist (clickable if callback provided)
+    artist_label = _make_clickable_artist_label(
+        artist, on_artist_clicked=on_artist_clicked,
+    )
     card.append(artist_label)
 
     child = Gtk.FlowBoxChild()
@@ -156,6 +191,8 @@ def _make_album_card(
     # Store references to art widgets for async loading
     child._art_icon = art_icon  # type: ignore[attr-defined]
     child._art_image = art_image  # type: ignore[attr-defined]
+    # Store play button for wiring callbacks
+    child._play_btn = play_btn  # type: ignore[attr-defined]
     return child
 
 
@@ -173,12 +210,22 @@ def _make_artist_row(
     row_box.set_margin_start(8)
     row_box.set_margin_end(8)
 
-    # Artist icon placeholder
+    # Artist icon placeholder (shown until image loads)
     icon = Gtk.Image.new_from_icon_name("avatar-default-symbolic")
     icon.set_pixel_size(32)
     icon.set_opacity(0.5)
     icon.set_valign(Gtk.Align.CENTER)
     row_box.append(icon)
+
+    # Artist art image (hidden until loaded)
+    art_image = Gtk.Image()
+    art_image.set_pixel_size(32)
+    art_image.set_size_request(32, 32)
+    art_image.set_halign(Gtk.Align.CENTER)
+    art_image.set_valign(Gtk.Align.CENTER)
+    art_image.add_css_class("artist-row-image")
+    art_image.set_visible(False)
+    row_box.append(art_image)
 
     # Artist name
     name_label = Gtk.Label(label=artist)
@@ -209,97 +256,397 @@ def _make_artist_row(
     row.set_activatable(True)
     # Store artist name for click handling
     row._artist_name = artist  # type: ignore[attr-defined]
+    # Store art widgets for async image loading
+    row._art_icon = icon  # type: ignore[attr-defined]
+    row._art_image = art_image  # type: ignore[attr-defined]
     return row
 
 
-def _make_track_row(track) -> Gtk.ListBoxRow:
-    """Build a single row for the tracks list."""
+def _make_album_list_row(
+    album: str, artist: str, source: str, track_count: int = 0,
+    on_artist_clicked: Callable | None = None,
+) -> Gtk.ListBoxRow:
+    """Build a list-mode row for an album (art + title + artist + count)."""
     row_box = Gtk.Box(
-        orientation=Gtk.Orientation.HORIZONTAL,
-        spacing=12,
+        orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
     )
-    row_box.add_css_class("library-track-row")
+    row_box.add_css_class("library-album-list-row")
     row_box.set_margin_top(4)
     row_box.set_margin_bottom(4)
     row_box.set_margin_start(8)
     row_box.set_margin_end(8)
 
-    # Mini album art placeholder
+    # Album art placeholder
+    art_icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
+    art_icon.set_pixel_size(24)
+    art_icon.set_opacity(0.4)
+    art_icon.set_valign(Gtk.Align.CENTER)
+    row_box.append(art_icon)
+
+    art_image = Gtk.Image()
+    art_image.set_pixel_size(40)
+    art_image.set_size_request(40, 40)
+    art_image.set_halign(Gtk.Align.CENTER)
+    art_image.set_valign(Gtk.Align.CENTER)
+    art_image.add_css_class("album-row-art-image")
+    art_image.set_visible(False)
+    row_box.append(art_image)
+
+    # Text column
+    text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+    text_box.set_hexpand(True)
+    text_box.set_valign(Gtk.Align.CENTER)
+
+    title_label = Gtk.Label(label=album)
+    title_label.set_xalign(0)
+    title_label.set_ellipsize(Pango.EllipsizeMode.END)
+    title_label.add_css_class("body")
+    text_box.append(title_label)
+
+    artist_label = _make_clickable_artist_label(
+        artist, on_artist_clicked=on_artist_clicked,
+        css_classes=["caption", "dim-label"],
+        max_chars=40, margin_start=0, margin_end=0,
+    )
+    text_box.append(artist_label)
+
+    row_box.append(text_box)
+
+    # Source badge
+    badge = _make_source_badge(source)
+    row_box.append(badge)
+
+    # Track count
+    if track_count > 0:
+        count_label = Gtk.Label(
+            label=f"{track_count} track{'s' if track_count != 1 else ''}"
+        )
+        count_label.add_css_class("caption")
+        count_label.add_css_class("library-track-count")
+        count_label.set_valign(Gtk.Align.CENTER)
+        row_box.append(count_label)
+
+    row = Gtk.ListBoxRow()
+    row.set_child(row_box)
+    row.set_activatable(True)
+    row._album_title = album
+    row._album_artist = artist
+    row._art_icon = art_icon
+    row._art_image = art_image
+    return row
+
+
+def _make_album_compact_row(
+    album: str, artist: str, source: str, index: int = 0,
+    on_artist_clicked: Callable | None = None,
+) -> Gtk.ListBoxRow:
+    """Build a compact row for an album (number + title + artist)."""
+    row_box = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL, spacing=8,
+    )
+    row_box.add_css_class("compact-track-row")
+    row_box.set_margin_top(2)
+    row_box.set_margin_bottom(2)
+    row_box.set_margin_start(8)
+    row_box.set_margin_end(8)
+
+    num_label = Gtk.Label(label=str(index + 1))
+    num_label.add_css_class("caption")
+    num_label.add_css_class("dim-label")
+    num_label.set_size_request(28, -1)
+    num_label.set_xalign(1)
+    num_label.set_valign(Gtk.Align.CENTER)
+    row_box.append(num_label)
+
+    title_label = Gtk.Label(label=album)
+    title_label.set_xalign(0)
+    title_label.set_hexpand(True)
+    title_label.set_ellipsize(Pango.EllipsizeMode.END)
+    title_label.add_css_class("body")
+    title_label.set_valign(Gtk.Align.CENTER)
+    row_box.append(title_label)
+
+    artist_label = _make_clickable_artist_label(
+        artist, on_artist_clicked=on_artist_clicked,
+        css_classes=["caption", "dim-label"],
+        max_chars=25, margin_start=0, margin_end=0,
+    )
+    artist_label.set_xalign(1)
+    artist_label.set_valign(Gtk.Align.CENTER)
+    row_box.append(artist_label)
+
+    badge = _make_source_badge(source)
+    row_box.append(badge)
+
+    row = Gtk.ListBoxRow()
+    row.set_child(row_box)
+    row.set_activatable(True)
+    row._album_title = album
+    row._album_artist = artist
+    return row
+
+
+def _make_artist_card(artist: str, track_count: int, sources: list[str]) -> Gtk.FlowBoxChild:
+    """Build an artist card for grid view."""
+    card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    card.add_css_class("album-card")
+
+    # Artist image with overlay badge
+    overlay = Gtk.Overlay()
+
     art_box = Gtk.Box(
         orientation=Gtk.Orientation.VERTICAL,
         halign=Gtk.Align.CENTER,
         valign=Gtk.Align.CENTER,
     )
     art_box.add_css_class("album-art-placeholder")
-    art_box.add_css_class("album-art-mini")
-    art_box.set_size_request(48, 48)
+    art_box.set_size_request(160, 160)
+    art_box.set_vexpand(False)
 
-    art_icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
-    art_icon.set_pixel_size(20)
+    art_icon = Gtk.Image.new_from_icon_name("avatar-default-symbolic")
+    art_icon.set_pixel_size(48)
     art_icon.set_opacity(0.4)
     art_icon.set_halign(Gtk.Align.CENTER)
     art_icon.set_valign(Gtk.Align.CENTER)
     art_icon.set_vexpand(True)
     art_box.append(art_icon)
-    row_box.append(art_box)
 
-    # Title + Artist + Album column
-    text_box = Gtk.Box(
-        orientation=Gtk.Orientation.VERTICAL,
-        spacing=2,
-    )
-    text_box.set_hexpand(True)
-    text_box.set_valign(Gtk.Align.CENTER)
+    art_image = Gtk.Image()
+    art_image.set_pixel_size(160)
+    art_image.set_halign(Gtk.Align.CENTER)
+    art_image.set_valign(Gtk.Align.CENTER)
+    art_image.add_css_class("album-card-art-image")
+    art_image.set_visible(False)
+    art_box.append(art_image)
 
-    title_label = Gtk.Label()
-    title_label.set_xalign(0)
-    title_label.set_ellipsize(Pango.EllipsizeMode.END)
-    title_label.set_max_width_chars(40)
-    title_label.add_css_class("body")
-    title_label.set_markup(
-        f"<b>{GLib.markup_escape_text(track.title)}</b>"
-    )
-    text_box.append(title_label)
-
-    subtitle_parts = [track.artist]
-    if track.album:
-        subtitle_parts.append(track.album)
-    subtitle_text = " \u2014 ".join(subtitle_parts)
-
-    subtitle_label = Gtk.Label(label=subtitle_text)
-    subtitle_label.set_xalign(0)
-    subtitle_label.set_ellipsize(Pango.EllipsizeMode.END)
-    subtitle_label.set_max_width_chars(50)
-    subtitle_label.add_css_class("track-row-subtitle")
-    text_box.append(subtitle_label)
-
-    row_box.append(text_box)
+    overlay.set_child(art_box)
 
     # Source badge
-    source_badge = _make_source_badge(track.source.value)
-    row_box.append(source_badge)
+    for src in sorted(set(sources)):
+        if src == "tidal":
+            badge = make_tidal_source_badge(
+                label_text=src.capitalize(),
+                css_class="source-badge-tidal",
+                icon_size=10,
+            )
+        else:
+            badge = Gtk.Label(label=src.capitalize())
+            badge.add_css_class("source-badge-local")
+        badge.set_halign(Gtk.Align.END)
+        badge.set_valign(Gtk.Align.START)
+        badge.set_margin_top(8)
+        badge.set_margin_end(8)
+        overlay.add_overlay(badge)
+        break  # Only show first source badge
 
-    # Quality badge
-    quality = track.quality_label
-    if quality and quality != "Unknown":
-        quality_badge = Gtk.Label(label=quality)
-        quality_badge.add_css_class("favorites-quality-badge")
-        quality_badge.set_valign(Gtk.Align.CENTER)
-        row_box.append(quality_badge)
+    # Hover overlay
+    hover_overlay = Gtk.Box()
+    hover_overlay.add_css_class("album-card-hover-overlay")
+    hover_overlay.set_halign(Gtk.Align.FILL)
+    hover_overlay.set_valign(Gtk.Align.FILL)
+    overlay.add_overlay(hover_overlay)
 
-    # Duration
-    dur_label = Gtk.Label(label=_format_duration(track.duration))
-    dur_label.add_css_class("caption")
-    dur_label.add_css_class("dim-label")
-    dur_label.set_valign(Gtk.Align.CENTER)
-    dur_label.set_margin_start(4)
-    row_box.append(dur_label)
+    # Play button
+    play_btn = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
+    play_btn.add_css_class("album-card-play-btn")
+    play_btn.set_halign(Gtk.Align.CENTER)
+    play_btn.set_valign(Gtk.Align.CENTER)
+    play_btn.set_tooltip_text(f"Play {artist}")
+    overlay.add_overlay(play_btn)
+
+    card.append(overlay)
+
+    # Artist name
+    name_label = Gtk.Label(label=artist)
+    name_label.set_xalign(0)
+    name_label.set_ellipsize(Pango.EllipsizeMode.END)
+    name_label.set_max_width_chars(18)
+    name_label.add_css_class("body")
+    name_label.set_margin_start(6)
+    name_label.set_margin_end(6)
+    card.append(name_label)
+
+    # Track count
+    if track_count > 0:
+        count_label = Gtk.Label(
+            label=f"{track_count} track{'s' if track_count != 1 else ''}"
+        )
+        count_label.set_xalign(0)
+        count_label.add_css_class("caption")
+        count_label.add_css_class("dim-label")
+        count_label.set_margin_start(6)
+        count_label.set_margin_end(6)
+        card.append(count_label)
+
+    child = Gtk.FlowBoxChild()
+    child.set_child(card)
+    child._artist_name = artist
+    child._art_icon = art_icon
+    child._art_image = art_image
+    child._play_btn = play_btn
+    return child
+
+
+def _make_artist_compact_row(
+    artist: str, track_count: int, sources: list[str], index: int = 0,
+) -> Gtk.ListBoxRow:
+    """Build a compact row for an artist."""
+    row_box = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL, spacing=8,
+    )
+    row_box.add_css_class("compact-track-row")
+    row_box.set_margin_top(2)
+    row_box.set_margin_bottom(2)
+    row_box.set_margin_start(8)
+    row_box.set_margin_end(8)
+
+    num_label = Gtk.Label(label=str(index + 1))
+    num_label.add_css_class("caption")
+    num_label.add_css_class("dim-label")
+    num_label.set_size_request(28, -1)
+    num_label.set_xalign(1)
+    num_label.set_valign(Gtk.Align.CENTER)
+    row_box.append(num_label)
+
+    name_label = Gtk.Label(label=artist)
+    name_label.set_xalign(0)
+    name_label.set_hexpand(True)
+    name_label.set_ellipsize(Pango.EllipsizeMode.END)
+    name_label.add_css_class("body")
+    name_label.set_valign(Gtk.Align.CENTER)
+    row_box.append(name_label)
+
+    for src in sorted(set(sources)):
+        badge = _make_source_badge(src)
+        row_box.append(badge)
+
+    if track_count > 0:
+        count_label = Gtk.Label(
+            label=f"{track_count} track{'s' if track_count != 1 else ''}"
+        )
+        count_label.add_css_class("caption")
+        count_label.add_css_class("library-track-count")
+        count_label.set_valign(Gtk.Align.CENTER)
+        row_box.append(count_label)
 
     row = Gtk.ListBoxRow()
     row.set_child(row_box)
     row.set_activatable(True)
-    # Store track reference for context menu
-    row._track_data = track  # type: ignore[attr-defined]
+    row._artist_name = artist
+    return row
+
+
+def _make_track_grid_card(
+    title: str, artist: str, source: str,
+    on_artist_clicked: Callable | None = None,
+) -> Gtk.FlowBoxChild:
+    """Build a track card for grid view (art + title + artist)."""
+    card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    card.add_css_class("album-card")
+
+    overlay = Gtk.Overlay()
+
+    art_box = Gtk.Box(
+        orientation=Gtk.Orientation.VERTICAL,
+        halign=Gtk.Align.CENTER,
+        valign=Gtk.Align.CENTER,
+    )
+    art_box.add_css_class("album-art-placeholder")
+    art_box.set_size_request(160, 160)
+    art_box.set_vexpand(False)
+
+    art_icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
+    art_icon.set_pixel_size(48)
+    art_icon.set_opacity(0.4)
+    art_icon.set_halign(Gtk.Align.CENTER)
+    art_icon.set_valign(Gtk.Align.CENTER)
+    art_icon.set_vexpand(True)
+    art_box.append(art_icon)
+
+    art_image = Gtk.Image()
+    art_image.set_pixel_size(160)
+    art_image.set_halign(Gtk.Align.CENTER)
+    art_image.set_valign(Gtk.Align.CENTER)
+    art_image.add_css_class("album-card-art-image")
+    art_image.set_visible(False)
+    art_box.append(art_image)
+
+    overlay.set_child(art_box)
+
+    if source == "tidal":
+        badge = make_tidal_source_badge(
+            label_text=source.capitalize(),
+            css_class="source-badge-tidal",
+            icon_size=10,
+        )
+    else:
+        badge = Gtk.Label(label=source.capitalize())
+        badge.add_css_class("source-badge-local")
+    badge.set_halign(Gtk.Align.END)
+    badge.set_valign(Gtk.Align.START)
+    badge.set_margin_top(8)
+    badge.set_margin_end(8)
+    overlay.add_overlay(badge)
+
+    hover_overlay = Gtk.Box()
+    hover_overlay.add_css_class("album-card-hover-overlay")
+    hover_overlay.set_halign(Gtk.Align.FILL)
+    hover_overlay.set_valign(Gtk.Align.FILL)
+    overlay.add_overlay(hover_overlay)
+
+    play_btn = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
+    play_btn.add_css_class("album-card-play-btn")
+    play_btn.set_halign(Gtk.Align.CENTER)
+    play_btn.set_valign(Gtk.Align.CENTER)
+    play_btn.set_tooltip_text(f"Play {title}")
+    overlay.add_overlay(play_btn)
+
+    card.append(overlay)
+
+    title_label = Gtk.Label(label=title)
+    title_label.set_xalign(0)
+    title_label.set_ellipsize(Pango.EllipsizeMode.END)
+    title_label.set_max_width_chars(18)
+    title_label.add_css_class("body")
+    title_label.set_margin_start(6)
+    title_label.set_margin_end(6)
+    card.append(title_label)
+
+    artist_label = _make_clickable_artist_label(
+        artist, on_artist_clicked=on_artist_clicked,
+    )
+    card.append(artist_label)
+
+    child = Gtk.FlowBoxChild()
+    child.set_child(card)
+    child._art_icon = art_icon
+    child._art_image = art_image
+    child._play_btn = play_btn
+    return child
+
+
+def _make_track_row(
+    track,
+    extra_widgets_after: list[Gtk.Widget] | None = None,
+    on_artist_clicked=None,
+    on_album_clicked=None,
+    on_play_clicked=None,
+) -> Gtk.ListBoxRow:
+    """Build a single row for the tracks list using the shared widget."""
+    row = make_standard_track_row(
+        track,
+        show_art=True,
+        show_source_badge=True,
+        show_quality_badge=True,
+        show_duration=True,
+        art_size=48,
+        css_class="library-track-row",
+        on_artist_clicked=on_artist_clicked,
+        on_album_clicked=on_album_clicked,
+        on_play_clicked=on_play_clicked,
+        extra_widgets_after=extra_widgets_after,
+    )
+    row.set_activatable(True)
     return row
 
 
@@ -316,12 +663,15 @@ class LibraryView(Gtk.Box):
         )
 
         self._db = None
-        self._active_filter: str = "All"
         self._active_view: str = "albums"
         self._active_sort: str = "Recently Added"
+        self._sort_ascending: bool = True
+        self._view_mode: ViewMode = ViewMode.LIST
 
         # Album art service for loading cover images
         self._album_art_service = None
+        # Artist image service for loading artist photos
+        self._artist_image_service = None
 
         # Callbacks
         self._on_album_clicked: Optional[
@@ -348,6 +698,9 @@ class LibraryView(Gtk.Box):
         # while the popover is still visible.
         self._current_menu = None
 
+        # Favorite toggle callback (called with track object)
+        self.on_favorite_toggled: Optional[Callable] = None
+
         # Track data caches
         self._all_tracks: list = []
         self._all_albums: list[dict] = []
@@ -359,8 +712,8 @@ class LibraryView(Gtk.Box):
             spacing=16,
         )
         header_section.set_margin_top(24)
-        header_section.set_margin_start(32)
-        header_section.set_margin_end(32)
+        header_section.set_margin_start(16)
+        header_section.set_margin_end(16)
 
         # 1. Header with title and track count
         header_box = Gtk.Box(
@@ -373,7 +726,7 @@ class LibraryView(Gtk.Box):
             "library-music-symbolic"
         )
         lib_icon.set_pixel_size(28)
-        lib_icon.add_css_class("favorites-header-icon")
+        lib_icon.add_css_class("collection-header-icon")
         header_box.append(lib_icon)
 
         title_label = Gtk.Label(label="Library")
@@ -391,13 +744,7 @@ class LibraryView(Gtk.Box):
 
         header_section.append(header_box)
 
-        # 2. View mode toggle + filter tabs + sort dropdown
-        controls_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=16,
-        )
-
-        # View mode buttons
+        # 2. View mode toggle row
         view_box = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=4,
@@ -417,53 +764,57 @@ class LibraryView(Gtk.Box):
             view_box.append(btn)
             self._view_buttons.append(btn)
 
-        controls_box.append(view_box)
+        header_section.append(view_box)
 
-        # Separator
-        sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
-        sep.set_margin_top(4)
-        sep.set_margin_bottom(4)
-        controls_box.append(sep)
-
-        # Filter tabs (All / Tidal / Local)
-        filter_box = Gtk.Box(
+        # 3. Sort + view mode row
+        sort_row = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=8,
         )
-
-        self._filter_buttons: list[Gtk.ToggleButton] = []
-        for label_text in ("All", "Tidal", "Local"):
-            btn = Gtk.ToggleButton(label=label_text)
-            btn.add_css_class("filter-btn")
-            btn.connect("toggled", self._on_filter_toggled)
-            filter_box.append(btn)
-            self._filter_buttons.append(btn)
-
-        controls_box.append(filter_box)
-
-        # Spacer
-        spacer = Gtk.Box()
-        spacer.set_hexpand(True)
-        controls_box.append(spacer)
+        sort_row.set_margin_bottom(12)
 
         # Sort dropdown
-        sort_label = Gtk.Label(label="Sort by:")
-        sort_label.add_css_class("caption")
-        sort_label.add_css_class("dim-label")
-        sort_label.set_valign(Gtk.Align.CENTER)
-        controls_box.append(sort_label)
+        self._sort_label = Gtk.Label(label="Sort by:")
+        self._sort_label.add_css_class("caption")
+        self._sort_label.add_css_class("dim-label")
+        self._sort_label.set_valign(Gtk.Align.CENTER)
+        sort_row.append(self._sort_label)
 
         self._sort_model = Gtk.StringList.new(_SORT_OPTIONS_ALBUMS)
         self._sort_dropdown = Gtk.DropDown(model=self._sort_model)
         self._sort_dropdown.set_selected(0)
-        self._sort_dropdown.add_css_class("favorites-sort-dropdown")
+        self._sort_dropdown.add_css_class("collection-sort-dropdown")
         self._sort_dropdown.set_valign(Gtk.Align.CENTER)
         self._sort_dropdown.connect(
             "notify::selected", self._on_sort_changed
         )
-        controls_box.append(self._sort_dropdown)
+        sort_row.append(self._sort_dropdown)
 
-        header_section.append(controls_box)
+        # Sort direction toggle button
+        self._sort_dir_btn = Gtk.Button.new_from_icon_name(
+            "view-sort-ascending-symbolic"
+        )
+        self._sort_dir_btn.add_css_class("flat")
+        self._sort_dir_btn.set_valign(Gtk.Align.CENTER)
+        self._sort_dir_btn.set_tooltip_text("Ascending")
+        self._sort_dir_btn.connect("clicked", self._on_sort_dir_clicked)
+        sort_row.append(self._sort_dir_btn)
+
+        # Spacer
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        sort_row.append(spacer)
+
+        # View mode toggle (list/compact/grid) - shown only on tracks tab
+        self._view_mode_toggle = make_view_mode_toggle(
+            on_mode_changed=self._on_view_mode_changed,
+            initial_mode=ViewMode.LIST,
+        )
+        self._view_mode_toggle.set_valign(Gtk.Align.CENTER)
+        self._view_mode_toggle.set_visible(True)
+        sort_row.append(self._view_mode_toggle)
+
+        header_section.append(sort_row)
 
         self.append(header_section)
 
@@ -473,6 +824,7 @@ class LibraryView(Gtk.Box):
             Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
         )
         self._scrolled.set_vexpand(True)
+        self._drag_scroll = DragScrollHelper(self._scrolled)
 
         # Content stack for view modes
         self._content_stack = Gtk.Stack()
@@ -487,13 +839,13 @@ class LibraryView(Gtk.Box):
             spacing=0,
         )
         albums_container.set_margin_top(16)
-        albums_container.set_margin_start(32)
-        albums_container.set_margin_end(32)
+        albums_container.set_margin_start(16)
+        albums_container.set_margin_end(16)
         albums_container.set_margin_bottom(32)
 
         self._album_grid = Gtk.FlowBox()
         self._album_grid.set_homogeneous(True)
-        self._album_grid.set_min_children_per_line(2)
+        self._album_grid.set_min_children_per_line(1)
         self._album_grid.set_max_children_per_line(6)
         self._album_grid.set_column_spacing(16)
         self._album_grid.set_row_spacing(16)
@@ -511,8 +863,8 @@ class LibraryView(Gtk.Box):
             spacing=0,
         )
         artists_container.set_margin_top(16)
-        artists_container.set_margin_start(32)
-        artists_container.set_margin_end(32)
+        artists_container.set_margin_start(16)
+        artists_container.set_margin_end(16)
         artists_container.set_margin_bottom(32)
 
         self._artist_list = Gtk.ListBox()
@@ -531,8 +883,8 @@ class LibraryView(Gtk.Box):
             spacing=0,
         )
         tracks_container.set_margin_top(16)
-        tracks_container.set_margin_start(32)
-        tracks_container.set_margin_end(32)
+        tracks_container.set_margin_start(16)
+        tracks_container.set_margin_end(16)
         tracks_container.set_margin_bottom(32)
 
         self._track_list = Gtk.ListBox()
@@ -545,6 +897,74 @@ class LibraryView(Gtk.Box):
 
         self._content_stack.add_named(tracks_container, "tracks")
 
+        # Tracks grid view (FlowBox for grid mode)
+        tracks_grid_container = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=0,
+        )
+        tracks_grid_container.set_margin_top(16)
+        tracks_grid_container.set_margin_start(16)
+        tracks_grid_container.set_margin_end(16)
+        tracks_grid_container.set_margin_bottom(32)
+
+        self._tracks_album_grid = Gtk.FlowBox()
+        self._tracks_album_grid.set_homogeneous(True)
+        self._tracks_album_grid.set_min_children_per_line(1)
+        self._tracks_album_grid.set_max_children_per_line(6)
+        self._tracks_album_grid.set_column_spacing(16)
+        self._tracks_album_grid.set_row_spacing(16)
+        self._tracks_album_grid.set_selection_mode(
+            Gtk.SelectionMode.SINGLE
+        )
+        self._tracks_album_grid.connect(
+            "child-activated", self._on_track_grid_card_activated
+        )
+        tracks_grid_container.append(self._tracks_album_grid)
+
+        self._content_stack.add_named(
+            tracks_grid_container, "tracks-grid"
+        )
+
+        # Albums list view (ListBox for list/compact modes)
+        albums_list_container = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=0,
+        )
+        albums_list_container.set_margin_top(16)
+        albums_list_container.set_margin_start(16)
+        albums_list_container.set_margin_end(16)
+        albums_list_container.set_margin_bottom(32)
+
+        self._album_list = Gtk.ListBox()
+        self._album_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._album_list.add_css_class("boxed-list")
+        self._album_list.connect(
+            "row-activated", self._on_album_row_activated
+        )
+        albums_list_container.append(self._album_list)
+        self._content_stack.add_named(albums_list_container, "albums-list")
+
+        # Artists grid view (FlowBox for grid mode)
+        artists_grid_container = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=0,
+        )
+        artists_grid_container.set_margin_top(16)
+        artists_grid_container.set_margin_start(16)
+        artists_grid_container.set_margin_end(16)
+        artists_grid_container.set_margin_bottom(32)
+
+        self._artist_grid = Gtk.FlowBox()
+        self._artist_grid.set_homogeneous(True)
+        self._artist_grid.set_min_children_per_line(1)
+        self._artist_grid.set_max_children_per_line(6)
+        self._artist_grid.set_column_spacing(16)
+        self._artist_grid.set_row_spacing(16)
+        self._artist_grid.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self._artist_grid.connect(
+            "child-activated", self._on_artist_card_activated
+        )
+        artists_grid_container.append(self._artist_grid)
+        self._content_stack.add_named(artists_grid_container, "artists-grid")
+
         # Empty state
         empty_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -552,7 +972,7 @@ class LibraryView(Gtk.Box):
             halign=Gtk.Align.CENTER,
             valign=Gtk.Align.CENTER,
         )
-        empty_box.add_css_class("favorites-empty-state")
+        empty_box.add_css_class("collection-empty-state")
         empty_box.set_vexpand(True)
         empty_box.set_margin_top(80)
 
@@ -577,9 +997,8 @@ class LibraryView(Gtk.Box):
         self._scrolled.set_child(self._content_stack)
         self.append(self._scrolled)
 
-        # Activate "Albums" view and "All" filter by default
+        # Activate "Albums" view by default
         self._view_buttons[0].set_active(True)
-        self._filter_buttons[0].set_active(True)
 
     # ------------------------------------------------------------------
     # Public API
@@ -588,6 +1007,10 @@ class LibraryView(Gtk.Box):
     def set_album_art_service(self, art_service) -> None:
         """Set the AlbumArtService instance for loading album art."""
         self._album_art_service = art_service
+
+    def set_artist_image_service(self, service) -> None:
+        """Set the ArtistImageService for loading artist photos."""
+        self._artist_image_service = service
 
     def load_album_art_for_card(
         self, child: Gtk.FlowBoxChild, track
@@ -609,34 +1032,52 @@ class LibraryView(Gtk.Box):
         request_token = object()
         child._art_request_token = request_token  # type: ignore[attr-defined]
 
+        # Fetch at logical_size * scale_factor for crisp rendering on HiDPI.
+        scale = child.get_scale_factor() or 1
+        art_px = 160 * scale
+
+        # Fast path: use cached texture immediately (avoids flicker on sort change)
+        cached_texture = art_service.get_texture_for_track(track, art_px, art_px)
+        if cached_texture is not None:
+            art_image.set_from_paintable(cached_texture)
+            art_image.set_visible(True)
+            art_icon.set_visible(False)
+            return
+
         def _on_art_loaded(pixbuf: GdkPixbuf.Pixbuf | None) -> None:
             # Guard: skip if the card was recycled during async fetch
             if getattr(child, "_art_request_token", None) is not request_token:
                 return
             if pixbuf is not None:
-                texture = Gdk.Texture.new_for_pixbuf(pixbuf)
-                art_image.set_from_paintable(texture)
-                art_image.set_visible(True)
-                art_icon.set_visible(False)
+                texture = art_service.get_or_create_texture(track, pixbuf, art_px, art_px)
+                if texture is not None:
+                    art_image.set_from_paintable(texture)
+                    art_image.set_visible(True)
+                    art_icon.set_visible(False)
 
-        # Fetch at logical_size * scale_factor for crisp rendering on HiDPI.
-        scale = child.get_scale_factor() or 1
-        art_px = 160 * scale
         art_service.get_art_async(track, _on_art_loaded, width=art_px, height=art_px)
+
+    def set_content_width(self, width: int) -> None:
+        """Adjust header layout based on available content width."""
+        self._sort_label.set_visible(width >= 500)
 
     def set_database(self, db) -> None:
         """Wire the library view to a database."""
         self._db = db
+        # Restore persisted view tab and sort
+        self._restore_persisted_state()
+        # Restore per-tab view mode (after tab is restored)
+        self._restore_tab_view_mode()
         self.refresh()
 
     def refresh(self) -> None:
-        """Reload all data from the database and refresh the display."""
+        """Reload local-only data from the database and refresh the display."""
         if self._db is None:
             return
         try:
-            self._all_albums = self._db.get_albums()
-            self._all_artists = self._db.get_artists()
-            self._all_tracks = self._db.get_all_tracks()
+            self._all_albums = self._db.get_albums(source=Source.LOCAL)
+            self._all_artists = self._db.get_artists(source=Source.LOCAL)
+            self._all_tracks = self._db.get_tracks_by_source(Source.LOCAL)
             self._update_count_label()
             self._refresh_current_view()
         except Exception:
@@ -649,6 +1090,7 @@ class LibraryView(Gtk.Box):
         on_album_clicked: Callable[[str, str], None] | None = None,
         on_play_track: Callable | None = None,
         on_artist_clicked: Callable[[str], None] | None = None,
+        on_play_album: Callable[[str, str], None] | None = None,
     ) -> None:
         """Set callback functions for user actions.
 
@@ -660,10 +1102,29 @@ class LibraryView(Gtk.Box):
             Called with a Track object when a track is clicked.
         on_artist_clicked:
             Called with artist_name when an artist row is clicked.
+        on_play_album:
+            Called with (album_name, artist) when the play button on an
+            album card is clicked.
         """
         self._on_album_clicked = on_album_clicked
         self._on_play_track = on_play_track
         self._on_artist_clicked = on_artist_clicked
+        self._on_play_album = on_play_album
+
+    # ------------------------------------------------------------------
+    # Scroll position persistence
+    # ------------------------------------------------------------------
+
+    def get_scroll_position(self) -> float:
+        """Return the current vertical scroll position."""
+        if hasattr(self, "_scrolled"):
+            return self._scrolled.get_vadjustment().get_value()
+        return 0.0
+
+    def set_scroll_position(self, value: float) -> None:
+        """Restore a previously saved scroll position."""
+        if hasattr(self, "_scrolled"):
+            self._scrolled.get_vadjustment().set_value(value)
 
     def set_context_callbacks(
         self,
@@ -689,6 +1150,85 @@ class LibraryView(Gtk.Box):
     ) -> None:
         """Set callback functions for the artist right-click context menu."""
         self._artist_context_callbacks = callbacks
+
+    # ------------------------------------------------------------------
+    # Album play button + drag source helpers
+    # ------------------------------------------------------------------
+
+    def _attach_play_button(self, child: Gtk.FlowBoxChild) -> None:
+        """Wire the play button on an album card to play the album."""
+        play_btn = getattr(child, "_play_btn", None)
+        album_title = getattr(child, "_album_title", None)
+        album_artist = getattr(child, "_album_artist", None)
+        if play_btn is None or album_title is None or album_artist is None:
+            return
+
+        def _on_play_clicked(
+            _btn, a=album_title, ar=album_artist
+        ):
+            cb = getattr(self, "_on_play_album", None)
+            if cb is not None:
+                cb(a, ar)
+
+        play_btn.connect("clicked", _on_play_clicked)
+
+    def _attach_drag_source_to_row(
+        self, row: Gtk.ListBoxRow, track
+    ) -> None:
+        """Attach a DragSource to a track row for drag-to-playlist."""
+        if track is None:
+            return
+        track_id = getattr(track, "id", None)
+        if track_id is None:
+            return
+
+        drag_source = Gtk.DragSource.new()
+        drag_source.set_actions(Gdk.DragAction.COPY)
+
+        def _on_prepare(_src, _x, _y, tid=track_id):
+            value = GObject.Value(GObject.TYPE_STRING, str(tid))
+            return Gdk.ContentProvider.new_for_value(value)
+
+        drag_source.connect("prepare", _on_prepare)
+        row.add_controller(drag_source)
+
+    def _attach_drag_source_to_album_card(
+        self, child: Gtk.FlowBoxChild
+    ) -> None:
+        """Attach a DragSource to an album card for drag-to-playlist."""
+        album_title = getattr(child, "_album_title", None)
+        album_artist = getattr(child, "_album_artist", None)
+        if album_title is None or album_artist is None:
+            return
+
+        drag_source = Gtk.DragSource.new()
+        drag_source.set_actions(Gdk.DragAction.COPY)
+
+        def _on_prepare(
+            _src, _x, _y, a=album_title, ar=album_artist
+        ):
+            if self._db is None:
+                return None
+            try:
+                tracks = self._db.get_tracks_by_album(a, ar)
+                if not tracks:
+                    return None
+                ids_str = ",".join(
+                    str(t.id) for t in tracks if t.id is not None
+                )
+                if not ids_str:
+                    return None
+                value = GObject.Value(GObject.TYPE_STRING, ids_str)
+                return Gdk.ContentProvider.new_for_value(value)
+            except Exception:
+                logger.warning(
+                    "Failed to get album tracks for drag",
+                    exc_info=True,
+                )
+                return None
+
+        drag_source.connect("prepare", _on_prepare)
+        child.add_controller(drag_source)
 
     # ------------------------------------------------------------------
     # Context menu helpers
@@ -733,6 +1273,9 @@ class LibraryView(Gtk.Box):
             "on_toggle_favorite": lambda t=track: self._context_callbacks.get("on_toggle_favorite", _noop)(t),
             "on_go_to_album": lambda t=track: self._context_callbacks.get("on_go_to_album", _noop)(t),
             "on_go_to_artist": lambda t=track: self._context_callbacks.get("on_go_to_artist", _noop)(t),
+            "on_track_radio": lambda t=track: self._context_callbacks.get("on_track_radio", _noop)(t),
+            "on_view_lyrics": lambda t=track: self._context_callbacks.get("on_view_lyrics", _noop)(t),
+            "on_credits": lambda t=track: self._context_callbacks.get("on_credits", _noop)(t),
         }
 
         track_data = {
@@ -741,6 +1284,7 @@ class LibraryView(Gtk.Box):
             "artist": getattr(track, "artist", ""),
             "album": getattr(track, "album", ""),
             "source": getattr(track, "source", None),
+            "source_id": getattr(track, "source_id", None),
             "is_favorite": False,
         }
 
@@ -807,6 +1351,7 @@ class LibraryView(Gtk.Box):
             "on_new_playlist": lambda a=album_name, ar=artist: cbs.get("on_new_playlist", _noop)(a, ar),
             "on_add_to_favorites": lambda a=album_name, ar=artist: cbs.get("on_add_to_favorites", _noop)(a, ar),
             "on_go_to_artist": lambda a=album_name, ar=artist: cbs.get("on_go_to_artist", _noop)(a, ar),
+            "on_shuffle_album": lambda a=album_name, ar=artist: cbs.get("on_shuffle_album", _noop)(a, ar),
         }
 
         album_data = {
@@ -866,6 +1411,10 @@ class LibraryView(Gtk.Box):
             "on_play_all": lambda name=artist_name: cbs.get("on_play_all", _noop)(name),
             "on_add_all_to_queue": lambda name=artist_name: cbs.get("on_add_all_to_queue", _noop)(name),
             "on_view_artist": lambda name=artist_name: cbs.get("on_view_artist", _noop)(name),
+            "on_artist_radio": lambda name=artist_name: cbs.get("on_artist_radio", _noop)(name),
+            "on_follow_artist": lambda name=artist_name: cbs.get("on_follow_artist", _noop)(name),
+            "on_unfollow_artist": lambda name=artist_name: cbs.get("on_unfollow_artist", _noop)(name),
+            "on_shuffle_artist": lambda name=artist_name: cbs.get("on_shuffle_artist", _noop)(name),
         }
 
         artist_data = {"artist": artist_name}
@@ -897,8 +1446,27 @@ class LibraryView(Gtk.Box):
 
         view_name = getattr(toggled_btn, "_view_name", "albums")
         self._active_view = view_name
+        self._persist_view_tab()
         self._update_sort_options()
+        # Show view mode toggle on all tabs
+        self._view_mode_toggle.set_visible(True)
+        # Restore per-tab view mode
+        self._restore_tab_view_mode()
         self._refresh_current_view()
+
+    def _restore_tab_view_mode(self) -> None:
+        """Restore the persisted view mode for the current tab."""
+        default = ViewMode.GRID if self._active_view == "albums" else ViewMode.LIST
+        mode = default
+        if self._db is not None:
+            saved = self._db.get_setting(f"view_mode_library_{self._active_view}")
+            if saved:
+                for m in ViewMode:
+                    if m.value == saved:
+                        mode = m
+                        break
+        self._view_mode = mode
+        set_active_mode(self._view_mode_toggle, mode)
 
     def _update_sort_options(self) -> None:
         """Update the sort dropdown options based on the active view."""
@@ -914,26 +1482,68 @@ class LibraryView(Gtk.Box):
         self._sort_dropdown.set_selected(0)
         self._active_sort = options[0]
 
-    # ------------------------------------------------------------------
-    # Filter handling
-    # ------------------------------------------------------------------
+    def _persist_view_tab(self) -> None:
+        """Save the active view tab to the database."""
+        if self._db is not None:
+            try:
+                self._db.set_setting("library_view_tab", self._active_view)
+            except Exception:
+                pass
 
-    def _on_filter_toggled(self, toggled_btn: Gtk.ToggleButton) -> None:
-        """Enforce radio-button behavior for filter tabs."""
-        if not toggled_btn.get_active():
-            any_active = any(
-                b.get_active() for b in self._filter_buttons
-            )
-            if not any_active:
-                toggled_btn.set_active(True)
+    def _persist_sort(self) -> None:
+        """Save the active sort and direction for the current view tab."""
+        if self._db is not None:
+            try:
+                key = f"library_sort_{self._active_view}"
+                self._db.set_setting(key, self._active_sort)
+                self._db.set_setting(
+                    f"library_sort_dir_{self._active_view}",
+                    "asc" if self._sort_ascending else "desc",
+                )
+            except Exception:
+                pass
+
+    def _restore_persisted_state(self) -> None:
+        """Restore view tab and sort from the database."""
+        if self._db is None:
             return
+        try:
+            saved_tab = self._db.get_setting("library_view_tab")
+            if saved_tab and saved_tab in ("albums", "artists", "tracks"):
+                self._active_view = saved_tab
+                for btn in self._view_buttons:
+                    view_name = getattr(btn, "_view_name", "")
+                    btn.handler_block_by_func(self._on_view_toggled)
+                    btn.set_active(view_name == saved_tab)
+                    btn.handler_unblock_by_func(self._on_view_toggled)
+                self._view_mode_toggle.set_visible(True)
+                self._update_sort_options()
 
-        for btn in self._filter_buttons:
-            if btn is not toggled_btn and btn.get_active():
-                btn.set_active(False)
+            saved_sort = self._db.get_setting(f"library_sort_{self._active_view}")
+            if saved_sort:
+                # Migrate old sort names
+                if saved_sort in ("Name (A-Z)", "Name (Z-A)"):
+                    saved_sort = "Name"
+                # Find the sort option in the current dropdown
+                if self._active_view == "albums":
+                    options = _SORT_OPTIONS_ALBUMS
+                elif self._active_view == "artists":
+                    options = _SORT_OPTIONS_ARTISTS
+                else:
+                    options = _SORT_OPTIONS_TRACKS
+                if saved_sort in options:
+                    self._active_sort = saved_sort
+                    idx = options.index(saved_sort)
+                    self._sort_dropdown.set_selected(idx)
 
-        self._active_filter = toggled_btn.get_label() or "All"
-        self._refresh_current_view()
+            saved_dir = self._db.get_setting(
+                f"library_sort_dir_{self._active_view}"
+            )
+            if saved_dir in ("asc", "desc"):
+                self._sort_ascending = saved_dir == "asc"
+                self._update_sort_dir_icon()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Sort handling
@@ -953,111 +1563,121 @@ class LibraryView(Gtk.Box):
             options = _SORT_OPTIONS_TRACKS
 
         if 0 <= idx < len(options):
-            self._active_sort = options[idx]
+            new_sort = options[idx]
+            if new_sort == self._active_sort:
+                # Same sort selected again — toggle direction
+                self._sort_ascending = not self._sort_ascending
+                self._update_sort_dir_icon()
+            else:
+                self._active_sort = new_sort
+                self._sort_ascending = True
+                self._update_sort_dir_icon()
+            self._persist_sort()
             self._refresh_current_view()
+
+    def _on_sort_dir_clicked(self, _btn: Gtk.Button) -> None:
+        """Toggle sort direction and refresh."""
+        self._sort_ascending = not self._sort_ascending
+        self._update_sort_dir_icon()
+        self._persist_sort()
+        self._refresh_current_view()
+
+    def _update_sort_dir_icon(self) -> None:
+        """Update the sort direction button icon and tooltip."""
+        if self._sort_ascending:
+            self._sort_dir_btn.set_icon_name("view-sort-ascending-symbolic")
+            self._sort_dir_btn.set_tooltip_text("Ascending")
+        else:
+            self._sort_dir_btn.set_icon_name("view-sort-descending-symbolic")
+            self._sort_dir_btn.set_tooltip_text("Descending")
 
     # ------------------------------------------------------------------
     # Data filtering and sorting
     # ------------------------------------------------------------------
 
-    def _get_source_filter(self) -> Source | None:
-        """Return the Source enum for the active filter, or None for All."""
-        if self._active_filter == "Tidal":
-            return Source.TIDAL
-        if self._active_filter == "Local":
-            return Source.LOCAL
-        return None
-
     def _get_filtered_albums(self) -> list[dict]:
-        """Return albums filtered by the active source filter."""
-        source = self._get_source_filter()
-        if source is None:
-            return list(self._all_albums)
-        return [
-            a for a in self._all_albums if a["source"] == source.value
-        ]
+        """Return all local albums."""
+        return list(self._all_albums)
 
     def _get_sorted_albums(
         self, albums: list[dict]
     ) -> list[dict]:
-        """Sort albums by the active sort criterion."""
-        if self._active_sort == "Name (A-Z)":
+        """Sort albums by the active sort criterion and direction."""
+        reverse = not self._sort_ascending
+        if self._active_sort in ("Name", "Name (A-Z)", "Name (Z-A)"):
             return sorted(
                 albums,
                 key=lambda a: (a["album"] or "").lower(),
-            )
-        if self._active_sort == "Name (Z-A)":
-            return sorted(
-                albums,
-                key=lambda a: (a["album"] or "").lower(),
-                reverse=True,
+                reverse=reverse,
             )
         if self._active_sort == "Artist":
             return sorted(
                 albums,
                 key=lambda a: (a["artist"] or "").lower(),
+                reverse=reverse,
             )
-        # Default: Recently Added (already ordered by added_at desc)
-        return albums
+        # Recently Added: ascending = oldest first, descending = newest first
+        if reverse:
+            return albums
+        return list(reversed(albums))
 
     def _get_filtered_artists(self) -> list[dict]:
-        """Return artists filtered by the active source filter."""
-        source = self._get_source_filter()
-        if source is None:
-            return list(self._all_artists)
-        return [
-            a
-            for a in self._all_artists
-            if source.value in a["sources"]
-        ]
+        """Return all local artists."""
+        return list(self._all_artists)
 
     def _get_sorted_artists(
         self, artists: list[dict]
     ) -> list[dict]:
-        """Sort artists by the active sort criterion."""
-        if self._active_sort == "Name (Z-A)":
+        """Sort artists by the active sort criterion and direction."""
+        reverse = not self._sort_ascending
+        if self._active_sort in ("Name", "Name (A-Z)", "Name (Z-A)"):
             return sorted(
                 artists,
                 key=lambda a: (a["artist"] or "").lower(),
-                reverse=True,
+                reverse=reverse,
             )
         if self._active_sort == "Track Count":
             return sorted(
                 artists,
                 key=lambda a: a["track_count"],
-                reverse=True,
+                reverse=reverse,
             )
-        # Default: Name (A-Z) -- already ordered
-        return artists
+        if self._active_sort == "Recently Added":
+            return sorted(
+                artists,
+                key=lambda a: a.get("latest_added") or "",
+                reverse=not reverse,  # newest first when ascending
+            )
+        # Default
+        return sorted(
+            artists,
+            key=lambda a: (a["artist"] or "").lower(),
+            reverse=reverse,
+        )
 
     def _get_filtered_tracks(self) -> list:
-        """Return tracks filtered by the active source filter."""
-        source = self._get_source_filter()
-        if source is None:
-            return list(self._all_tracks)
-        return [
-            t for t in self._all_tracks if t.source == source
-        ]
+        """Return all local tracks."""
+        return list(self._all_tracks)
 
     def _get_sorted_tracks(self, tracks: list) -> list:
-        """Sort tracks by the active sort criterion."""
-        if self._active_sort == "Name (A-Z)":
-            return sorted(
-                tracks, key=lambda t: (t.title or "").lower()
-            )
-        if self._active_sort == "Name (Z-A)":
+        """Sort tracks by the active sort criterion and direction."""
+        reverse = not self._sort_ascending
+        if self._active_sort in ("Name", "Name (A-Z)", "Name (Z-A)"):
             return sorted(
                 tracks,
                 key=lambda t: (t.title or "").lower(),
-                reverse=True,
+                reverse=reverse,
             )
         if self._active_sort == "Artist":
             return sorted(
                 tracks,
                 key=lambda t: (t.artist or "").lower(),
+                reverse=reverse,
             )
-        # Default: Recently Added (already ordered)
-        return tracks
+        # Recently Added: ascending = oldest first, descending = newest first
+        if reverse:
+            return tracks
+        return list(reversed(tracks))
 
     # ------------------------------------------------------------------
     # View refresh
@@ -1086,8 +1706,9 @@ class LibraryView(Gtk.Box):
         return None
 
     def _refresh_albums(self) -> None:
-        """Rebuild the albums grid."""
+        """Rebuild the albums display based on current view mode."""
         self._clear_flow_box(self._album_grid)
+        self._clear_list_box(self._album_list)
 
         filtered = self._get_filtered_albums()
         sorted_albums = self._get_sorted_albums(filtered)
@@ -1096,24 +1717,56 @@ class LibraryView(Gtk.Box):
             self._content_stack.set_visible_child_name("empty")
             return
 
-        for album_data in sorted_albums:
-            card = _make_album_card(
-                album=album_data["album"],
-                artist=album_data["artist"],
-                source=album_data["source"],
-            )
-            self._attach_album_context_gesture(card)
-            self._album_grid.append(card)
-            # Load album art asynchronously using the first track of this album
-            representative_track = self._find_album_track(
-                album_data["album"], album_data["artist"]
-            )
-            self.load_album_art_for_card(card, representative_track)
-        self._content_stack.set_visible_child_name("albums")
+        if self._view_mode == ViewMode.GRID:
+            for album_data in sorted_albums:
+                card = _make_album_card(
+                    album=album_data["album"],
+                    artist=album_data["artist"],
+                    source=album_data["source"],
+                    on_artist_clicked=self._on_artist_clicked,
+                )
+                self._attach_album_context_gesture(card)
+                self._attach_play_button(card)
+                self._attach_drag_source_to_album_card(card)
+                self._album_grid.append(card)
+                representative_track = self._find_album_track(
+                    album_data["album"], album_data["artist"]
+                )
+                self.load_album_art_for_card(card, representative_track)
+            self._content_stack.set_visible_child_name("albums")
+        elif self._view_mode == ViewMode.COMPACT_LIST:
+            for i, album_data in enumerate(sorted_albums):
+                row = _make_album_compact_row(
+                    album=album_data["album"],
+                    artist=album_data["artist"],
+                    source=album_data["source"],
+                    index=i,
+                    on_artist_clicked=self._on_artist_clicked,
+                )
+                self._attach_album_context_gesture(row)
+                self._album_list.append(row)
+            self._content_stack.set_visible_child_name("albums-list")
+        else:  # LIST
+            for album_data in sorted_albums:
+                row = _make_album_list_row(
+                    album=album_data["album"],
+                    artist=album_data["artist"],
+                    source=album_data["source"],
+                    track_count=album_data.get("track_count", 0),
+                    on_artist_clicked=self._on_artist_clicked,
+                )
+                self._attach_album_context_gesture(row)
+                self._album_list.append(row)
+                representative_track = self._find_album_track(
+                    album_data["album"], album_data["artist"]
+                )
+                self._load_art_for_album_row(row, representative_track)
+            self._content_stack.set_visible_child_name("albums-list")
 
     def _refresh_artists(self) -> None:
-        """Rebuild the artists list."""
+        """Rebuild the artists display based on current view mode."""
         self._clear_list_box(self._artist_list)
+        self._clear_flow_box(self._artist_grid)
 
         filtered = self._get_filtered_artists()
         sorted_artists = self._get_sorted_artists(filtered)
@@ -1122,19 +1775,169 @@ class LibraryView(Gtk.Box):
             self._content_stack.set_visible_child_name("empty")
             return
 
-        for artist_data in sorted_artists:
-            row = _make_artist_row(
-                artist=artist_data["artist"],
-                track_count=artist_data["track_count"],
-                sources=artist_data["sources"],
-            )
-            self._attach_artist_context_gesture(row)
-            self._artist_list.append(row)
-        self._content_stack.set_visible_child_name("artists")
+        if self._view_mode == ViewMode.GRID:
+            cards = []
+            for artist_data in sorted_artists:
+                card = _make_artist_card(
+                    artist=artist_data["artist"],
+                    track_count=artist_data["track_count"],
+                    sources=artist_data["sources"],
+                )
+                self._attach_artist_context_gesture(card)
+                self._attach_artist_play_button(card)
+                self._artist_grid.append(card)
+                cards.append(card)
+            self._content_stack.set_visible_child_name("artists-grid")
+            if self._artist_image_service is not None:
+                for card in cards:
+                    self._load_artist_image_for_card(card)
+        elif self._view_mode == ViewMode.COMPACT_LIST:
+            for i, artist_data in enumerate(sorted_artists):
+                row = _make_artist_compact_row(
+                    artist=artist_data["artist"],
+                    track_count=artist_data["track_count"],
+                    sources=artist_data["sources"],
+                    index=i,
+                )
+                self._attach_artist_context_gesture(row)
+                self._artist_list.append(row)
+            self._content_stack.set_visible_child_name("artists")
+        else:  # LIST
+            rows = []
+            for artist_data in sorted_artists:
+                row = _make_artist_row(
+                    artist=artist_data["artist"],
+                    track_count=artist_data["track_count"],
+                    sources=artist_data["sources"],
+                )
+                self._attach_artist_context_gesture(row)
+                self._artist_list.append(row)
+                rows.append(row)
+            self._content_stack.set_visible_child_name("artists")
+            if self._artist_image_service is not None:
+                for row in rows:
+                    self._load_artist_image_for_row(row)
+
+    def _load_artist_image_for_row(self, row: Gtk.ListBoxRow) -> None:
+        """Request an async artist image for a row."""
+        service = self._artist_image_service
+        if service is None:
+            return
+        artist_name = getattr(row, "_artist_name", None)
+        art_icon = getattr(row, "_art_icon", None)
+        art_image = getattr(row, "_art_image", None)
+        if not artist_name or art_icon is None or art_image is None:
+            return
+
+        request_token = object()
+        row._art_request_token = request_token  # type: ignore[attr-defined]
+
+        def _on_loaded(pixbuf) -> None:
+            if getattr(row, "_art_request_token", None) is not request_token:
+                return
+            if pixbuf is not None:
+                texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                art_image.set_from_paintable(texture)
+                art_image.set_visible(True)
+                art_icon.set_visible(False)
+
+        scale = row.get_scale_factor() or 1
+        service.get_artist_image_async(artist_name, _on_loaded, size=32 * scale)
+
+    def _load_artist_image_for_card(self, card: Gtk.FlowBoxChild) -> None:
+        """Request an async artist image for a grid card."""
+        service = self._artist_image_service
+        if service is None:
+            return
+        artist_name = getattr(card, "_artist_name", None)
+        art_icon = getattr(card, "_art_icon", None)
+        art_image = getattr(card, "_art_image", None)
+        if not artist_name or art_icon is None or art_image is None:
+            return
+
+        request_token = object()
+        card._art_request_token = request_token
+
+        def _on_loaded(pixbuf) -> None:
+            if getattr(card, "_art_request_token", None) is not request_token:
+                return
+            if pixbuf is not None:
+                texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                art_image.set_from_paintable(texture)
+                art_image.set_visible(True)
+                art_icon.set_visible(False)
+
+        scale = card.get_scale_factor() or 1
+        service.get_artist_image_async(artist_name, _on_loaded, size=160 * scale)
+
+    def _load_art_for_album_row(self, row: Gtk.ListBoxRow, track) -> None:
+        """Load album art asynchronously for an album list row."""
+        art_service = self._album_art_service
+        if art_service is None or track is None:
+            return
+        art_icon = getattr(row, "_art_icon", None)
+        art_image = getattr(row, "_art_image", None)
+        if art_icon is None or art_image is None:
+            return
+
+        # Fast path: use cached texture immediately
+        cached_texture = art_service.get_texture_for_track(track, 40, 40)
+        if cached_texture is not None:
+            art_image.set_from_paintable(cached_texture)
+            art_image.set_visible(True)
+            art_icon.set_visible(False)
+            return
+
+        request_token = object()
+        row._art_request_token = request_token
+
+        def _on_loaded(pixbuf) -> None:
+            if getattr(row, "_art_request_token", None) is not request_token:
+                return
+            if pixbuf is not None:
+                texture = art_service.get_or_create_texture(track, pixbuf, 40, 40)
+                if texture is not None:
+                    art_image.set_from_paintable(texture)
+                    art_image.set_visible(True)
+                    art_icon.set_visible(False)
+
+        art_service.get_art_async(track, _on_loaded, width=40, height=40)
+
+    def _attach_artist_play_button(self, card: Gtk.FlowBoxChild) -> None:
+        """Wire the play overlay button on an artist grid card."""
+        play_btn = getattr(card, "_play_btn", None)
+        if play_btn is None:
+            return
+        artist_name = getattr(card, "_artist_name", None)
+        if artist_name is None:
+            return
+
+        def _on_play(_btn, name=artist_name):
+            # Trigger play all by artist if callback exists
+            if self._on_artist_clicked is not None:
+                self._on_artist_clicked(name)
+
+        play_btn.connect("clicked", _on_play)
+        play_btn.set_can_target(False)
+
+    def _on_view_mode_changed(self, mode: ViewMode) -> None:
+        """Handle view mode toggle (list/compact/grid) for all tabs."""
+        self._view_mode = mode
+        # Persist per-tab preference
+        if self._db is not None:
+            key = f"view_mode_library_{self._active_view}"
+            try:
+                self._db.set_setting(key, mode.value)
+            except Exception:
+                logger.warning(
+                    "Failed to persist view mode", exc_info=True
+                )
+        self._refresh_current_view()
 
     def _refresh_tracks(self) -> None:
-        """Rebuild the tracks list."""
+        """Rebuild the tracks list/grid based on the current view mode."""
         self._clear_list_box(self._track_list)
+        self._clear_flow_box(self._tracks_album_grid)
 
         filtered = self._get_filtered_tracks()
         sorted_tracks = self._get_sorted_tracks(filtered)
@@ -1143,16 +1946,167 @@ class LibraryView(Gtk.Box):
             self._content_stack.set_visible_child_name("empty")
             return
 
-        for track in sorted_tracks:
-            row = _make_track_row(track)
-            self._attach_context_gesture(row, track)
-            self._track_list.append(row)
+        if self._view_mode == ViewMode.GRID:
+            self._refresh_tracks_grid(sorted_tracks)
+        elif self._view_mode == ViewMode.COMPACT_LIST:
+            self._refresh_tracks_compact(sorted_tracks)
+        else:
+            self._refresh_tracks_list(sorted_tracks)
 
+    def _make_heart_button(self, track) -> Gtk.ToggleButton:
+        """Create a heart toggle button for a library track row."""
+        heart_btn = Gtk.ToggleButton()
+        heart_btn.set_icon_name("emblem-favorite-symbolic")
+        heart_btn.add_css_class("flat")
+        heart_btn.add_css_class("collection-heart-btn")
+        heart_btn.set_valign(Gtk.Align.CENTER)
+
+        # Query current favorite state from DB
+        track_id = getattr(track, "id", None)
+        is_fav = False
+        if self._db is not None and track_id is not None:
+            try:
+                is_fav = self._db.is_favorite(track_id)
+            except Exception:
+                pass
+        heart_btn.set_active(is_fav)
+        heart_btn.set_tooltip_text(
+            "Remove from collection" if is_fav else "Add to collection"
+        )
+
+        def _on_toggled(btn, trk=track):
+            btn.set_tooltip_text(
+                "Remove from collection" if btn.get_active() else "Add to collection"
+            )
+            if self.on_favorite_toggled is not None:
+                self.on_favorite_toggled(trk)
+
+        heart_btn.connect("toggled", _on_toggled)
+        return heart_btn
+
+    def _refresh_tracks_list(self, tracks: list) -> None:
+        """Render tracks in full LIST mode."""
+        for track in tracks:
+            heart_btn = self._make_heart_button(track)
+            row = _make_track_row(
+                track,
+                extra_widgets_after=[heart_btn],
+                on_artist_clicked=self._on_artist_clicked,
+                on_album_clicked=self._on_album_clicked,
+                on_play_clicked=self._on_play_track,
+            )
+            self._attach_context_gesture(row, track)
+            self._attach_drag_source_to_row(row, track)
+            self._track_list.append(row)
+            self._load_art_for_track_row(row, track)
         self._content_stack.set_visible_child_name("tracks")
+
+    def _load_art_for_track_row(
+        self, row: Gtk.ListBoxRow, track
+    ) -> None:
+        """Load album art asynchronously for a track list row."""
+        art_service = self._album_art_service
+        if art_service is None or track is None:
+            return
+
+        art_icon = getattr(row, "_art_icon", None)
+        art_image = getattr(row, "_art_image", None)
+        if art_icon is None or art_image is None:
+            return
+
+        scale = row.get_scale_factor() or 1
+        art_px = 48 * scale
+
+        # Fast path: use cached texture immediately
+        cached_texture = art_service.get_texture_for_track(track, art_px, art_px)
+        if cached_texture is not None:
+            art_image.set_from_paintable(cached_texture)
+            art_image.set_visible(True)
+            art_icon.set_visible(False)
+            return
+
+        request_token = object()
+        row._art_request_token = request_token  # type: ignore[attr-defined]
+
+        def _on_art_loaded(pixbuf: GdkPixbuf.Pixbuf | None) -> None:
+            if getattr(row, "_art_request_token", None) is not request_token:
+                return
+            if pixbuf is not None:
+                texture = art_service.get_or_create_texture(track, pixbuf, art_px, art_px)
+                if texture is not None:
+                    art_image.set_from_paintable(texture)
+                    art_image.set_visible(True)
+                    art_icon.set_visible(False)
+
+        art_service.get_art_async(track, _on_art_loaded, width=art_px, height=art_px)
+
+    def _refresh_tracks_compact(self, tracks: list) -> None:
+        """Render tracks in COMPACT_LIST mode."""
+        for idx, track in enumerate(tracks):
+            heart_btn = self._make_heart_button(track)
+            row = make_compact_track_row(
+                track,
+                index=idx,
+                show_source_badge=True,
+                show_quality_badge=True,
+                on_artist_clicked=self._on_artist_clicked,
+                on_album_clicked=self._on_album_clicked,
+                extra_widgets_after=[heart_btn],
+            )
+            row.set_activatable(True)
+            self._attach_context_gesture(row, track)
+            self._attach_drag_source_to_row(row, track)
+            self._track_list.append(row)
+        self._content_stack.set_visible_child_name("tracks")
+
+    def _refresh_tracks_grid(self, tracks: list) -> None:
+        """Render tracks in GRID mode with individual track cards."""
+        for track in tracks:
+            title = getattr(track, "title", "") or "Unknown"
+            artist = getattr(track, "artist", "") or "Unknown"
+            source = getattr(track, "source", None)
+            source_str = source.value if hasattr(source, "value") else "local"
+
+            card = _make_track_grid_card(
+                title, artist, source_str,
+                on_artist_clicked=self._on_artist_clicked,
+            )
+            card._track_obj = track
+            self._attach_track_grid_play_button(card, track)
+            self._attach_context_gesture(card, track)
+            self._attach_drag_source_to_row(card, track)
+            self._tracks_album_grid.append(card)
+            self.load_album_art_for_card(card, track)
+
+        self._content_stack.set_visible_child_name("tracks-grid")
+
+    def _attach_track_grid_play_button(
+        self, card: Gtk.FlowBoxChild, track
+    ) -> None:
+        """Wire the play overlay button on a track grid card."""
+        play_btn = getattr(card, "_play_btn", None)
+        if play_btn is None:
+            return
+
+        def _on_play(_btn, t=track):
+            if self._on_play_track is not None:
+                self._on_play_track(t)
+
+        play_btn.connect("clicked", _on_play)
 
     # ------------------------------------------------------------------
     # Event handlers
     # ------------------------------------------------------------------
+
+    def _on_track_grid_card_activated(
+        self,
+        _flow_box: Gtk.FlowBox,
+        child: Gtk.FlowBoxChild,
+    ) -> None:
+        """Handle a track grid card being clicked to play."""
+        track = getattr(child, "_track_obj", None)
+        if track is not None and self._on_play_track is not None:
+            self._on_play_track(track)
 
     def _on_album_card_activated(
         self,
@@ -1168,6 +2122,27 @@ class LibraryView(Gtk.Box):
             and self._on_album_clicked is not None
         ):
             self._on_album_clicked(album_title, album_artist)
+
+    def _on_album_row_activated(
+        self, _list_box: Gtk.ListBox, row: Gtk.ListBoxRow
+    ) -> None:
+        """Handle an album list row being clicked."""
+        album_title = getattr(row, "_album_title", None)
+        album_artist = getattr(row, "_album_artist", None)
+        if (
+            album_title is not None
+            and album_artist is not None
+            and self._on_album_clicked is not None
+        ):
+            self._on_album_clicked(album_title, album_artist)
+
+    def _on_artist_card_activated(
+        self, _flow_box: Gtk.FlowBox, child: Gtk.FlowBoxChild,
+    ) -> None:
+        """Handle an artist card in grid mode being clicked."""
+        artist_name = getattr(child, "_artist_name", None)
+        if artist_name is not None and self._on_artist_clicked is not None:
+            self._on_artist_clicked(artist_name)
 
     def _on_artist_row_activated(
         self, _list_box: Gtk.ListBox, row: Gtk.ListBoxRow
@@ -1195,21 +2170,24 @@ class LibraryView(Gtk.Box):
             btn.set_active(view_name == "tracks")
             btn.handler_unblock_by_func(self._on_view_toggled)
         self._update_sort_options()
-        # Filter tracks to this artist
-        source = self._get_source_filter()
+        # Filter tracks to this artist (all local)
         filtered = [
             t
             for t in self._all_tracks
             if t.artist == artist_name
-            and (source is None or t.source == source)
         ]
         self._clear_list_box(self._track_list)
         if not filtered:
             self._content_stack.set_visible_child_name("empty")
             return
         for track in filtered:
-            track_row = _make_track_row(track)
+            track_row = _make_track_row(
+                track,
+                on_artist_clicked=self._on_artist_clicked,
+                on_album_clicked=self._on_album_clicked,
+            )
             self._attach_context_gesture(track_row, track)
+            self._attach_drag_source_to_row(track_row, track)
             self._track_list.append(track_row)
         self._content_stack.set_visible_child_name("tracks")
 
@@ -1219,7 +2197,6 @@ class LibraryView(Gtk.Box):
         """Handle a track row being clicked to play."""
         index = row.get_index()
         # Build the current visible track list from the active filter/sort
-        source = self._get_source_filter()
         filtered = self._get_filtered_tracks()
         sorted_tracks = self._get_sorted_tracks(filtered)
         if 0 <= index < len(sorted_tracks):

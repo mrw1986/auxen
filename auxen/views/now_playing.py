@@ -10,7 +10,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import Gdk, GdkPixbuf, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango
 
 from auxen.views.visualizer import SpectrumVisualizer
 
@@ -24,7 +24,15 @@ def _format_time(seconds: float) -> str:
 
 
 class NowPlayingBar(Gtk.Box):
-    """Persistent now-playing bar with track info, transport controls, and extras."""
+    """Persistent now-playing bar with track info, transport controls, and extras.
+
+    Responsive layout levels:
+        0 (full, >=800): 3-section horizontal, all controls visible
+        1 (compact, 600-799): hide volume slider + quality badge
+        2 (narrow, 450-599): 2-row layout — Row1=[Art+Info+Fav+Prev/Play/Next],
+                             Row2=[full-width progress]. Hide shuffle/repeat/volume/lyrics/queue.
+        3 (ultra, <450): single row [Art+Info+Play], no progress bar.
+    """
 
     __gtype_name__ = "NowPlayingBar"
 
@@ -40,8 +48,9 @@ class NowPlayingBar(Gtk.Box):
         on_favorite: Callable[[bool], None] | None = None,
         **kwargs,
     ) -> None:
+        # Outer container is VERTICAL so we can stack main_row + progress_row
         super().__init__(
-            orientation=Gtk.Orientation.HORIZONTAL,
+            orientation=Gtk.Orientation.VERTICAL,
             **kwargs,
         )
 
@@ -69,21 +78,128 @@ class NowPlayingBar(Gtk.Box):
         self._current_album: str = ""
 
         self.add_css_class("now-playing-bar")
+        self.set_size_request(-1, 60)
+        self.set_vexpand(False)
+
+        # ---- Main row: left + center + right (horizontal) ----
+        self._main_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+        )
+        self._main_row.set_hexpand(True)
+        self.append(self._main_row)
 
         # ---- Left section: Track info ----
-        left = self._build_left_section()
-        left.set_hexpand(True)
-        self.append(left)
+        self._left_section = self._build_left_section()
+        self._left_section.set_hexpand(True)
+        self._main_row.append(self._left_section)
 
         # ---- Center section: Transport + Progress ----
-        center = self._build_center_section()
-        center.set_hexpand(True)
-        self.append(center)
+        self._center_section = self._build_center_section()
+        self._center_section.set_hexpand(True)
+        self._main_row.append(self._center_section)
 
         # ---- Right section: Extra controls ----
-        right = self._build_right_section()
-        right.set_hexpand(True)
-        self.append(right)
+        self._right_section = self._build_right_section()
+        self._right_section.set_hexpand(False)
+        self._main_row.append(self._right_section)
+
+        # Inline transport controls for narrow mode (hidden by default)
+        self._inline_transport = self._build_inline_transport()
+        self._inline_transport.set_visible(False)
+        self._left_section.append(self._inline_transport)
+
+        # Responsive layout state
+        self._responsive_level = 0
+        self._responsive_pending = False
+        # Track whether progress row is reparented to outer box
+        self._progress_reparented = False
+
+    def do_size_allocate(self, width: int, height: int, baseline: int) -> None:
+        """Detect width changes and schedule responsive layout updates."""
+        super().do_size_allocate(width, height, baseline)
+        if width < 450:
+            level = 3  # ultra-narrow
+        elif width < 600:
+            level = 2  # narrow
+        elif width < 800:
+            level = 1  # compact
+        else:
+            level = 0  # full
+        if level != self._responsive_level and not self._responsive_pending:
+            self._responsive_level = level
+            self._responsive_pending = True
+            GLib.idle_add(self._apply_responsive_layout)
+
+    def _apply_responsive_layout(self) -> bool:
+        """Apply visibility and reparenting changes for the current responsive level."""
+        self._responsive_pending = False
+        level = self._responsive_level
+
+        # Volume controls: only at full width
+        self._volume_scale.set_visible(level == 0)
+        self._volume_btn.set_visible(level == 0)
+
+        # Quality badge: only at full width
+        if level == 0:
+            has_quality = bool(self._quality_badge.get_label())
+            self._quality_badge.set_visible(has_quality)
+        else:
+            self._quality_badge.set_visible(False)
+
+        # Shuffle/repeat: levels 0-1 only
+        self._shuffle_btn.set_visible(level < 2)
+        self._repeat_btn.set_visible(level < 2)
+
+        # Time labels: levels 0-1 in center, level 2 in reparented progress row
+        self._current_time_label.set_visible(level < 2)
+        self._total_time_label.set_visible(level < 2)
+
+        # Lyrics/queue buttons: levels 0-1 only
+        self._lyrics_btn.set_visible(level < 2)
+        self._queue_btn.set_visible(level < 2)
+
+        # Level 2 (narrow): reparent progress row to outer box (full-width below)
+        # and show inline prev/play/next in left section
+        if level == 2:
+            if not self._progress_reparented:
+                self._center_section.remove(self._progress_row)
+                self.append(self._progress_row)
+                self._progress_reparented = True
+            self._center_section.set_visible(False)
+            self._right_section.set_visible(False)
+            self._progress_row.set_visible(True)
+            self._inline_transport.set_visible(True)
+            self._inline_play_btn.set_visible(False)
+            self.add_css_class("now-playing-narrow")
+            self.set_size_request(-1, 85)
+        elif level == 3:
+            # Ultra-narrow: hide everything except left + inline play
+            if self._progress_reparented:
+                self.remove(self._progress_row)
+                self._center_section.append(self._progress_row)
+                self._progress_reparented = False
+            self._center_section.set_visible(False)
+            self._right_section.set_visible(False)
+            self._progress_row.set_visible(False)
+            self._inline_transport.set_visible(False)
+            self._inline_play_btn.set_visible(True)
+            self.remove_css_class("now-playing-narrow")
+            self.set_size_request(-1, 60)
+        else:
+            # Levels 0-1: restore normal layout
+            if self._progress_reparented:
+                self.remove(self._progress_row)
+                self._center_section.append(self._progress_row)
+                self._progress_reparented = False
+            self._center_section.set_visible(True)
+            self._right_section.set_visible(True)
+            self._progress_row.set_visible(True)
+            self._inline_transport.set_visible(False)
+            self._inline_play_btn.set_visible(False)
+            self.remove_css_class("now-playing-narrow")
+            self.set_size_request(-1, 60)
+
+        return False  # Remove idle callback
 
     # ── Left section ──────────────────────────────────────
 
@@ -94,6 +210,7 @@ class NowPlayingBar(Gtk.Box):
             spacing=12,
         )
         left.set_valign(Gtk.Align.CENTER)
+        left.set_size_request(-1, -1)
 
         # Album art container
         self._art_box = Gtk.Box(
@@ -103,12 +220,13 @@ class NowPlayingBar(Gtk.Box):
         )
         self._art_box.add_css_class("now-playing-art")
         self._art_box.set_size_request(48, 48)
+        self._art_box.set_vexpand(False)
 
         # Placeholder icon (shown when no album art is available)
         self._art_placeholder = Gtk.Image.new_from_icon_name(
             "audio-x-generic-symbolic"
         )
-        self._art_placeholder.set_pixel_size(24)
+        self._art_placeholder.set_pixel_size(32)
         self._art_placeholder.set_opacity(0.4)
         self._art_placeholder.set_halign(Gtk.Align.CENTER)
         self._art_placeholder.set_valign(Gtk.Align.CENTER)
@@ -116,9 +234,10 @@ class NowPlayingBar(Gtk.Box):
 
         # Actual album art image (hidden until art is loaded)
         self._art_image = Gtk.Image()
+        self._art_image.set_pixel_size(48)
         self._art_image.set_size_request(48, 48)
-        self._art_image.set_halign(Gtk.Align.CENTER)
-        self._art_image.set_valign(Gtk.Align.CENTER)
+        self._art_image.set_halign(Gtk.Align.FILL)
+        self._art_image.set_valign(Gtk.Align.FILL)
         self._art_image.add_css_class("now-playing-art-image")
         self._art_image.set_visible(False)
 
@@ -148,11 +267,13 @@ class NowPlayingBar(Gtk.Box):
             spacing=2,
         )
         text_box.set_valign(Gtk.Align.CENTER)
+        text_box.set_hexpand(True)
 
         self._title_label = Gtk.Label(label="No Track Playing")
         self._title_label.set_xalign(0)
         self._title_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self._title_label.set_max_width_chars(30)
+        self._title_label.set_hexpand(True)
+        self._title_label.set_width_chars(4)
         self._title_label.add_css_class("now-playing-track-title")
         self._title_label.add_css_class("clickable-link")
         self._title_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
@@ -167,7 +288,8 @@ class NowPlayingBar(Gtk.Box):
         self._artist_label = Gtk.Label(label="")
         self._artist_label.set_xalign(0)
         self._artist_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self._artist_label.set_max_width_chars(30)
+        self._artist_label.set_hexpand(True)
+        self._artist_label.set_width_chars(4)
         self._artist_label.add_css_class("now-playing-track-artist")
         self._artist_label.add_css_class("clickable-link")
         self._artist_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
@@ -187,10 +309,64 @@ class NowPlayingBar(Gtk.Box):
         self._fav_btn.add_css_class("flat")
         self._fav_btn.add_css_class("now-playing-control-btn")
         self._fav_btn.set_valign(Gtk.Align.CENTER)
+        self._fav_btn.set_tooltip_text("Add to Collection")
         self._fav_btn.connect("toggled", self._on_favorite_toggled)
         left.append(self._fav_btn)
 
+        # Inline play/pause for ultra-narrow mode (hidden by default)
+        self._inline_play_btn = Gtk.Button.new_from_icon_name(
+            "media-playback-start-symbolic"
+        )
+        self._inline_play_btn.add_css_class("flat")
+        self._inline_play_btn.add_css_class("now-playing-control-btn")
+        self._inline_play_btn.set_valign(Gtk.Align.CENTER)
+        self._inline_play_btn.set_visible(False)
+        self._inline_play_btn.connect(
+            "clicked", self._on_play_pause_clicked
+        )
+        left.append(self._inline_play_btn)
+
         return left
+
+    def _build_inline_transport(self) -> Gtk.Box:
+        """Build compact prev/play/next buttons for narrow mode."""
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=2,
+        )
+        box.set_valign(Gtk.Align.CENTER)
+
+        prev_btn = Gtk.Button.new_from_icon_name(
+            "media-skip-backward-symbolic"
+        )
+        prev_btn.add_css_class("flat")
+        prev_btn.add_css_class("now-playing-control-btn")
+        prev_btn.set_valign(Gtk.Align.CENTER)
+        prev_btn.set_tooltip_text("Previous Track")
+        prev_btn.connect("clicked", self._on_prev_clicked)
+        box.append(prev_btn)
+
+        play_btn = Gtk.Button.new_from_icon_name(
+            "media-playback-start-symbolic"
+        )
+        play_btn.add_css_class("now-playing-play-btn")
+        play_btn.set_valign(Gtk.Align.CENTER)
+        play_btn.set_tooltip_text("Play")
+        play_btn.connect("clicked", self._on_play_pause_clicked)
+        self._inline_transport_play_btn = play_btn
+        box.append(play_btn)
+
+        next_btn = Gtk.Button.new_from_icon_name(
+            "media-skip-forward-symbolic"
+        )
+        next_btn.add_css_class("flat")
+        next_btn.add_css_class("now-playing-control-btn")
+        next_btn.set_valign(Gtk.Align.CENTER)
+        next_btn.set_tooltip_text("Next Track")
+        next_btn.connect("clicked", self._on_next_clicked)
+        box.append(next_btn)
+
+        return box
 
     # ── Center section ────────────────────────────────────
 
@@ -198,15 +374,15 @@ class NowPlayingBar(Gtk.Box):
         """Build transport controls and progress bar."""
         center = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
-            spacing=2,
+            spacing=4,
         )
         center.set_valign(Gtk.Align.CENTER)
-        center.set_halign(Gtk.Align.CENTER)
+        center.set_halign(Gtk.Align.FILL)
 
         # Transport controls row
         transport = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=6,
+            spacing=4,
         )
         transport.set_halign(Gtk.Align.CENTER)
 
@@ -216,6 +392,7 @@ class NowPlayingBar(Gtk.Box):
         self._shuffle_btn.add_css_class("flat")
         self._shuffle_btn.add_css_class("now-playing-control-btn")
         self._shuffle_btn.set_valign(Gtk.Align.CENTER)
+        self._shuffle_btn.set_tooltip_text("Shuffle")
         self._shuffle_btn.connect("toggled", self._on_shuffle_toggled)
         transport.append(self._shuffle_btn)
 
@@ -226,6 +403,7 @@ class NowPlayingBar(Gtk.Box):
         prev_btn.add_css_class("flat")
         prev_btn.add_css_class("now-playing-control-btn")
         prev_btn.set_valign(Gtk.Align.CENTER)
+        prev_btn.set_tooltip_text("Previous Track")
         prev_btn.connect("clicked", self._on_prev_clicked)
         transport.append(prev_btn)
 
@@ -235,6 +413,7 @@ class NowPlayingBar(Gtk.Box):
         )
         self._play_btn.add_css_class("now-playing-play-btn")
         self._play_btn.set_valign(Gtk.Align.CENTER)
+        self._play_btn.set_tooltip_text("Play")
         self._play_btn.connect("clicked", self._on_play_pause_clicked)
         transport.append(self._play_btn)
 
@@ -245,6 +424,7 @@ class NowPlayingBar(Gtk.Box):
         next_btn.add_css_class("flat")
         next_btn.add_css_class("now-playing-control-btn")
         next_btn.set_valign(Gtk.Align.CENTER)
+        next_btn.set_tooltip_text("Next Track")
         next_btn.connect("clicked", self._on_next_clicked)
         transport.append(next_btn)
 
@@ -254,35 +434,37 @@ class NowPlayingBar(Gtk.Box):
         self._repeat_btn.add_css_class("flat")
         self._repeat_btn.add_css_class("now-playing-control-btn")
         self._repeat_btn.set_valign(Gtk.Align.CENTER)
+        self._repeat_btn.set_tooltip_text("Repeat Off")
         self._repeat_btn.connect("toggled", self._on_repeat_toggled)
         transport.append(self._repeat_btn)
 
         center.append(transport)
 
         # Progress row
-        progress_row = Gtk.Box(
+        self._progress_row = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=6,
         )
-        progress_row.set_halign(Gtk.Align.CENTER)
+        self._progress_row.set_hexpand(True)
 
         self._current_time_label = Gtk.Label(label="0:00")
         self._current_time_label.add_css_class("now-playing-time")
-        progress_row.append(self._current_time_label)
+        self._progress_row.append(self._current_time_label)
 
         self._progress_scale = Gtk.Scale.new_with_range(
             Gtk.Orientation.HORIZONTAL, 0, 100, 1
         )
         self._progress_scale.set_draw_value(False)
-        self._progress_scale.set_size_request(280, -1)
+        self._progress_scale.set_size_request(20, -1)
+        self._progress_scale.set_hexpand(True)
         self._progress_scale.add_css_class("now-playing-progress")
-        progress_row.append(self._progress_scale)
+        self._progress_row.append(self._progress_scale)
 
         self._total_time_label = Gtk.Label(label="0:00")
         self._total_time_label.add_css_class("now-playing-time")
-        progress_row.append(self._total_time_label)
+        self._progress_row.append(self._total_time_label)
 
-        center.append(progress_row)
+        center.append(self._progress_row)
 
         return center
 
@@ -292,7 +474,7 @@ class NowPlayingBar(Gtk.Box):
         """Build extra controls (quality badge, volume, queue)."""
         right = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=8,
+            spacing=4,
         )
         right.set_valign(Gtk.Align.CENTER)
         right.set_halign(Gtk.Align.END)
@@ -304,6 +486,7 @@ class NowPlayingBar(Gtk.Box):
         )
         self._sleep_timer_indicator.set_valign(Gtk.Align.CENTER)
         self._sleep_timer_indicator.set_visible(False)
+        self._sleep_timer_indicator.set_tooltip_text("Sleep Timer Active")
 
         sleep_dot = Gtk.Box()
         sleep_dot.add_css_class("sleep-timer-active-indicator")
@@ -333,6 +516,7 @@ class NowPlayingBar(Gtk.Box):
         self._volume_btn.add_css_class("flat")
         self._volume_btn.add_css_class("now-playing-control-btn")
         self._volume_btn.set_valign(Gtk.Align.CENTER)
+        self._volume_btn.set_tooltip_text("Volume")
         right.append(self._volume_btn)
 
         # Volume slider
@@ -341,37 +525,49 @@ class NowPlayingBar(Gtk.Box):
         )
         self._volume_scale.set_draw_value(False)
         self._volume_scale.set_value(70)
-        self._volume_scale.set_size_request(120, -1)
+        self._volume_scale.set_size_request(80, -1)
         self._volume_scale.add_css_class("now-playing-volume")
+        self._volume_scale.set_tooltip_text("Volume")
         right.append(self._volume_scale)
 
         # Lyrics toggle button
         self._lyrics_btn = Gtk.ToggleButton()
-        self._lyrics_btn.set_icon_name(
-            "format-justify-left-symbolic"
-        )
+        self._lyrics_btn.set_icon_name("view-media-lyrics")
         self._lyrics_btn.add_css_class("flat")
         self._lyrics_btn.add_css_class("now-playing-control-btn")
         self._lyrics_btn.add_css_class("lyrics-toggle-btn")
         self._lyrics_btn.set_valign(Gtk.Align.CENTER)
-        self._lyrics_btn.set_tooltip_text("Lyrics")
+        self._lyrics_btn.set_tooltip_text("Show Lyrics")
         self._lyrics_btn.connect("toggled", self._on_lyrics_toggled)
         right.append(self._lyrics_btn)
 
         # Queue toggle button
         self._queue_btn = Gtk.ToggleButton()
-        self._queue_btn.set_icon_name("view-list-symbolic")
+        self._queue_btn.set_icon_name("view-media-playlist")
         self._queue_btn.add_css_class("flat")
         self._queue_btn.add_css_class("now-playing-control-btn")
         self._queue_btn.add_css_class("queue-toggle-btn")
         self._queue_btn.set_valign(Gtk.Align.CENTER)
-        self._queue_btn.set_tooltip_text("Queue")
+        self._queue_btn.set_tooltip_text("Show Queue")
         self._queue_btn.connect("toggled", self._on_queue_toggled)
         right.append(self._queue_btn)
 
         return right
 
     # ── Public API ────────────────────────────────────────
+
+    def set_idle(self, idle: bool) -> None:
+        """Toggle the bar between idle (no track) and active states.
+
+        When idle the bar stays visible at the same fixed height but
+        controls are dimmed / insensitive so there is no layout reflow.
+        """
+        if idle:
+            self.add_css_class("now-playing-idle")
+            self._play_btn.set_sensitive(False)
+        else:
+            self.remove_css_class("now-playing-idle")
+            self._play_btn.set_sensitive(True)
 
     def update_track(
         self,
@@ -382,14 +578,29 @@ class NowPlayingBar(Gtk.Box):
         album: str = "",
     ) -> None:
         """Update the displayed track info."""
-        self._title_label.set_label(title)
+        self._title_label.set_label(title or "No Track Playing")
         self._artist_label.set_label(artist)
         self._current_artist = artist
         self._current_album = album
 
         if quality_label:
             self._quality_badge.set_label(quality_label)
-            self._quality_badge.set_visible(True)
+            self._quality_badge.set_visible(self._responsive_level == 0)
+            # Set descriptive tooltip for the quality badge
+            quality_tooltips = {
+                "FLAC": "FLAC Lossless Audio",
+                "Hi-Res": "Hi-Res Lossless Audio (up to 24-bit/192kHz)",
+                "MQA": "MQA Master Quality Audio",
+                "AAC": "AAC Compressed Audio",
+                "MP3": "MP3 Compressed Audio",
+                "OGG": "OGG Vorbis Compressed Audio",
+                "ALAC": "ALAC Lossless Audio",
+                "WAV": "WAV Uncompressed Audio",
+            }
+            tooltip = quality_tooltips.get(
+                quality_label, f"{quality_label} Audio"
+            )
+            self._quality_badge.set_tooltip_text(tooltip)
         else:
             self._quality_badge.set_visible(False)
 
@@ -407,7 +618,7 @@ class NowPlayingBar(Gtk.Box):
             self._progress_scale.set_value(0)
 
     def set_playing(self, is_playing: bool) -> None:
-        """Toggle the play/pause button icon."""
+        """Toggle the play/pause button icon and tooltip."""
         self._is_playing = is_playing
         icon = (
             "media-playback-pause-symbolic"
@@ -415,11 +626,17 @@ class NowPlayingBar(Gtk.Box):
             else "media-playback-start-symbolic"
         )
         self._play_btn.set_icon_name(icon)
+        self._play_btn.set_tooltip_text("Pause" if is_playing else "Play")
+        self._inline_play_btn.set_icon_name(icon)
+        self._inline_transport_play_btn.set_icon_name(icon)
+
+    _ART_SIZE = 64  # logical pixel size for the player-bar album art
 
     def set_album_art(self, pixbuf: GdkPixbuf.Pixbuf | None) -> None:
         """Set the album art image, or fall back to placeholder if None."""
         if pixbuf is not None:
-            self._art_image.set_from_pixbuf(pixbuf)
+            texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+            self._art_image.set_from_paintable(texture)
             self._art_image.set_visible(True)
             self._art_placeholder.set_visible(False)
         else:
@@ -499,8 +716,10 @@ class NowPlayingBar(Gtk.Box):
         self._shuffle_active = btn.get_active()
         if self._shuffle_active:
             btn.add_css_class("active")
+            btn.set_tooltip_text("Shuffle (On)")
         else:
             btn.remove_css_class("active")
+            btn.set_tooltip_text("Shuffle")
 
         if self._on_shuffle:
             self._on_shuffle(self._shuffle_active)
@@ -513,8 +732,10 @@ class NowPlayingBar(Gtk.Box):
         self._repeat_active = btn.get_active()
         if self._repeat_active:
             btn.add_css_class("active")
+            btn.set_tooltip_text("Repeat All")
         else:
             btn.remove_css_class("active")
+            btn.set_tooltip_text("Repeat Off")
 
         if self._on_repeat:
             self._on_repeat(self._repeat_active)
@@ -527,8 +748,10 @@ class NowPlayingBar(Gtk.Box):
         self._favorite_active = btn.get_active()
         if self._favorite_active:
             btn.add_css_class("active")
+            btn.set_tooltip_text("Remove from Collection")
         else:
             btn.remove_css_class("active")
+            btn.set_tooltip_text("Add to Collection")
 
         if self._on_favorite:
             self._on_favorite(self._favorite_active)
@@ -537,8 +760,10 @@ class NowPlayingBar(Gtk.Box):
         self._lyrics_active = btn.get_active()
         if self._lyrics_active:
             btn.add_css_class("active")
+            btn.set_tooltip_text("Hide Lyrics")
         else:
             btn.remove_css_class("active")
+            btn.set_tooltip_text("Show Lyrics")
 
         if self._on_lyrics_toggle:
             self._on_lyrics_toggle(self._lyrics_active)
@@ -554,8 +779,10 @@ class NowPlayingBar(Gtk.Box):
         self._fav_btn.set_active(active)
         if active:
             self._fav_btn.add_css_class("active")
+            self._fav_btn.set_tooltip_text("Remove from Collection")
         else:
             self._fav_btn.remove_css_class("active")
+            self._fav_btn.set_tooltip_text("Add to Collection")
         self._fav_btn.handler_unblock_by_func(self._on_favorite_toggled)
 
     def set_lyrics_active(self, active: bool) -> None:
@@ -565,16 +792,20 @@ class NowPlayingBar(Gtk.Box):
         self._lyrics_btn.set_active(active)
         if active:
             self._lyrics_btn.add_css_class("active")
+            self._lyrics_btn.set_tooltip_text("Hide Lyrics")
         else:
             self._lyrics_btn.remove_css_class("active")
+            self._lyrics_btn.set_tooltip_text("Show Lyrics")
         self._lyrics_btn.handler_unblock_by_func(self._on_lyrics_toggled)
 
     def _on_queue_toggled(self, btn: Gtk.ToggleButton) -> None:
         self._queue_active = btn.get_active()
         if self._queue_active:
             btn.add_css_class("active")
+            btn.set_tooltip_text("Hide Queue")
         else:
             btn.remove_css_class("active")
+            btn.set_tooltip_text("Show Queue")
 
         if self._on_queue_toggle:
             self._on_queue_toggle(self._queue_active)
@@ -590,6 +821,8 @@ class NowPlayingBar(Gtk.Box):
         self._queue_btn.set_active(active)
         if active:
             self._queue_btn.add_css_class("active")
+            self._queue_btn.set_tooltip_text("Hide Queue")
         else:
             self._queue_btn.remove_css_class("active")
+            self._queue_btn.set_tooltip_text("Show Queue")
         self._queue_btn.handler_unblock_by_func(self._on_queue_toggled)
