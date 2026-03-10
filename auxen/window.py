@@ -30,6 +30,7 @@ from auxen.views.playlist_view import PlaylistView
 from auxen.views.search import SearchView
 from auxen.views.settings import AuxenSettings
 from auxen.views.sidebar import AuxenSidebar
+from auxen.views.splash import SplashScreen
 from auxen.views.sleep_timer_dialog import SleepTimerDialog
 from auxen.views.mini_player import MiniPlayerWindow
 from auxen.views.smart_playlist_view import SmartPlaylistView
@@ -311,7 +312,21 @@ class AuxenWindow(Adw.ApplicationWindow):
         )
         split_view.set_content(content_page)
 
-        self.set_content(split_view)
+        # Splash screen — overlay with crossfade
+        # Main content starts invisible; splash sits on top.
+        split_view.set_opacity(0)
+        self._splash: SplashScreen | None = SplashScreen()
+        self._splash_overlay = Gtk.Overlay()
+        self._splash_overlay.set_child(split_view)
+        self._splash_overlay.add_overlay(self._splash)
+        self._splash_timer_done = False
+        self._splash_app_ready = False
+        self._splash_anim_out = None
+        self._splash_anim_in = None
+        self.set_content(self._splash_overlay)
+
+        # Minimum 3.5s display time
+        GLib.timeout_add(3500, self._on_splash_timer_done)
 
         # Wire context menu callbacks for all views that support them
         context_callbacks = {
@@ -432,6 +447,52 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._stack.set_visible_child_name("home")
 
     # ------------------------------------------------------------------
+    # Splash screen
+    # ------------------------------------------------------------------
+
+    def _on_splash_timer_done(self) -> bool:
+        self._splash_timer_done = True
+        self._maybe_dismiss_splash()
+        return GLib.SOURCE_REMOVE
+
+    def _on_splash_app_ready(self) -> None:
+        self._splash_app_ready = True
+        self._maybe_dismiss_splash()
+
+    def _maybe_dismiss_splash(self) -> None:
+        if not self._splash_timer_done or not self._splash_app_ready:
+            return
+        if self._splash is None:
+            return
+        # Crossfade: splash out + main content in simultaneously
+        main_child = self._splash_overlay.get_child()
+
+        splash_target = Adw.PropertyAnimationTarget.new(
+            self._splash, "opacity"
+        )
+        self._splash_anim_out = Adw.TimedAnimation.new(
+            self._splash, 1.0, 0.0, 500, splash_target
+        )
+
+        main_target = Adw.PropertyAnimationTarget.new(
+            main_child, "opacity"
+        )
+        self._splash_anim_in = Adw.TimedAnimation.new(
+            main_child, 0.0, 1.0, 500, main_target
+        )
+
+        self._splash_anim_out.connect("done", self._on_crossfade_done)
+        self._splash_anim_out.play()
+        self._splash_anim_in.play()
+
+    def _on_crossfade_done(self, _anim: Adw.Animation) -> None:
+        if self._splash is not None:
+            self._splash_overlay.remove_overlay(self._splash)
+            self._splash = None
+        self._splash_anim_out = None
+        self._splash_anim_in = None
+
+    # ------------------------------------------------------------------
     # Service wiring
     # ------------------------------------------------------------------
 
@@ -453,6 +514,8 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._now_playing._on_play_pause = app.player.play_pause
             self._now_playing._on_next = app.player.next_track
             self._now_playing._on_previous = app.player.previous_track
+            self._now_playing._on_repeat = self._on_repeat_mode_changed
+            self._now_playing._on_shuffle = self._on_shuffle_toggled
 
             # Player signals -> Now-Playing Bar updates
             app.player.connect("track-changed", self._on_track_changed)
@@ -529,6 +592,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         # --- Sidebar -> Database (playlists) ---
         if app.db is not None:
             self._sidebar.set_database(app.db)
+            self._sidebar.restore_theme_from_db()
 
         # --- Stats View -> Database + Callbacks ---
         if app.db is not None:
@@ -576,12 +640,10 @@ class AuxenWindow(Adw.ApplicationWindow):
 
         # --- Home Page initial refresh ---
         if app.db is not None:
-            try:
-                self._home_page.refresh(app.db)
-            except Exception:
-                logger.warning(
-                    "Failed initial home page refresh", exc_info=True
-                )
+            self.refresh_home(app.db)
+        else:
+            # No database — mark splash as ready immediately
+            self._on_splash_app_ready()
 
     def refresh_home(self, db) -> None:
         """Refresh the home page with data from the given database."""
@@ -589,6 +651,9 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._home_page.refresh(db)
         except Exception:
             logger.warning("Failed to refresh home page", exc_info=True)
+        # Signal splash screen that the app content is ready
+        if self._splash is not None:
+            self._on_splash_app_ready()
 
     # ------------------------------------------------------------------
     # Navigation history
@@ -909,6 +974,19 @@ class AuxenWindow(Adw.ApplicationWindow):
     def _on_spectrum_data(self, _player, levels) -> None:
         """Forward spectrum data to the now-playing visualizer."""
         self._now_playing.visualizer.update_spectrum(levels)
+
+    def _on_repeat_mode_changed(self, mode) -> None:
+        """Set the queue repeat mode from the now-playing bar."""
+        if self._app_ref and self._app_ref.player is not None:
+            self._app_ref.player.queue.repeat_mode = mode
+
+    def _on_shuffle_toggled(self, active: bool) -> None:
+        """Toggle queue shuffle from the now-playing bar."""
+        if self._app_ref and self._app_ref.player is not None:
+            if active:
+                self._app_ref.player.queue.shuffle()
+            else:
+                self._app_ref.player.queue.unshuffle()
 
     def _on_volume_changed(self, scale) -> None:
         """Set the player volume from the volume slider."""

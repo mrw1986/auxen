@@ -103,15 +103,33 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     border-bottom: 1px solid alpha(@theme_fg_color, 0.06);
 }
 
-.sidebar-brand image {
-    color: #d4a039;
+.sidebar-brand-logo {
+    -gtk-icon-size: 52px;
+    margin-top: -4px;
+}
+
+.sidebar-brand-title {
+    font-family: "Josefin Sans";
+    font-weight: 700;
+    font-size: 1.4rem;
+    letter-spacing: 1px;
+    color: #f0c560;
 }
 
 .sidebar-brand-subtitle {
     font-variant: all-small-caps;
     letter-spacing: 2px;
-    color: alpha(@theme_fg_color, 0.55);
-    font-size: 0.75rem;
+    font-size: 0.85rem;
+    color: #e0b868;
+}
+
+/* Light theme — darken brand colors for contrast on light backgrounds */
+:root:not(.dark) .sidebar-brand-title {
+    color: #8a6010;
+}
+
+:root:not(.dark) .sidebar-brand-subtitle {
+    color: #7a5820;
 }
 
 /* ── Sidebar collapse button ──────────────────────────── */
@@ -429,6 +447,8 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     color: #0c0b0f;
     border-radius: 9999px;
     padding: 2px 8px;
+    margin-top: 6px;
+    margin-right: 6px;
     font-size: 0.65rem;
     font-weight: 700;
     letter-spacing: 0.3px;
@@ -446,6 +466,8 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     color: #0c0b0f;
     border-radius: 9999px;
     padding: 2px 8px;
+    margin-top: 6px;
+    margin-right: 6px;
     font-size: 0.65rem;
     font-weight: 700;
     letter-spacing: 0.3px;
@@ -2240,6 +2262,27 @@ button.flat:hover {
     box-shadow: 0 6px 24px rgba(212, 160, 57, 0.5);
 }
 
+/* ── Album Row Play Overlay (list/compact views) ─────── */
+
+.album-row-play-overlay {
+    background-color: alpha(black, 0.55);
+    border-radius: 9999px;
+    min-width: 24px;
+    min-height: 24px;
+    padding: 0;
+    color: white;
+}
+
+.album-row-play-overlay:hover {
+    background-color: alpha(black, 0.7);
+}
+
+/* ── Source Badge Containment — keep badge inside art bounds ── */
+
+.album-card-art-container {
+    border-radius: 10px 10px 0 0;
+}
+
 /* ── Drag-and-drop highlight on sidebar playlist rows ── */
 .playlist-drop-highlight {
     background-color: rgba(212, 160, 57, 0.15);
@@ -2377,4 +2420,54 @@ tooltip.background {
 .grid-album-card-count {
     font-size: 0.75rem;
     opacity: 0.5;
+}
+
+/* About dialog — larger wordmark icon + brand colors */
+dialog.about image.icon {
+    -gtk-icon-size: 180px;
+}
+
+dialog.about .version {
+    color: #d4a039;
+}
+
+dialog.about .comments {
+    color: #c4a060;
+}
+
+:root:not(.dark) dialog.about .version {
+    color: #a07820;
+}
+
+:root:not(.dark) dialog.about .comments {
+    color: #8a6e3a;
+}
+
+/* ── Splash Screen ─────────────────────────────────────── */
+
+.splash-screen {
+    background-color: @window_bg_color;
+}
+
+.splash-title {
+    font-family: "Josefin Sans";
+    font-weight: 700;
+    font-size: 2.4rem;
+    letter-spacing: 2px;
+    color: #f0c560;
+}
+
+.splash-tagline {
+    font-variant: all-small-caps;
+    letter-spacing: 3px;
+    font-size: 1rem;
+    color: #e0b868;
+}
+
+:root:not(.dark) .splash-title {
+    color: #8a6010;
+}
+
+:root:not(.dark) .splash-tagline {
+    color: #7a5820;
 }
