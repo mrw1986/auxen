@@ -322,6 +322,7 @@ class ExploreView(Gtk.ScrolledWindow):
 
         # Album art placeholder with overlay badge
         overlay = Gtk.Overlay()
+        overlay.add_css_class("album-card-art-container")
 
         art_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,

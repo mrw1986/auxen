@@ -88,11 +88,18 @@ install_data(
   install_dir: get_option('datadir') / 'metainfo',
 )
 
-# Install icon
+# Install icons
 install_data(
   'data/icons/hicolor/scalable/apps/io.github.auxen.Auxen.svg',
   install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'scalable' / 'apps',
 )
+
+foreach size : ['16', '24', '32', '48', '64', '128', '256', '512']
+  install_data(
+    'data/icons/hicolor' / size + 'x' + size / 'apps' / 'io.github.auxen.Auxen.png',
+    install_dir: get_option('datadir') / 'icons' / 'hicolor' / size + 'x' + size / 'apps',
+  )
+endforeach
 
 # Install CSS
 install_data(

@@ -39,6 +39,22 @@ class AuxenSettings(Adw.PreferencesWindow):
         self._lastfm_service = None
 
         self.set_default_size(600, 700)
+        self.set_modal(True)
+        self.set_deletable(True)
+
+        # Close on Escape key
+        esc_controller = Gtk.ShortcutController.new()
+        esc_controller.set_scope(Gtk.ShortcutScope.LOCAL)
+        esc_controller.add_shortcut(
+            Gtk.Shortcut.new(
+                Gtk.ShortcutTrigger.parse_string("Escape"),
+                Gtk.CallbackAction.new(lambda *_: self.close() or True),
+            )
+        )
+        self.add_controller(esc_controller)
+
+        # Close when window loses focus (click outside)
+        self.connect("notify::is-active", self._on_active_changed)
 
         page = Adw.PreferencesPage()
         page.set_icon_name("emblem-system-symbolic")
@@ -52,6 +68,41 @@ class AuxenSettings(Adw.PreferencesWindow):
         page.add(self._build_about_group())
 
         self.add(page)
+
+        # Add a close button to the internal header bar.
+        # Adw.PreferencesWindow doesn't expose its header bar directly,
+        # so walk the widget tree to find it.
+        GLib.idle_add(self._inject_close_button)
+
+    def _inject_close_button(self) -> bool:
+        """Walk widget tree to find the header bar and add a close button."""
+        header = self._find_header_bar(self)
+        if header is not None:
+            close_btn = Gtk.Button.new_from_icon_name(
+                "window-close-symbolic"
+            )
+            close_btn.add_css_class("flat")
+            close_btn.set_tooltip_text("Close")
+            close_btn.connect("clicked", lambda *_: self.close())
+            header.pack_end(close_btn)
+        return False  # don't repeat
+
+    def _find_header_bar(self, widget: Gtk.Widget):
+        """Recursively find the first Adw.HeaderBar in the widget tree."""
+        if isinstance(widget, Adw.HeaderBar):
+            return widget
+        child = widget.get_first_child()
+        while child is not None:
+            result = self._find_header_bar(child)
+            if result is not None:
+                return result
+            child = child.get_next_sibling()
+        return None
+
+    def _on_active_changed(self, *_args) -> None:
+        """Close the settings window when it loses focus."""
+        if not self.is_active():
+            self.close()
 
     # ---- Public API ----
 
@@ -209,14 +260,6 @@ class AuxenSettings(Adw.PreferencesWindow):
         self._audio_quality.set_model(quality_model)
         self._audio_quality.set_selected(2)
         group.add(self._audio_quality)
-
-        # Gapless playback
-        self._gapless = Adw.SwitchRow(
-            title="Gapless Playback",
-            subtitle="Eliminate silence between consecutive tracks",
-        )
-        self._gapless.set_active(True)
-        group.add(self._gapless)
 
         # ReplayGain
         self._replaygain = Adw.SwitchRow(

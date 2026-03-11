@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Auxen - Batch 4 Test Checklist</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --surface2: #0f3460;
+    --accent: #e94560;
+    --green: #00b894;
+    --yellow: #fdcb6e;
+    --red: #d63031;
+    --text: #eee;
+    --dim: #888;
+    --border: #2a2a4a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    max-width: 900px;
+    margin: 0 auto;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 6px; }
+  .subtitle { color: var(--dim); margin-bottom: 24px; font-size: 0.9rem; }
+  h2 {
+    font-size: 1.1rem;
+    margin: 20px 0 10px;
+    padding: 8px 12px;
+    background: var(--surface2);
+    border-radius: 6px;
+    border-left: 3px solid var(--accent);
+  }
+  .section { margin-bottom: 16px; }
+  .item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.15s;
+    border-radius: 4px;
+  }
+  .item:hover { background: var(--surface); }
+  .item input[type="checkbox"] {
+    margin-top: 3px;
+    accent-color: var(--green);
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  .item label { cursor: pointer; flex: 1; }
+  .item .tag {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .tag-fix { background: var(--green); color: #000; }
+  .tag-feature { background: var(--accent); color: #fff; }
+  .tag-responsive { background: var(--yellow); color: #000; }
+  .progress-bar {
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    padding: 12px 0;
+    z-index: 10;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+  .progress-track {
+    height: 8px;
+    background: var(--surface);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--green), #55efc4);
+    border-radius: 4px;
+    transition: width 0.3s;
+  }
+  .progress-text {
+    font-size: 0.85rem;
+    color: var(--dim);
+    margin-top: 4px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<h1>Batch 4 — Bug Fixes + Context Menu Enhancements</h1>
+<p class="subtitle">Test checklist for the latest round of changes. Check each item after verifying.</p>
+
+<div class="progress-bar">
+  <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+  <div class="progress-text" id="progressText">0 / 0 checked</div>
+</div>
+
+<!-- ===== Library Albums Bug ===== -->
+<h2>Library — Albums View Fix</h2>
+<div class="section" id="s-library">
+  <div class="item"><input type="checkbox"><label>Library &gt; Albums shows album names (not artist names)</label><span class="tag tag-fix">Fix</span></div>
+  <div class="item"><input type="checkbox"><label>Library &gt; Artists shows artist rows correctly</label><span class="tag tag-fix">Fix</span></div>
+  <div class="item"><input type="checkbox"><label>Library &gt; Tracks shows track rows correctly</label><span class="tag tag-fix">Fix</span></div>
+  <div class="item"><input type="checkbox"><label>Switching Albums → Artists → Tracks → Albums shows correct content each time</label><span class="tag tag-fix">Fix</span></div>
+  <div class="item"><input type="checkbox"><label>Navigate away from Library and back — correct tab content still shows</label><span class="tag tag-fix">Fix</span></div>
+</div>
+
+<!-- ===== Scroll Persistence ===== -->
+<h2>Scroll Position Persistence</h2>
+<div class="section" id="s-scroll">
+  <div class="item"><input type="checkbox"><label>Library: scroll down, go to Home, come back — scroll position restored</label><span class="tag tag-fix">Fix</span></div>
+  <div class="item"><input type="checkbox"><label>Collection: scroll down, go to Home, come back — scroll position restored</label><span class="tag tag-fix">Fix</span></div>
+  <div class="item"><input type="checkbox"><label>Home: scroll down, go to Library, come back — scroll position restored</label><span class="tag tag-fix">Fix</span></div>
+  <div class="item"><input type="checkbox"><label>Using browser back/forward preserves scroll position</label><span class="tag tag-fix">Fix</span></div>
+</div>
+
+<!-- ===== Player Bar Responsive ===== -->
+<h2>Player Bar — Responsive Layout</h2>
+<div class="section" id="s-responsive">
+  <div class="item"><input type="checkbox"><label>Full width (≥800px): all controls visible, volume slider shown</label><span class="tag tag-responsive">Responsive</span></div>
+  <div class="item"><input type="checkbox"><label>Compact (600–799px): volume slider hidden, volume button visible, no tiny dot</label><span class="tag tag-responsive">Responsive</span></div>
+  <div class="item"><input type="checkbox"><label>Narrow (450–599px): shuffle, repeat, time labels, volume all hidden</label><span class="tag tag-responsive">Responsive</span></div>
+  <div class="item"><input type="checkbox"><label>Ultra-narrow (&lt;450px): only track info + inline play button</label><span class="tag tag-responsive">Responsive</span></div>
+  <div class="item"><input type="checkbox"><label>No controls appear as tiny dots or clipped at any width</label><span class="tag tag-responsive">Responsive</span></div>
+</div>
+
+<!-- ===== Track Context Menu ===== -->
+<h2>Track Context Menu — New Options</h2>
+<div class="section" id="s-track-ctx">
+  <div class="item"><input type="checkbox"><label>Right-click Tidal track → "Go to Track Radio" appears</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Click "Go to Track Radio" → radio tracks start playing</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Right-click Tidal track → "Credits" appears</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Click "Credits" → dialog shows songwriter/producer info</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Right-click local track → "Go to Track Radio" does NOT appear</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Right-click local track → "Credits" does NOT appear</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Track Radio/Credits work from Library view</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Track Radio/Credits work from Collection view</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Track Radio/Credits work from Explore view</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Track Radio/Credits work from Search results</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Track Radio/Credits work from Album Detail</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Track Radio/Credits work from Playlist view</label><span class="tag tag-feature">Feature</span></div>
+</div>
+
+<!-- ===== Album Context Menu ===== -->
+<h2>Album Context Menu — Shuffle</h2>
+<div class="section" id="s-album-ctx">
+  <div class="item"><input type="checkbox"><label>Right-click album → "Shuffle Album" option visible</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Click "Shuffle Album" → album tracks play in random order</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Shuffle works from Library album cards</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Shuffle works from Collection album cards</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Shuffle works from Home recently added albums</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Shuffle works from Explore album cards</label><span class="tag tag-feature">Feature</span></div>
+</div>
+
+<!-- ===== Artist Context Menu ===== -->
+<h2>Artist Context Menu — New Options</h2>
+<div class="section" id="s-artist-ctx">
+  <div class="item"><input type="checkbox"><label>Right-click artist → "Go to Artist Radio" appears</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Click "Go to Artist Radio" → radio tracks start playing</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Right-click artist → "Shuffle Artist" appears</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Click "Shuffle Artist" → artist tracks play in random order</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Right-click artist → "Follow Artist" or "Unfollow Artist" appears</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Click "Follow Artist" → no error, artist followed on Tidal</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Click "Unfollow Artist" → no error, artist unfollowed on Tidal</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Artist context menu works from Library artist list</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Artist context menu works from Collection artist list</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Artist context menu works from Stats top artists</label><span class="tag tag-feature">Feature</span></div>
+</div>
+
+<!-- ===== Home Page ===== -->
+<h2>Home Page — Clickable Artists</h2>
+<div class="section" id="s-home">
+  <div class="item"><input type="checkbox"><label>Recently Played rows: artist name is clickable (underline on hover)</label><span class="tag tag-feature">Feature</span></div>
+  <div class="item"><input type="checkbox"><label>Clicking artist name navigates to Artist Detail page</label><span class="tag tag-feature">Feature</span></div>
+</div>
+
+<!-- ===== Regression ===== -->
+<h2>Regression — Existing Features</h2>
+<div class="section" id="s-regression">
+  <div class="item"><input type="checkbox"><label>Play/pause works from player bar</label><span class="tag tag-fix">Regression</span></div>
+  <div class="item"><input type="checkbox"><label>Queue panel opens/closes correctly</label><span class="tag tag-fix">Regression</span></div>
+  <div class="item"><input type="checkbox"><label>Lyrics panel opens/closes correctly</label><span class="tag tag-fix">Regression</span></div>
+  <div class="item"><input type="checkbox"><label>Existing context menu options (Play, Add to Queue, etc.) still work</label><span class="tag tag-fix">Regression</span></div>
+  <div class="item"><input type="checkbox"><label>Collection tabs (Albums/Artists/Tracks) work correctly</label><span class="tag tag-fix">Regression</span></div>
+  <div class="item"><input type="checkbox"><label>Search works and shows results</label><span class="tag tag-fix">Regression</span></div>
+</div>
+
+<script>
+const boxes = document.querySelectorAll('input[type="checkbox"]');
+const fill = document.getElementById('progressFill');
+const text = document.getElementById('progressText');
+const KEY = 'auxen-batch4-checklist';
+
+function update() {
+  const total = boxes.length;
+  const checked = [...boxes].filter(b => b.checked).length;
+  fill.style.width = (total ? (checked / total * 100) : 0) + '%';
+  text.textContent = checked + ' / ' + total + ' checked';
+  const state = [...boxes].map(b => b.checked ? '1' : '0').join('');
+  localStorage.setItem(KEY, state);
+}
+
+// Restore
+const saved = localStorage.getItem(KEY);
+if (saved) {
+  [...boxes].forEach((b, i) => { if (saved[i] === '1') b.checked = true; });
+}
+
+boxes.forEach(b => b.addEventListener('change', update));
+// Click row to toggle
+document.querySelectorAll('.item').forEach(item => {
+  item.addEventListener('click', e => {
+    if (e.target.tagName === 'INPUT') return;
+    const cb = item.querySelector('input[type="checkbox"]');
+    cb.checked = !cb.checked;
+    update();
+  });
+});
+update();
+</script>
+</body>
+</html>

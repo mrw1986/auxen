@@ -1,0 +1,262 @@
+{
+  "lib-1": {
+    "status": "fail",
+    "comment": "",
+    "checked": false
+  },
+  "lib-2": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "lib-3": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "lib-4": {
+    "status": "fail",
+    "comment": "Albums show nothing or incorrect info.",
+    "checked": false
+  },
+  "lib-5": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "lib-6": {
+    "status": "fail",
+    "comment": "It loads, but the content is wrong.",
+    "checked": false
+  },
+  "scr-1": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "scr-2": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "scr-3": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "res-1": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "res-2": {
+    "status": "fail",
+    "comment": "",
+    "checked": false
+  },
+  "res-3": {
+    "status": "fail",
+    "comment": "",
+    "checked": false
+  },
+  "res-4": {
+    "status": "fail",
+    "comment": "",
+    "checked": false
+  },
+  "res-5": {
+    "status": "fail",
+    "comment": "",
+    "checked": false
+  },
+  "tc-1": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "tc-2": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "tc-3": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "tc-4": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "tc-5": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "tc-6": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "tc-7": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "tc-8": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "tc-9": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "tc-10": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "tc-11": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "tc-12": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "ac-1": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "ac-2": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "ac-3": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "ac-4": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "ac-5": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "ac-6": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "ac-7": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "art-1": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "art-2": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "art-3": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "art-4": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "art-5": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "art-6": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "art-7": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "art-8": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "art-9": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "art-10": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "hm-1": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "hm-2": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "pn-1": {
+    "status": "fail",
+    "comment": "There's still a 1-2 pixel difference in width. Additionally, when opening the lyrics or queue panel when the window is docked to the right side of the screen the new panel goes off screen.",
+    "checked": false
+  },
+  "reg-1": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "reg-2": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "reg-3": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "reg-4": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "reg-5": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  },
+  "reg-6": {
+    "status": "pass",
+    "comment": "",
+    "checked": true
+  }
+}

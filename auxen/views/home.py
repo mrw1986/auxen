@@ -92,6 +92,7 @@ def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
 
     # -- Album art with overlay badge --
     overlay = Gtk.Overlay()
+    overlay.add_css_class("album-card-art-container")
 
     art_box = Gtk.Box(
         orientation=Gtk.Orientation.VERTICAL,
@@ -312,7 +313,7 @@ class HomePage(Gtk.ScrolledWindow):
         tidal_card, self._tidal_value_label = self._make_stat_card(
             icon_name="tidal-symbolic",
             value="0",
-            label="Tidal Tracks",
+            label="Tidal Collection",
             accent_class="stat-accent-tidal",
         )
         stats_box.append(tidal_card)

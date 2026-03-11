@@ -15,13 +15,13 @@ import auxen
 
 APPLICATION_NAME = "Auxen"
 APPLICATION_ID = "io.github.auxen.Auxen"
-DEVELOPER_NAME = "mrw1986"
-DEVELOPERS = ["mrw1986", "Claude (AI Assistant)"]
+DEVELOPER_NAME = "Matt Warner"
+DEVELOPERS = ["Matt Warner", "Claude (AI Assistant)"]
 ARTISTS: list[str] = []
-COPYRIGHT = "\u00a9 2026 mrw1986"
+COPYRIGHT = "\u00a9 2026 Matt Warner"
 LICENSE_TYPE = Gtk.License.GPL_3_0
 COMMENTS = (
-    "Feed the Ox. A premium music player for Tidal streaming "
+    "Unorthodox Audio. A premium music player for Tidal streaming "
     "and local media."
 )
 WEBSITE = ""
@@ -42,10 +42,26 @@ RELEASE_NOTES = (
     "</ul>"
 )
 
+# Icon names registered via data/icons/hicolor/scalable/apps/
+# "dark" wordmark has light/cream fills — for dark backgrounds
+# "light" wordmark has dark/brown fills — for light backgrounds
+_ICON_FOR_DARK_THEME = "auxen-wordmark-dark"
+_ICON_FOR_LIGHT_THEME = "auxen-wordmark-light"
+
 
 def get_version() -> str:
     """Return the current Auxen version string."""
     return auxen.__version__
+
+
+def _is_dark_theme() -> bool:
+    """Check if the current Adw theme is dark."""
+    return Adw.StyleManager.get_default().get_dark()
+
+
+def _get_wordmark_icon_name() -> str:
+    """Return the appropriate wordmark icon name for the current theme."""
+    return _ICON_FOR_DARK_THEME if _is_dark_theme() else _ICON_FOR_LIGHT_THEME
 
 
 def show_about_dialog(parent_window) -> Adw.AboutDialog:
@@ -62,10 +78,10 @@ def show_about_dialog(parent_window) -> Adw.AboutDialog:
         The created dialog instance.
     """
     dialog = Adw.AboutDialog(
-        application_name=APPLICATION_NAME,
-        application_icon=APPLICATION_ID,
+        application_name="",
+        application_icon=_get_wordmark_icon_name(),
         version=get_version(),
-        developer_name=DEVELOPER_NAME,
+        developer_name="",
         license_type=LICENSE_TYPE,
         comments=COMMENTS,
         developers=DEVELOPERS,

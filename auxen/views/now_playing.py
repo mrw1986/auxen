@@ -12,6 +12,7 @@ gi.require_version("GdkPixbuf", "2.0")
 
 from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango
 
+from auxen.queue import RepeatMode
 from auxen.views.visualizer import SpectrumVisualizer
 
 
@@ -42,7 +43,7 @@ class NowPlayingBar(Gtk.Box):
         on_next: Callable[[], None] | None = None,
         on_previous: Callable[[], None] | None = None,
         on_shuffle: Callable[[bool], None] | None = None,
-        on_repeat: Callable[[bool], None] | None = None,
+        on_repeat: Callable[[RepeatMode], None] | None = None,
         on_lyrics_toggle: Callable[[bool], None] | None = None,
         on_queue_toggle: Callable[[bool], None] | None = None,
         on_favorite: Callable[[bool], None] | None = None,
@@ -65,7 +66,7 @@ class NowPlayingBar(Gtk.Box):
 
         self._is_playing = False
         self._shuffle_active = False
-        self._repeat_active = False
+        self._repeat_mode: RepeatMode = RepeatMode.OFF
         self._favorite_active = False
         self._lyrics_active = False
         self._queue_active = False
@@ -428,14 +429,14 @@ class NowPlayingBar(Gtk.Box):
         next_btn.connect("clicked", self._on_next_clicked)
         transport.append(next_btn)
 
-        # Repeat
-        self._repeat_btn = Gtk.ToggleButton()
+        # Repeat (3-state: Off → All → One → Off)
+        self._repeat_btn = Gtk.Button()
         self._repeat_btn.set_icon_name("media-playlist-repeat-symbolic")
         self._repeat_btn.add_css_class("flat")
         self._repeat_btn.add_css_class("now-playing-control-btn")
         self._repeat_btn.set_valign(Gtk.Align.CENTER)
         self._repeat_btn.set_tooltip_text("Repeat Off")
-        self._repeat_btn.connect("toggled", self._on_repeat_toggled)
+        self._repeat_btn.connect("clicked", self._on_repeat_clicked)
         transport.append(self._repeat_btn)
 
         center.append(transport)
@@ -728,21 +729,38 @@ class NowPlayingBar(Gtk.Box):
                 f"[NowPlaying] shuffle -> {self._shuffle_active}"
             )
 
-    def _on_repeat_toggled(self, btn: Gtk.ToggleButton) -> None:
-        self._repeat_active = btn.get_active()
-        if self._repeat_active:
-            btn.add_css_class("active")
-            btn.set_tooltip_text("Repeat All")
+    def _on_repeat_clicked(self, _btn: Gtk.Button) -> None:
+        # Cycle: OFF → QUEUE (All) → TRACK (One) → OFF
+        if self._repeat_mode == RepeatMode.OFF:
+            self._repeat_mode = RepeatMode.QUEUE
+        elif self._repeat_mode == RepeatMode.QUEUE:
+            self._repeat_mode = RepeatMode.TRACK
         else:
-            btn.remove_css_class("active")
-            btn.set_tooltip_text("Repeat Off")
+            self._repeat_mode = RepeatMode.OFF
+        self._apply_repeat_ui()
 
         if self._on_repeat:
-            self._on_repeat(self._repeat_active)
+            self._on_repeat(self._repeat_mode)
         else:
             print(  # noqa: T201
-                f"[NowPlaying] repeat -> {self._repeat_active}"
+                f"[NowPlaying] repeat -> {self._repeat_mode}"
             )
+
+    def _apply_repeat_ui(self) -> None:
+        """Update the repeat button icon, tooltip, and active state."""
+        btn = self._repeat_btn
+        if self._repeat_mode == RepeatMode.OFF:
+            btn.set_icon_name("media-playlist-repeat-symbolic")
+            btn.remove_css_class("active")
+            btn.set_tooltip_text("Repeat Off")
+        elif self._repeat_mode == RepeatMode.QUEUE:
+            btn.set_icon_name("media-playlist-repeat-symbolic")
+            btn.add_css_class("active")
+            btn.set_tooltip_text("Repeat All")
+        else:  # TRACK
+            btn.set_icon_name("media-playlist-repeat-song-symbolic")
+            btn.add_css_class("active")
+            btn.set_tooltip_text("Repeat One")
 
     def _on_favorite_toggled(self, btn: Gtk.ToggleButton) -> None:
         self._favorite_active = btn.get_active()

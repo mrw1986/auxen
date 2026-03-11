@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Auxen - Library/Collection Refactor Test Checklist</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --surface2: #0f3460;
+    --accent: #e94560;
+    --green: #00b894;
+    --yellow: #fdcb6e;
+    --red: #d63031;
+    --text: #eee;
+    --dim: #888;
+    --border: #2a2a4a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    max-width: 900px;
+    margin: 0 auto;
+    line-height: 1.5;
+  }
+  h1 {
+    font-size: 1.6rem;
+    margin-bottom: 4px;
+    color: var(--accent);
+  }
+  .subtitle {
+    color: var(--dim);
+    font-size: 0.9rem;
+    margin-bottom: 24px;
+  }
+  .progress-bar-container {
+    background: var(--surface);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 24px;
+    border: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .progress-stats {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    margin-bottom: 8px;
+  }
+  .progress-stats .pass { color: var(--green); }
+  .progress-stats .fail { color: var(--red); }
+  .progress-stats .skip { color: var(--yellow); }
+  .progress-track {
+    width: 100%;
+    height: 8px;
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+  }
+  .progress-track .bar-pass {
+    background: var(--green);
+    height: 100%;
+    transition: width 0.3s;
+  }
+  .progress-track .bar-fail {
+    background: var(--red);
+    height: 100%;
+    transition: width 0.3s;
+  }
+  .progress-track .bar-skip {
+    background: var(--yellow);
+    height: 100%;
+    transition: width 0.3s;
+  }
+  .section {
+    background: var(--surface);
+    border-radius: 10px;
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .section-header {
+    padding: 14px 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    user-select: none;
+    background: var(--surface2);
+  }
+  .section-header:hover { opacity: 0.9; }
+  .section-header .arrow {
+    transition: transform 0.2s;
+    font-size: 0.75rem;
+    color: var(--dim);
+  }
+  .section-header.collapsed .arrow { transform: rotate(-90deg); }
+  .section-header h2 {
+    font-size: 1.05rem;
+    flex: 1;
+  }
+  .section-badge {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--border);
+  }
+  .section-body { padding: 8px 0; }
+  .section-body.hidden { display: none; }
+  .test-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+  }
+  .test-item:last-child { border-bottom: none; }
+  .test-item:hover { background: rgba(255,255,255,0.03); }
+  .test-item .buttons {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .test-item .buttons button {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--dim);
+    cursor: pointer;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+  .test-item .buttons button:hover { border-color: var(--text); color: var(--text); }
+  .test-item .buttons button.active-pass {
+    background: var(--green);
+    color: #fff;
+    border-color: var(--green);
+  }
+  .test-item .buttons button.active-fail {
+    background: var(--red);
+    color: #fff;
+    border-color: var(--red);
+  }
+  .test-item .buttons button.active-skip {
+    background: var(--yellow);
+    color: #333;
+    border-color: var(--yellow);
+  }
+  .test-item .content { flex: 1; }
+  .test-item .label {
+    font-size: 0.92rem;
+    font-weight: 500;
+  }
+  .test-item .detail {
+    font-size: 0.8rem;
+    color: var(--dim);
+    margin-top: 2px;
+  }
+  .test-item .note-input {
+    margin-top: 6px;
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: var(--text);
+    font-size: 0.82rem;
+    resize: vertical;
+    min-height: 32px;
+    display: none;
+  }
+  .test-item .note-input.visible { display: block; }
+  .test-item .note-toggle {
+    font-size: 0.75rem;
+    color: var(--dim);
+    cursor: pointer;
+    margin-top: 4px;
+    display: inline-block;
+  }
+  .test-item .note-toggle:hover { color: var(--text); }
+  .actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 24px;
+    margin-bottom: 40px;
+  }
+  .actions button {
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.15s;
+  }
+  .actions button:hover { background: var(--surface2); }
+  .actions button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .actions button.primary:hover { opacity: 0.85; }
+  #export-output {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-top: 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+    white-space: pre-wrap;
+    display: none;
+    max-height: 500px;
+    overflow-y: auto;
+  }
+</style>
+</head>
+<body>
+
+<h1>Library/Collection Refactor - Test Checklist</h1>
+<p class="subtitle">Auxen Music Player &mdash; Local-Only Library + Tidal Collection Albums/Artists</p>
+
+<div class="progress-bar-container">
+  <div class="progress-stats">
+    <span>Progress: <strong id="pct">0%</strong></span>
+    <span class="pass" id="pass-count">0 pass</span>
+    <span class="fail" id="fail-count">0 fail</span>
+    <span class="skip" id="skip-count">0 skip</span>
+    <span id="remaining-count" style="color:var(--dim)">0 remaining</span>
+  </div>
+  <div class="progress-track">
+    <div class="bar-pass" id="bar-pass"></div>
+    <div class="bar-fail" id="bar-fail"></div>
+    <div class="bar-skip" id="bar-skip"></div>
+  </div>
+</div>
+
+<div id="sections"></div>
+
+<div class="actions">
+  <button class="primary" onclick="exportResults()">Export Results</button>
+  <button onclick="resetAll()">Reset All</button>
+  <button onclick="copyResults()">Copy to Clipboard</button>
+</div>
+<div id="export-output"></div>
+
+<script>
+const DATA = [
+  {
+    title: "Phase 1: App Launch & Basic Navigation",
+    tests: [
+      { id: "launch", label: "App launches without errors", detail: "No Python tracebacks in terminal. Window appears normally." },
+      { id: "sidebar-lib", label: "Sidebar 'Library' link works", detail: "Click Library in sidebar. Page loads without crash." },
+      { id: "sidebar-col", label: "Sidebar 'Collection' link works", detail: "Click Collection in sidebar. Page loads without crash." },
+      { id: "nav-between", label: "Navigate between Library and Collection", detail: "Switch back and forth several times. No visual glitches or crashes." },
+    ]
+  },
+  {
+    title: "Phase 2: Library View - Local Only",
+    tests: [
+      { id: "lib-no-filters", label: "No filter pills (All/Tidal/Local) in Library", detail: "The source filter buttons should be completely gone from Library." },
+      { id: "lib-view-toggle", label: "Albums/Artists/Tracks toggle works", detail: "Click each tab. View switches correctly." },
+      { id: "lib-sort", label: "Sort dropdown works", detail: "Sort dropdown changes options per tab and sorts correctly." },
+      { id: "lib-albums-local", label: "Albums tab shows ONLY local albums", detail: "No Tidal albums should appear. All albums should be from local files." },
+      { id: "lib-artists-local", label: "Artists tab shows ONLY local artists", detail: "No Tidal-only artists should appear." },
+      { id: "lib-tracks-local", label: "Tracks tab shows ONLY local tracks", detail: "No Tidal tracks should appear. All tracks from local files only." },
+      { id: "lib-album-art", label: "Album art loads for local albums", detail: "Cover images display on album cards." },
+      { id: "lib-artist-img", label: "Artist images load", detail: "Artist photos appear on artist rows." },
+      { id: "lib-album-click", label: "Album click navigates to album detail", detail: "Click an album card. Album detail page opens." },
+      { id: "lib-artist-click", label: "Artist click navigates to artist detail", detail: "Click an artist row. Artist detail page opens." },
+      { id: "lib-track-play", label: "Track click plays the track", detail: "Click a track row. Track starts playing." },
+      { id: "lib-context-menu", label: "Right-click context menus work", detail: "Right-click on albums, artists, and tracks. Context menus appear." },
+      { id: "lib-view-mode", label: "Track view mode toggle (list/compact/grid)", detail: "On Tracks tab, view mode buttons switch between layouts." },
+      { id: "lib-count-label", label: "Count label shows correct local-only count", detail: "Header shows track/album/artist count matching local files only." },
+      { id: "lib-heart-btn", label: "Heart button works on tracks", detail: "Toggle heart on a track. Favorite state changes." },
+      { id: "lib-drag", label: "Drag tracks to playlist works", detail: "Drag a track from Library to a playlist in sidebar." },
+    ]
+  },
+  {
+    title: "Phase 3: Collection View - Tracks Tab",
+    tests: [
+      { id: "col-filter-pills", label: "Filter pills (All/Local/Tidal) present", detail: "Collection should still have source filter buttons." },
+      { id: "col-tracks-all", label: "Tracks tab (All) shows local + Tidal favorites", detail: "Both local and Tidal favorited tracks appear." },
+      { id: "col-tracks-local", label: "Tracks tab (Local filter) shows only local favorites", detail: "Switch to Local filter. Only local tracks shown." },
+      { id: "col-tracks-tidal", label: "Tracks tab (Tidal filter) shows only Tidal favorites", detail: "Switch to Tidal filter. Only Tidal tracks shown." },
+      { id: "col-tracks-sort", label: "Track sorting works", detail: "Sort by Date Added, Artist, Album, Title." },
+      { id: "col-tracks-heart", label: "Unfavorite (heart) button removes track", detail: "Click heart on a track. Track is removed from collection." },
+      { id: "col-tracks-context", label: "Right-click context menu on tracks", detail: "Right-click a track row. Menu appears with expected options." },
+      { id: "col-tracks-viewmode", label: "Track view modes (list/compact/grid)", detail: "Toggle between view modes. All render correctly." },
+    ]
+  },
+  {
+    title: "Phase 4: Collection View - Albums Tab",
+    tests: [
+      { id: "col-albums-tab", label: "Albums tab loads without crash", detail: "Click Albums tab in Collection. No error." },
+      { id: "col-albums-tidal-api", label: "Tidal saved albums appear", detail: "Albums you've saved/favorited on Tidal show up. These come from the favorites.albums() API." },
+      { id: "col-albums-local", label: "Local albums with favorited tracks appear", detail: "Local albums that have at least one hearted track show up." },
+      { id: "col-albums-art-tidal", label: "Tidal album cover art loads", detail: "Tidal albums show cover images (loaded from cover_url)." },
+      { id: "col-albums-art-local", label: "Local album cover art loads", detail: "Local albums show cover images (loaded from track art)." },
+      { id: "col-albums-filter-all", label: "Filter All shows both sources", detail: "All filter shows both Tidal and local albums." },
+      { id: "col-albums-filter-tidal", label: "Filter Tidal shows only Tidal albums", detail: "Only Tidal saved albums appear." },
+      { id: "col-albums-filter-local", label: "Filter Local shows only local albums", detail: "Only local albums with favorited tracks appear." },
+      { id: "col-albums-sort", label: "Album sorting works", detail: "Sort by name, artist, recently added." },
+      { id: "col-albums-click", label: "Album click navigates to detail", detail: "Click a collection album. Detail page opens." },
+      { id: "col-albums-play", label: "Play button on album card works", detail: "Hover over album, click play. Album starts playing." },
+      { id: "col-albums-context", label: "Right-click context menu on albums", detail: "Right-click an album card. Menu appears." },
+      { id: "col-albums-empty", label: "Empty state shows helpful message", detail: "If no albums, message says 'Save albums on Tidal or heart local tracks'." },
+      { id: "col-albums-count", label: "Count label is correct", detail: "Header shows correct album count." },
+    ]
+  },
+  {
+    title: "Phase 5: Collection View - Artists Tab",
+    tests: [
+      { id: "col-artists-tab", label: "Artists tab loads without crash", detail: "Click Artists tab in Collection. No error." },
+      { id: "col-artists-tidal-api", label: "Tidal followed artists appear", detail: "Artists you follow on Tidal show up. These come from the favorites.artists() API." },
+      { id: "col-artists-local", label: "Local artists with favorited tracks appear", detail: "Local artists that have at least one hearted track show up." },
+      { id: "col-artists-images", label: "Artist images load", detail: "Artist photos display on rows." },
+      { id: "col-artists-filter-all", label: "Filter All shows both sources", detail: "Both Tidal and local artists appear." },
+      { id: "col-artists-filter-tidal", label: "Filter Tidal shows only Tidal artists", detail: "Only Tidal followed artists appear." },
+      { id: "col-artists-filter-local", label: "Filter Local shows only local artists", detail: "Only local artists with favorited tracks appear." },
+      { id: "col-artists-sort", label: "Artist sorting works", detail: "Sort by name, track count." },
+      { id: "col-artists-click", label: "Artist click navigates to detail", detail: "Click an artist. Artist detail page opens." },
+      { id: "col-artists-context", label: "Right-click context menu on artists", detail: "Right-click an artist row. Menu appears." },
+      { id: "col-artists-source-badge", label: "Source badges show correctly", detail: "Tidal artists show Tidal badge, local show Local badge, mixed show both." },
+      { id: "col-artists-empty", label: "Empty state shows helpful message", detail: "If no artists, message says 'Follow artists on Tidal or heart local tracks'." },
+      { id: "col-artists-count", label: "Count label is correct", detail: "Header shows correct artist count." },
+    ]
+  },
+  {
+    title: "Phase 6: Edge Cases & Tidal Not Logged In",
+    tests: [
+      { id: "edge-tidal-disconn-lib", label: "Library works when Tidal not logged in", detail: "Library should work fine — it's local-only and doesn't need Tidal." },
+      { id: "edge-tidal-disconn-col-tracks", label: "Collection Tracks works when Tidal not logged in", detail: "Shows local favorites. Tidal filter shows connect prompt." },
+      { id: "edge-tidal-disconn-col-albums", label: "Collection Albums works when Tidal not logged in", detail: "Shows local albums only. No crash from missing Tidal." },
+      { id: "edge-tidal-disconn-col-artists", label: "Collection Artists works when Tidal not logged in", detail: "Shows local artists only. No crash from missing Tidal." },
+      { id: "edge-no-favorites", label: "Collection empty state when no favorites", detail: "Collection shows appropriate empty messages on all tabs." },
+      { id: "edge-refresh", label: "Refresh after favoriting/unfavoriting", detail: "Heart a track in Library, switch to Collection. Track appears. Unfavorite it. It disappears." },
+      { id: "edge-tidal-login-col", label: "Tidal connect prompt in Collection", detail: "When filtering by Tidal and not logged in, connect prompt appears." },
+    ]
+  },
+];
+
+// State
+let results = {};
+let notes = {};
+
+function init() {
+  const saved = localStorage.getItem('auxen-test-results');
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      results = parsed.results || {};
+      notes = parsed.notes || {};
+    } catch(e) {}
+  }
+  render();
+}
+
+function save() {
+  localStorage.setItem('auxen-test-results', JSON.stringify({ results, notes }));
+}
+
+function render() {
+  const container = document.getElementById('sections');
+  container.innerHTML = '';
+
+  DATA.forEach((section, si) => {
+    const div = document.createElement('div');
+    div.className = 'section';
+
+    const sectionPass = section.tests.filter(t => results[t.id] === 'pass').length;
+    const sectionFail = section.tests.filter(t => results[t.id] === 'fail').length;
+    const sectionTotal = section.tests.length;
+
+    div.innerHTML = `
+      <div class="section-header" onclick="toggleSection(${si})">
+        <span class="arrow" id="arrow-${si}">&#9660;</span>
+        <h2>${section.title}</h2>
+        <span class="section-badge">${sectionPass + sectionFail}/${sectionTotal}</span>
+      </div>
+      <div class="section-body" id="body-${si}">
+        ${section.tests.map(t => {
+          const r = results[t.id] || '';
+          const n = notes[t.id] || '';
+          return `
+          <div class="test-item" id="item-${t.id}">
+            <div class="buttons">
+              <button title="Pass" class="${r === 'pass' ? 'active-pass' : ''}" onclick="setResult('${t.id}','pass')">&#10003;</button>
+              <button title="Fail" class="${r === 'fail' ? 'active-fail' : ''}" onclick="setResult('${t.id}','fail')">&#10007;</button>
+              <button title="Skip" class="${r === 'skip' ? 'active-skip' : ''}" onclick="setResult('${t.id}','skip')">&#8212;</button>
+            </div>
+            <div class="content">
+              <div class="label">${t.label}</div>
+              <div class="detail">${t.detail}</div>
+              <span class="note-toggle" onclick="toggleNote('${t.id}')">+ Add note</span>
+              <textarea class="note-input ${n ? 'visible' : ''}" id="note-${t.id}"
+                placeholder="Add a note (bug description, screenshot ref, etc.)"
+                oninput="updateNote('${t.id}', this.value)">${n}</textarea>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    `;
+    container.appendChild(div);
+  });
+
+  updateProgress();
+}
+
+function setResult(id, value) {
+  if (results[id] === value) {
+    delete results[id];
+  } else {
+    results[id] = value;
+  }
+  save();
+  render();
+}
+
+function toggleNote(id) {
+  const el = document.getElementById('note-' + id);
+  el.classList.toggle('visible');
+  if (el.classList.contains('visible')) el.focus();
+}
+
+function updateNote(id, value) {
+  notes[id] = value;
+  save();
+}
+
+function toggleSection(idx) {
+  const body = document.getElementById('body-' + idx);
+  const arrow = document.getElementById('arrow-' + idx);
+  body.classList.toggle('hidden');
+  arrow.parentElement.classList.toggle('collapsed');
+}
+
+function updateProgress() {
+  const total = DATA.reduce((s, sec) => s + sec.tests.length, 0);
+  const pass = Object.values(results).filter(v => v === 'pass').length;
+  const fail = Object.values(results).filter(v => v === 'fail').length;
+  const skip = Object.values(results).filter(v => v === 'skip').length;
+  const done = pass + fail + skip;
+  const remaining = total - done;
+
+  document.getElementById('pct').textContent = Math.round((done / total) * 100) + '%';
+  document.getElementById('pass-count').textContent = pass + ' pass';
+  document.getElementById('fail-count').textContent = fail + ' fail';
+  document.getElementById('skip-count').textContent = skip + ' skip';
+  document.getElementById('remaining-count').textContent = remaining + ' remaining';
+
+  document.getElementById('bar-pass').style.width = (pass / total * 100) + '%';
+  document.getElementById('bar-fail').style.width = (fail / total * 100) + '%';
+  document.getElementById('bar-skip').style.width = (skip / total * 100) + '%';
+}
+
+function exportResults() {
+  let out = '# Auxen Library/Collection Refactor - Test Results\n\n';
+  let totalPass = 0, totalFail = 0, totalSkip = 0, totalUntested = 0;
+
+  DATA.forEach(section => {
+    out += `## ${section.title}\n\n`;
+    section.tests.forEach(t => {
+      const r = results[t.id] || 'untested';
+      const icon = r === 'pass' ? 'PASS' : r === 'fail' ? 'FAIL' : r === 'skip' ? 'SKIP' : '    ';
+      out += `[${icon}] ${t.label}\n`;
+      if (notes[t.id]) out += `       Note: ${notes[t.id]}\n`;
+      if (r === 'pass') totalPass++;
+      else if (r === 'fail') totalFail++;
+      else if (r === 'skip') totalSkip++;
+      else totalUntested++;
+    });
+    out += '\n';
+  });
+
+  out += `---\nSummary: ${totalPass} pass, ${totalFail} fail, ${totalSkip} skip, ${totalUntested} untested\n`;
+
+  // List failures prominently
+  const failures = [];
+  DATA.forEach(section => {
+    section.tests.forEach(t => {
+      if (results[t.id] === 'fail') {
+        failures.push({ label: t.label, note: notes[t.id] || '', section: section.title });
+      }
+    });
+  });
+
+  if (failures.length > 0) {
+    out += '\n## Failures Requiring Fixes\n\n';
+    failures.forEach((f, i) => {
+      out += `${i + 1}. **${f.label}** (${f.section})\n`;
+      if (f.note) out += `   - ${f.note}\n`;
+    });
+  }
+
+  const el = document.getElementById('export-output');
+  el.textContent = out;
+  el.style.display = 'block';
+  el.scrollIntoView({ behavior: 'smooth' });
+}
+
+function copyResults() {
+  exportResults();
+  const text = document.getElementById('export-output').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = event.target;
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = orig, 1500);
+  });
+}
+
+function resetAll() {
+  if (confirm('Reset all test results? This cannot be undone.')) {
+    results = {};
+    notes = {};
+    save();
+    render();
+    document.getElementById('export-output').style.display = 'none';
+  }
+}
+
+init();
+</script>
+</body>
+</html>

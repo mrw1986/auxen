@@ -11,8 +11,9 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Gio, GLib, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango
 
+from auxen.album_art import AlbumArtService
 from auxen.views.context_menu import Gdk_Rectangle
 from auxen.views.widgets import DragScrollHelper, make_tidal_connect_prompt, make_tidal_source_badge
 
@@ -291,6 +292,7 @@ class MixesView(Gtk.ScrolledWindow):
         description: str,
         tidal_id: str,
         track_count: int = 0,
+        image_url: str = "",
     ) -> Gtk.FlowBoxChild:
         """Build a single mix card for the mixes grid."""
         card = Gtk.Box(
@@ -320,6 +322,14 @@ class MixesView(Gtk.ScrolledWindow):
         art_icon.set_valign(Gtk.Align.CENTER)
         art_icon.set_vexpand(True)
         art_box.append(art_icon)
+
+        # Cover art image (hidden until loaded)
+        art_image = Gtk.Image()
+        art_image.set_pixel_size(200)
+        art_image.set_halign(Gtk.Align.FILL)
+        art_image.set_valign(Gtk.Align.FILL)
+        art_image.set_visible(False)
+        art_box.append(art_image)
 
         overlay.set_child(art_box)
 
@@ -364,6 +374,8 @@ class MixesView(Gtk.ScrolledWindow):
         # Store data for click handling
         child._mix_tidal_id = tidal_id  # type: ignore[attr-defined]
         child._mix_name = name  # type: ignore[attr-defined]
+        child._art_icon = art_icon  # type: ignore[attr-defined]
+        child._art_image = art_image  # type: ignore[attr-defined]
         return child
 
     def _make_playlist_card(
@@ -372,6 +384,7 @@ class MixesView(Gtk.ScrolledWindow):
         description: str,
         tidal_id: str,
         track_count: int = 0,
+        image_url: str = "",
     ) -> Gtk.FlowBoxChild:
         """Build a single playlist card for the playlists grid."""
         card = Gtk.Box(
@@ -402,6 +415,14 @@ class MixesView(Gtk.ScrolledWindow):
         art_icon.set_valign(Gtk.Align.CENTER)
         art_icon.set_vexpand(True)
         art_box.append(art_icon)
+
+        # Cover art image (hidden until loaded)
+        art_image = Gtk.Image()
+        art_image.set_pixel_size(200)
+        art_image.set_halign(Gtk.Align.FILL)
+        art_image.set_valign(Gtk.Align.FILL)
+        art_image.set_visible(False)
+        art_box.append(art_image)
 
         overlay.set_child(art_box)
 
@@ -457,6 +478,8 @@ class MixesView(Gtk.ScrolledWindow):
         child.set_child(card)
         child._mix_tidal_id = tidal_id  # type: ignore[attr-defined]
         child._mix_name = name  # type: ignore[attr-defined]
+        child._art_icon = art_icon  # type: ignore[attr-defined]
+        child._art_image = art_image  # type: ignore[attr-defined]
         return child
 
     # ------------------------------------------------------------------
@@ -540,29 +563,37 @@ class MixesView(Gtk.ScrolledWindow):
         """Fill the mixes grid with mix cards."""
         self._clear_flow_box(self._mixes_grid)
         for mix in mixes:
+            image_url = mix.get("cover_url") or mix.get("image_url") or ""
             child = self._make_mix_card(
                 name=mix.get("name", "Mix"),
                 description=mix.get("description", ""),
                 tidal_id=mix.get("tidal_id", ""),
                 track_count=mix.get("track_count", 0),
+                image_url=image_url,
             )
             child._mix_is_playlist = False  # type: ignore[attr-defined]
             self._attach_mix_context_gesture(child)
             self._mixes_grid.append(child)
+            if image_url:
+                self._load_card_art(child, image_url)
 
     def _populate_playlists(self, playlists: list[dict]) -> None:
         """Fill the playlists grid with playlist cards."""
         self._clear_flow_box(self._playlists_grid)
         for pl in playlists:
+            image_url = pl.get("cover_url") or pl.get("image_url") or ""
             child = self._make_playlist_card(
                 name=pl.get("name", "Playlist"),
                 description=pl.get("description", ""),
                 tidal_id=pl.get("tidal_id", ""),
                 track_count=pl.get("track_count", 0),
+                image_url=image_url,
             )
             child._mix_is_playlist = True  # type: ignore[attr-defined]
             self._attach_mix_context_gesture(child)
             self._playlists_grid.append(child)
+            if image_url:
+                self._load_card_art(child, image_url)
 
     # ------------------------------------------------------------------
     # Event handlers
@@ -721,6 +752,41 @@ class MixesView(Gtk.ScrolledWindow):
             self._current_menu = None
             self._menu_action_group = None
             self._menu_parent = None
+
+    # ------------------------------------------------------------------
+    # Cover art loading
+    # ------------------------------------------------------------------
+
+    def _load_card_art(self, child: Gtk.FlowBoxChild, url: str) -> None:
+        """Load cover art for a mix/playlist card asynchronously."""
+        art_icon = getattr(child, "_art_icon", None)
+        art_image = getattr(child, "_art_image", None)
+        if art_icon is None or art_image is None:
+            return
+
+        import threading
+
+        request_token = object()
+        child._art_request_token = request_token  # type: ignore[attr-defined]
+
+        def _load():
+            try:
+                pixbuf = AlbumArtService.load_pixbuf_from_url(url, 400, 400)
+                GLib.idle_add(_on_loaded, pixbuf)
+            except Exception:
+                pass
+
+        def _on_loaded(pixbuf):
+            if getattr(child, "_art_request_token", None) is not request_token:
+                return False
+            if pixbuf is not None:
+                texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                art_image.set_from_paintable(texture)
+                art_image.set_visible(True)
+                art_icon.set_visible(False)
+            return False
+
+        threading.Thread(target=_load, daemon=True).start()
 
     # ------------------------------------------------------------------
     # Utility

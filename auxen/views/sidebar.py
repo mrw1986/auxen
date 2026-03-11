@@ -245,21 +245,29 @@ class AuxenSidebar(Gtk.Box):
         )
         brand_box.add_css_class("sidebar-brand")
 
-        self._brand_icon = Gtk.Image.new_from_icon_name("audio-headphones-symbolic")
-        self._brand_icon.set_pixel_size(32)
-        self._brand_icon.add_css_class("accent")
+        # Theme-aware ox logo (not wordmark)
+        self._brand_icon = Gtk.Image()
+        self._brand_icon.set_pixel_size(52)
+        self._brand_icon.set_valign(Gtk.Align.CENTER)
+        self._brand_icon.add_css_class("sidebar-brand-logo")
+        self._update_brand_icon()
         brand_box.append(self._brand_icon)
+
+        # Listen for theme changes to swap logo variant
+        style_mgr = Adw.StyleManager.get_default()
+        style_mgr.connect("notify::dark", lambda *_a: self._update_brand_icon())
 
         brand_text_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
-            spacing=2,
+            spacing=0,
+            valign=Gtk.Align.CENTER,
         )
-        brand_title = Gtk.Label(label="Auxen")
+        brand_title = Gtk.Label(label="AUXEN")
         brand_title.set_xalign(0)
-        brand_title.add_css_class("title-3")
+        brand_title.add_css_class("sidebar-brand-title")
         brand_text_box.append(brand_title)
 
-        brand_subtitle = Gtk.Label(label="FEED THE OX")
+        brand_subtitle = Gtk.Label(label="UNORTHODOX AUDIO")
         brand_subtitle.set_xalign(0)
         brand_subtitle.add_css_class("caption")
         brand_subtitle.add_css_class("sidebar-brand-subtitle")
@@ -418,16 +426,32 @@ class AuxenSidebar(Gtk.Box):
             spacing=0,
         )
 
-        # Collapse / expand toggle
+        # Collapse / expand toggle + theme toggle
         collapse_row = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
         )
         collapse_row.add_css_class("sidebar-collapse-row")
+
+        # Theme toggle button (dark/light/system cycle)
+        self._theme_mode = 0  # 0=system, 1=dark, 2=light
+        self._theme_btn = Gtk.Button.new_from_icon_name(
+            "display-brightness-symbolic"
+        )
+        self._theme_btn.add_css_class("flat")
+        self._theme_btn.add_css_class("sidebar-collapse-btn")
+        self._theme_btn.set_tooltip_text("Theme: System")
+        self._theme_btn.set_halign(Gtk.Align.START)
+        self._theme_btn.connect("clicked", self._on_theme_clicked)
+        collapse_row.append(self._theme_btn)
+
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        collapse_row.append(spacer)
+
         collapse_btn = Gtk.Button.new_from_icon_name("sidebar-show-symbolic")
         collapse_btn.add_css_class("flat")
         collapse_btn.add_css_class("sidebar-collapse-btn")
         collapse_btn.set_tooltip_text("Collapse sidebar")
-        collapse_btn.set_hexpand(True)
         collapse_btn.set_halign(Gtk.Align.END)
         collapse_btn.connect("clicked", self._on_collapse_clicked)
         self._collapse_btn = collapse_btn
@@ -503,7 +527,52 @@ class AuxenSidebar(Gtk.Box):
         if first_row:
             self._browse_list.select_row(first_row)
 
+    # ---- Brand icon helpers ----
+
+    def _update_brand_icon(self) -> None:
+        """Set the brand icon to the theme-appropriate ox logo."""
+        is_dark = Adw.StyleManager.get_default().get_dark()
+        icon_name = "auxen-logo-dark" if is_dark else "auxen-logo-light"
+        self._brand_icon.set_from_icon_name(icon_name)
+
     # ---- Collapse / Expand ----
+
+    def _on_theme_clicked(self, _btn: Gtk.Button) -> None:
+        """Cycle theme: system → dark → light → system."""
+        # 0=system, 1=dark, 2=light
+        self._theme_mode = (self._theme_mode + 1) % 3
+        self._apply_theme()
+        # Persist to database
+        if self._db is not None:
+            scheme_names = {0: "system", 1: "dark", 2: "light"}
+            self._db.set_setting(
+                "color_scheme", scheme_names[self._theme_mode]
+            )
+
+    def _apply_theme(self) -> None:
+        """Apply the current theme mode to the style manager and button."""
+        style_mgr = Adw.StyleManager.get_default()
+        if self._theme_mode == 0:  # System
+            style_mgr.set_color_scheme(Adw.ColorScheme.DEFAULT)
+            self._theme_btn.set_icon_name("display-brightness-symbolic")
+            self._theme_btn.set_tooltip_text("Theme: System")
+        elif self._theme_mode == 1:  # Dark
+            style_mgr.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+            self._theme_btn.set_icon_name("weather-clear-night-symbolic")
+            self._theme_btn.set_tooltip_text("Theme: Dark")
+        else:  # Light
+            style_mgr.set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
+            self._theme_btn.set_icon_name("weather-clear-symbolic")
+            self._theme_btn.set_tooltip_text("Theme: Light")
+
+    def restore_theme_from_db(self) -> None:
+        """Restore the theme setting from the database (call after set_database)."""
+        if self._db is None:
+            return
+        scheme = self._db.get_setting("color_scheme", "system")
+        mapping = {"system": 0, "dark": 1, "light": 2}
+        self._theme_mode = mapping.get(scheme, 0)
+        self._apply_theme()
 
     def _on_collapse_clicked(self, _btn: Gtk.Button) -> None:
         """Toggle sidebar between expanded and collapsed (icon-only) mode."""

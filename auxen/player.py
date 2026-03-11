@@ -12,7 +12,7 @@ gi.require_version("Gst", "1.0")
 from gi.repository import GLib, GObject, Gst  # noqa: E402
 
 from auxen.models import Source, Track  # noqa: E402
-from auxen.queue import PlayQueue  # noqa: E402
+from auxen.queue import PlayQueue, RepeatMode  # noqa: E402
 
 if False:  # TYPE_CHECKING
     from auxen.crossfade import CrossfadeService
@@ -565,14 +565,21 @@ class Player(GObject.Object):
             return
 
         snap = self.queue.snapshot()
-        next_index = snap.position + 1
 
-        if next_index < len(snap.tracks):
-            next_track = snap.tracks[next_index]
-        elif snap.repeat_mode.value == "queue" and snap.tracks:
-            next_track = snap.tracks[0]
+        # Repeat-one: prefetch the current track itself
+        if snap.repeat_mode == RepeatMode.TRACK:
+            if snap.tracks and 0 <= snap.position < len(snap.tracks):
+                next_track = snap.tracks[snap.position]
+            else:
+                return
         else:
-            return
+            next_index = snap.position + 1
+            if next_index < len(snap.tracks):
+                next_track = snap.tracks[next_index]
+            elif snap.repeat_mode == RepeatMode.QUEUE and snap.tracks:
+                next_track = snap.tracks[0]
+            else:
+                return
 
         if not next_track.source_id:
             return
@@ -729,14 +736,21 @@ class Player(GObject.Object):
         track's audio.
         """
         snap = self.queue.snapshot()
-        next_index = snap.position + 1
 
-        if next_index < len(snap.tracks):
-            next_track = snap.tracks[next_index]
-        elif snap.repeat_mode.value == "queue" and snap.tracks:
-            next_track = snap.tracks[0]
+        # Repeat-one: replay the current track
+        if snap.repeat_mode == RepeatMode.TRACK:
+            if snap.tracks and 0 <= snap.position < len(snap.tracks):
+                next_track = snap.tracks[snap.position]
+            else:
+                return
         else:
-            return
+            next_index = snap.position + 1
+            if next_index < len(snap.tracks):
+                next_track = snap.tracks[next_index]
+            elif snap.repeat_mode == RepeatMode.QUEUE and snap.tracks:
+                next_track = snap.tracks[0]
+            else:
+                return
 
         # Look up the prefetched URI — never resolve synchronously here
         uri: Optional[str] = None

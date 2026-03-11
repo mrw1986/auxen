@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Auxen - Batch 4 Test Feedback</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --surface2: #0f3460;
+    --accent: #e94560;
+    --green: #00b894;
+    --yellow: #fdcb6e;
+    --red: #d63031;
+    --text: #eee;
+    --dim: #888;
+    --border: #2a2a4a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    max-width: 960px;
+    margin: 0 auto;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 6px; }
+  .subtitle { color: var(--dim); margin-bottom: 24px; font-size: 0.9rem; }
+  h2 {
+    font-size: 1.1rem;
+    margin: 20px 0 10px;
+    padding: 8px 12px;
+    background: var(--surface2);
+    border-radius: 6px;
+    border-left: 3px solid var(--accent);
+  }
+  .section { margin-bottom: 16px; }
+  .item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    border-radius: 4px;
+    transition: background 0.15s;
+  }
+  .item:hover { background: var(--surface); }
+  .item-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    cursor: pointer;
+  }
+  .item input[type="checkbox"] {
+    margin-top: 3px;
+    accent-color: var(--green);
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  .item label { cursor: pointer; flex: 1; }
+  .item .tag {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .tag-fix { background: var(--green); color: #000; }
+  .tag-feature { background: var(--accent); color: #fff; }
+  .tag-responsive { background: var(--yellow); color: #000; }
+  .status-btns {
+    display: flex;
+    gap: 4px;
+    margin-left: 26px;
+  }
+  .status-btn {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--dim);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .status-btn:hover { border-color: var(--text); color: var(--text); }
+  .status-btn.active-pass { background: var(--green); color: #000; border-color: var(--green); }
+  .status-btn.active-fail { background: var(--red); color: #fff; border-color: var(--red); }
+  .status-btn.active-partial { background: var(--yellow); color: #000; border-color: var(--yellow); }
+  .status-btn.active-skip { background: var(--dim); color: #000; border-color: var(--dim); }
+  .comment-row {
+    margin-left: 26px;
+    margin-top: 4px;
+  }
+  .comment-toggle {
+    font-size: 0.75rem;
+    color: var(--accent);
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+  }
+  .comment-toggle:hover { text-decoration: underline; }
+  .comment-input {
+    width: 100%;
+    margin-top: 4px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.85rem;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 32px;
+  }
+  .comment-input:focus { outline: none; border-color: var(--accent); }
+  .comment-input::placeholder { color: var(--dim); }
+  .progress-bar {
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    padding: 12px 0;
+    z-index: 10;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+  .progress-track {
+    height: 8px;
+    background: var(--surface);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--green), #55efc4);
+    border-radius: 4px;
+    transition: width 0.3s;
+  }
+  .progress-text {
+    font-size: 0.85rem;
+    color: var(--dim);
+    margin-top: 4px;
+    text-align: center;
+  }
+  .stats-row {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    margin-top: 6px;
+    font-size: 0.8rem;
+  }
+  .stat { color: var(--dim); }
+  .stat .n { font-weight: 700; }
+  .stat-pass .n { color: var(--green); }
+  .stat-fail .n { color: var(--red); }
+  .stat-partial .n { color: var(--yellow); }
+  .export-bar {
+    display: flex;
+    gap: 8px;
+    margin: 20px 0;
+    justify-content: center;
+  }
+  .export-btn {
+    padding: 8px 20px;
+    border-radius: 6px;
+    border: none;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: opacity 0.15s;
+  }
+  .export-btn:hover { opacity: 0.85; }
+  .btn-export { background: var(--accent); color: #fff; }
+  .btn-clear { background: var(--surface2); color: var(--text); }
+  .btn-copy { background: var(--green); color: #000; }
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--green);
+    color: #000;
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+    z-index: 100;
+  }
+  .toast.visible { opacity: 1; }
+</style>
+</head>
+<body>
+
+<h1>Batch 4 — Interactive Test Feedback</h1>
+<p class="subtitle">Test each item, mark its status, and add comments. Data is saved to localStorage automatically.</p>
+
+<div class="progress-bar">
+  <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+  <div class="progress-text" id="progressText">0 / 0 tested</div>
+  <div class="stats-row">
+    <span class="stat stat-pass"><span class="n" id="nPass">0</span> pass</span>
+    <span class="stat stat-fail"><span class="n" id="nFail">0</span> fail</span>
+    <span class="stat stat-partial"><span class="n" id="nPartial">0</span> partial</span>
+    <span class="stat"><span class="n" id="nSkip">0</span> skip</span>
+  </div>
+</div>
+
+<!-- ===== Library Albums Bug ===== -->
+<h2>Library — Albums View Fix</h2>
+<div class="section" id="s-library">
+  <div class="item" data-id="lib-1"><div class="item-row"><input type="checkbox"><label>Library &gt; Albums shows album names (not artist names)</label><span class="tag tag-fix">Fix</span></div></div>
+  <div class="item" data-id="lib-2"><div class="item-row"><input type="checkbox"><label>Library &gt; Artists shows artist rows correctly</label><span class="tag tag-fix">Fix</span></div></div>
+  <div class="item" data-id="lib-3"><div class="item-row"><input type="checkbox"><label>Library &gt; Tracks shows track rows correctly</label><span class="tag tag-fix">Fix</span></div></div>
+  <div class="item" data-id="lib-4"><div class="item-row"><input type="checkbox"><label>Switching Albums → Artists → Tracks → Albums shows correct content each time</label><span class="tag tag-fix">Fix</span></div></div>
+  <div class="item" data-id="lib-5"><div class="item-row"><input type="checkbox"><label>Navigate away from Library and back — correct tab content still shows</label><span class="tag tag-fix">Fix</span></div></div>
+  <div class="item" data-id="lib-6"><div class="item-row"><input type="checkbox"><label>Library &gt; Albums &gt; List View loads correctly</label><span class="tag tag-fix">Fix</span></div></div>
+</div>
+
+<!-- ===== Scroll Persistence ===== -->
+<h2>Scroll Position Persistence</h2>
+<div class="section" id="s-scroll">
+  <div class="item" data-id="scr-1"><div class="item-row"><input type="checkbox"><label>Library: scroll down, go to Home, come back — scroll position restored</label><span class="tag tag-fix">Fix</span></div></div>
+  <div class="item" data-id="scr-2"><div class="item-row"><input type="checkbox"><label>Collection: scroll down, go to Home, come back — scroll position restored</label><span class="tag tag-fix">Fix</span></div></div>
+  <div class="item" data-id="scr-3"><div class="item-row"><input type="checkbox"><label>Home: scroll down, go to Library, come back — scroll position restored</label><span class="tag tag-fix">Fix</span></div></div>
+</div>
+
+<!-- ===== Player Bar Responsive ===== -->
+<h2>Player Bar — Responsive Layout</h2>
+<div class="section" id="s-responsive">
+  <div class="item" data-id="res-1"><div class="item-row"><input type="checkbox"><label>Full width (≥800px): all controls visible, volume slider shown</label><span class="tag tag-responsive">Responsive</span></div></div>
+  <div class="item" data-id="res-2"><div class="item-row"><input type="checkbox"><label>Compact (600–799px): volume slider hidden, volume button visible, no tiny dot</label><span class="tag tag-responsive">Responsive</span></div></div>
+  <div class="item" data-id="res-3"><div class="item-row"><input type="checkbox"><label>Narrow (450–599px): shuffle, repeat, time labels, volume all hidden</label><span class="tag tag-responsive">Responsive</span></div></div>
+  <div class="item" data-id="res-4"><div class="item-row"><input type="checkbox"><label>Ultra-narrow (&lt;450px): only track info + inline play button</label><span class="tag tag-responsive">Responsive</span></div></div>
+  <div class="item" data-id="res-5"><div class="item-row"><input type="checkbox"><label>No controls appear as tiny dots or clipped at any width</label><span class="tag tag-responsive">Responsive</span></div></div>
+</div>
+
+<!-- ===== Track Context Menu ===== -->
+<h2>Track Context Menu — New Options</h2>
+<div class="section" id="s-track-ctx">
+  <div class="item" data-id="tc-1"><div class="item-row"><input type="checkbox"><label>Right-click Tidal track → "Go to Track Radio" appears</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="tc-2"><div class="item-row"><input type="checkbox"><label>Click "Go to Track Radio" → radio tracks start playing</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="tc-3"><div class="item-row"><input type="checkbox"><label>Right-click Tidal track → "Credits" appears</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="tc-4"><div class="item-row"><input type="checkbox"><label>Click "Credits" → dialog shows songwriter/producer info</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="tc-5"><div class="item-row"><input type="checkbox"><label>Right-click local track → "Go to Track Radio" does NOT appear</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="tc-6"><div class="item-row"><input type="checkbox"><label>Right-click local track → "Credits" does NOT appear</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="tc-7"><div class="item-row"><input type="checkbox"><label>Track Radio/Credits work from Library view</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="tc-8"><div class="item-row"><input type="checkbox"><label>Track Radio/Credits work from Collection view</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="tc-9"><div class="item-row"><input type="checkbox"><label>Track Radio/Credits work from Explore view</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="tc-10"><div class="item-row"><input type="checkbox"><label>Track Radio/Credits work from Search results</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="tc-11"><div class="item-row"><input type="checkbox"><label>Track Radio/Credits work from Album Detail</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="tc-12"><div class="item-row"><input type="checkbox"><label>Track Radio/Credits work from Playlist view</label><span class="tag tag-feature">Feature</span></div></div>
+</div>
+
+<!-- ===== Album Context Menu ===== -->
+<h2>Album Context Menu — Shuffle</h2>
+<div class="section" id="s-album-ctx">
+  <div class="item" data-id="ac-1"><div class="item-row"><input type="checkbox"><label>Right-click album → "Shuffle Album" option visible</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="ac-2"><div class="item-row"><input type="checkbox"><label>Click "Shuffle Album" → album tracks play in random order</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="ac-3"><div class="item-row"><input type="checkbox"><label>Shuffle works from Library album cards</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="ac-4"><div class="item-row"><input type="checkbox"><label>Shuffle works from Collection album cards</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="ac-5"><div class="item-row"><input type="checkbox"><label>Shuffle works from Home recently added albums</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="ac-6"><div class="item-row"><input type="checkbox"><label>Shuffle works from Explore album cards</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="ac-7"><div class="item-row"><input type="checkbox"><label>Right-click albums on Artist Detail page works</label><span class="tag tag-feature">Feature</span></div></div>
+</div>
+
+<!-- ===== Artist Context Menu ===== -->
+<h2>Artist Context Menu — New Options</h2>
+<div class="section" id="s-artist-ctx">
+  <div class="item" data-id="art-1"><div class="item-row"><input type="checkbox"><label>Right-click artist → "Go to Artist Radio" appears</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="art-2"><div class="item-row"><input type="checkbox"><label>Click "Go to Artist Radio" → radio tracks start playing</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="art-3"><div class="item-row"><input type="checkbox"><label>Right-click artist → "Shuffle Artist" appears</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="art-4"><div class="item-row"><input type="checkbox"><label>Click "Shuffle Artist" → artist tracks play in random order</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="art-5"><div class="item-row"><input type="checkbox"><label>Right-click artist → "Follow Artist" or "Unfollow Artist" appears</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="art-6"><div class="item-row"><input type="checkbox"><label>Click "Follow Artist" → no error, artist followed on Tidal</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="art-7"><div class="item-row"><input type="checkbox"><label>Click "Unfollow Artist" → no error, artist unfollowed on Tidal</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="art-8"><div class="item-row"><input type="checkbox"><label>Artist context menu works from Library artist list</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="art-9"><div class="item-row"><input type="checkbox"><label>Artist context menu works from Collection artist list</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="art-10"><div class="item-row"><input type="checkbox"><label>Artist context menu works from Stats top artists</label><span class="tag tag-feature">Feature</span></div></div>
+</div>
+
+<!-- ===== Home Page ===== -->
+<h2>Home Page — Clickable Artists</h2>
+<div class="section" id="s-home">
+  <div class="item" data-id="hm-1"><div class="item-row"><input type="checkbox"><label>Recently Played rows: artist name is clickable (underline on hover)</label><span class="tag tag-feature">Feature</span></div></div>
+  <div class="item" data-id="hm-2"><div class="item-row"><input type="checkbox"><label>Clicking artist name navigates to Artist Detail page</label><span class="tag tag-feature">Feature</span></div></div>
+</div>
+
+<!-- ===== Panels ===== -->
+<h2>Side Panels</h2>
+<div class="section" id="s-panels">
+  <div class="item" data-id="pn-1"><div class="item-row"><input type="checkbox"><label>Lyrics panel and Queue panel are the same width</label><span class="tag tag-fix">Fix</span></div></div>
+</div>
+
+<!-- ===== Regression ===== -->
+<h2>Regression — Existing Features</h2>
+<div class="section" id="s-regression">
+  <div class="item" data-id="reg-1"><div class="item-row"><input type="checkbox"><label>Play/pause works from player bar</label><span class="tag tag-fix">Regression</span></div></div>
+  <div class="item" data-id="reg-2"><div class="item-row"><input type="checkbox"><label>Queue panel opens/closes correctly</label><span class="tag tag-fix">Regression</span></div></div>
+  <div class="item" data-id="reg-3"><div class="item-row"><input type="checkbox"><label>Lyrics panel opens/closes correctly</label><span class="tag tag-fix">Regression</span></div></div>
+  <div class="item" data-id="reg-4"><div class="item-row"><input type="checkbox"><label>Existing context menu options (Play, Add to Queue, etc.) still work</label><span class="tag tag-fix">Regression</span></div></div>
+  <div class="item" data-id="reg-5"><div class="item-row"><input type="checkbox"><label>Collection tabs (Albums/Artists/Tracks) work correctly</label><span class="tag tag-fix">Regression</span></div></div>
+  <div class="item" data-id="reg-6"><div class="item-row"><input type="checkbox"><label>Search works and shows results</label><span class="tag tag-fix">Regression</span></div></div>
+</div>
+
+<div class="export-bar">
+  <button class="export-btn btn-copy" onclick="copyReport()">Copy Report</button>
+  <button class="export-btn btn-export" onclick="exportJSON()">Export JSON</button>
+  <button class="export-btn btn-clear" onclick="clearAll()">Reset All</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const KEY = 'auxen-batch4-feedback';
+const items = document.querySelectorAll('.item[data-id]');
+
+// Initialize status buttons and comment fields for each item
+items.forEach(item => {
+  const id = item.dataset.id;
+
+  // Status buttons
+  const statusDiv = document.createElement('div');
+  statusDiv.className = 'status-btns';
+  ['Pass', 'Fail', 'Partial', 'Skip'].forEach(s => {
+    const btn = document.createElement('button');
+    btn.className = 'status-btn';
+    btn.textContent = s;
+    btn.dataset.status = s.toLowerCase();
+    btn.addEventListener('click', () => {
+      statusDiv.querySelectorAll('.status-btn').forEach(b => {
+        b.className = 'status-btn';
+      });
+      btn.classList.add('active-' + s.toLowerCase());
+      // Also check the checkbox if pass
+      const cb = item.querySelector('input[type="checkbox"]');
+      if (s === 'Pass') cb.checked = true;
+      else if (s === 'Fail' || s === 'Skip') cb.checked = false;
+      save();
+      updateProgress();
+    });
+    statusDiv.appendChild(btn);
+  });
+  item.appendChild(statusDiv);
+
+  // Comment toggle + input
+  const commentRow = document.createElement('div');
+  commentRow.className = 'comment-row';
+  const toggle = document.createElement('button');
+  toggle.className = 'comment-toggle';
+  toggle.textContent = '+ Add comment';
+  const textarea = document.createElement('textarea');
+  textarea.className = 'comment-input';
+  textarea.placeholder = 'Enter feedback, bugs, or notes...';
+  textarea.style.display = 'none';
+  textarea.rows = 2;
+  textarea.addEventListener('input', save);
+
+  toggle.addEventListener('click', () => {
+    const showing = textarea.style.display !== 'none';
+    textarea.style.display = showing ? 'none' : 'block';
+    toggle.textContent = showing ? '+ Add comment' : '- Hide comment';
+    if (!showing) textarea.focus();
+  });
+
+  commentRow.appendChild(toggle);
+  commentRow.appendChild(textarea);
+  item.appendChild(commentRow);
+
+  // Checkbox click -> pass
+  const cb = item.querySelector('input[type="checkbox"]');
+  cb.addEventListener('change', () => {
+    if (cb.checked) {
+      statusDiv.querySelectorAll('.status-btn').forEach(b => b.className = 'status-btn');
+      statusDiv.querySelector('[data-status="pass"]').classList.add('active-pass');
+    } else {
+      statusDiv.querySelectorAll('.status-btn').forEach(b => b.className = 'status-btn');
+    }
+    save();
+    updateProgress();
+  });
+
+  // Click row to toggle
+  item.querySelector('.item-row').addEventListener('click', e => {
+    if (e.target.tagName === 'INPUT') return;
+    cb.checked = !cb.checked;
+    cb.dispatchEvent(new Event('change'));
+  });
+});
+
+function getState() {
+  const state = {};
+  items.forEach(item => {
+    const id = item.dataset.id;
+    const activeBtn = item.querySelector('.status-btn[class*="active-"]');
+    const status = activeBtn ? activeBtn.dataset.status : '';
+    const comment = item.querySelector('.comment-input').value;
+    const checked = item.querySelector('input[type="checkbox"]').checked;
+    state[id] = { status, comment, checked };
+  });
+  return state;
+}
+
+function save() {
+  localStorage.setItem(KEY, JSON.stringify(getState()));
+}
+
+function restore() {
+  const raw = localStorage.getItem(KEY);
+  if (!raw) return;
+  try {
+    const state = JSON.parse(raw);
+    items.forEach(item => {
+      const id = item.dataset.id;
+      const d = state[id];
+      if (!d) return;
+      if (d.checked) item.querySelector('input[type="checkbox"]').checked = true;
+      if (d.status) {
+        const btn = item.querySelector(`.status-btn[data-status="${d.status}"]`);
+        if (btn) btn.classList.add('active-' + d.status);
+      }
+      if (d.comment) {
+        const ta = item.querySelector('.comment-input');
+        ta.value = d.comment;
+        ta.style.display = 'block';
+        item.querySelector('.comment-toggle').textContent = '- Hide comment';
+      }
+    });
+  } catch {}
+}
+
+function updateProgress() {
+  const total = items.length;
+  let tested = 0, pass = 0, fail = 0, partial = 0, skip = 0;
+  items.forEach(item => {
+    const btn = item.querySelector('.status-btn[class*="active-"]');
+    if (btn) {
+      tested++;
+      const s = btn.dataset.status;
+      if (s === 'pass') pass++;
+      else if (s === 'fail') fail++;
+      else if (s === 'partial') partial++;
+      else if (s === 'skip') skip++;
+    }
+  });
+  document.getElementById('progressFill').style.width = (total ? (tested / total * 100) : 0) + '%';
+  document.getElementById('progressText').textContent = tested + ' / ' + total + ' tested';
+  document.getElementById('nPass').textContent = pass;
+  document.getElementById('nFail').textContent = fail;
+  document.getElementById('nPartial').textContent = partial;
+  document.getElementById('nSkip').textContent = skip;
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('visible');
+  setTimeout(() => t.classList.remove('visible'), 2000);
+}
+
+function copyReport() {
+  const state = getState();
+  let report = 'Auxen Batch 4 Test Report\n' + '='.repeat(40) + '\n\n';
+  let currentSection = '';
+  items.forEach(item => {
+    const section = item.closest('.section');
+    const h2 = section.previousElementSibling;
+    if (h2 && h2.textContent !== currentSection) {
+      currentSection = h2.textContent;
+      report += '\n## ' + currentSection + '\n';
+    }
+    const id = item.dataset.id;
+    const label = item.querySelector('label').textContent;
+    const d = state[id];
+    const icon = d.status === 'pass' ? '[PASS]' : d.status === 'fail' ? '[FAIL]' : d.status === 'partial' ? '[PARTIAL]' : d.status === 'skip' ? '[SKIP]' : '[    ]';
+    report += icon + ' ' + label + '\n';
+    if (d.comment) report += '   > ' + d.comment.replace(/\n/g, '\n   > ') + '\n';
+  });
+  navigator.clipboard.writeText(report).then(() => showToast('Report copied to clipboard!'));
+}
+
+function exportJSON() {
+  const state = getState();
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'batch4-feedback.json';
+  a.click();
+  showToast('JSON exported!');
+}
+
+function clearAll() {
+  if (!confirm('Reset all test results and comments?')) return;
+  localStorage.removeItem(KEY);
+  items.forEach(item => {
+    item.querySelector('input[type="checkbox"]').checked = false;
+    item.querySelectorAll('.status-btn').forEach(b => b.className = 'status-btn');
+    const ta = item.querySelector('.comment-input');
+    ta.value = '';
+    ta.style.display = 'none';
+    item.querySelector('.comment-toggle').textContent = '+ Add comment';
+  });
+  updateProgress();
+  showToast('All reset!');
+}
+
+restore();
+updateProgress();
+</script>
+</body>
+</html>

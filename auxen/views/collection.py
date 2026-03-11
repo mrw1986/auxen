@@ -176,6 +176,7 @@ def _make_album_card(
 
     # Album art with overlay badge
     overlay = Gtk.Overlay()
+    overlay.add_css_class("album-card-art-container")
 
     art_box = Gtk.Box(
         orientation=Gtk.Orientation.VERTICAL,
@@ -284,14 +285,18 @@ def _make_artist_row(
     row_box.set_margin_start(8)
     row_box.set_margin_end(8)
 
-    # Artist icon placeholder (shown until image loads)
+    # Art overlay: placeholder + loaded image + play button
+    art_overlay = Gtk.Overlay()
+    art_overlay.set_size_request(32, 32)
+    art_overlay.set_valign(Gtk.Align.CENTER)
+
     icon = Gtk.Image.new_from_icon_name("avatar-default-symbolic")
     icon.set_pixel_size(32)
     icon.set_opacity(0.5)
     icon.set_valign(Gtk.Align.CENTER)
-    row_box.append(icon)
+    icon.set_halign(Gtk.Align.CENTER)
+    art_overlay.set_child(icon)
 
-    # Artist art image (hidden until loaded)
     art_image = Gtk.Image()
     art_image.set_pixel_size(32)
     art_image.set_size_request(32, 32)
@@ -299,7 +304,33 @@ def _make_artist_row(
     art_image.set_valign(Gtk.Align.CENTER)
     art_image.add_css_class("artist-row-image")
     art_image.set_visible(False)
-    row_box.append(art_image)
+    art_overlay.add_overlay(art_image)
+
+    play_btn = Gtk.Button.new_from_icon_name(
+        "media-playback-start-symbolic"
+    )
+    play_btn.add_css_class("flat")
+    play_btn.add_css_class("album-row-play-overlay")
+    play_btn.set_valign(Gtk.Align.CENTER)
+    play_btn.set_halign(Gtk.Align.CENTER)
+    play_btn.set_tooltip_text(f"Play {artist}")
+    play_btn.set_opacity(0)
+    art_overlay.add_overlay(play_btn)
+
+    # Hover controller: show/hide play button
+    motion = Gtk.EventControllerMotion.new()
+
+    def _on_enter(*_args):
+        play_btn.set_opacity(1)
+
+    def _on_leave(*_args):
+        play_btn.set_opacity(0)
+
+    motion.connect("enter", _on_enter)
+    motion.connect("leave", _on_leave)
+    row_box.add_controller(motion)
+
+    row_box.append(art_overlay)
 
     # Artist name
     name_label = Gtk.Label(label=artist)
@@ -319,11 +350,10 @@ def _make_artist_row(
     row = Gtk.ListBoxRow()
     row.set_child(row_box)
     row.set_activatable(True)
-    # Store artist name for click handling
-    row._artist_name = artist  # type: ignore[attr-defined]
-    # Store art widgets for async image loading
-    row._art_icon = icon  # type: ignore[attr-defined]
-    row._art_image = art_image  # type: ignore[attr-defined]
+    row._artist_name = artist
+    row._art_icon = icon
+    row._art_image = art_image
+    row._play_btn = play_btn
     return row
 
 
@@ -339,11 +369,17 @@ def _make_album_list_row(
     row_box.set_margin_start(8)
     row_box.set_margin_end(8)
 
+    # Art overlay: placeholder + loaded image + play button
+    art_overlay = Gtk.Overlay()
+    art_overlay.set_size_request(40, 40)
+    art_overlay.set_valign(Gtk.Align.CENTER)
+
     art_icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
     art_icon.set_pixel_size(24)
     art_icon.set_opacity(0.4)
     art_icon.set_valign(Gtk.Align.CENTER)
-    row_box.append(art_icon)
+    art_icon.set_halign(Gtk.Align.CENTER)
+    art_overlay.set_child(art_icon)
 
     art_image = Gtk.Image()
     art_image.set_pixel_size(40)
@@ -352,7 +388,33 @@ def _make_album_list_row(
     art_image.set_valign(Gtk.Align.CENTER)
     art_image.add_css_class("album-row-art-image")
     art_image.set_visible(False)
-    row_box.append(art_image)
+    art_overlay.add_overlay(art_image)
+
+    play_btn = Gtk.Button.new_from_icon_name(
+        "media-playback-start-symbolic"
+    )
+    play_btn.add_css_class("flat")
+    play_btn.add_css_class("album-row-play-overlay")
+    play_btn.set_valign(Gtk.Align.CENTER)
+    play_btn.set_halign(Gtk.Align.CENTER)
+    play_btn.set_tooltip_text(f"Play {album}")
+    play_btn.set_opacity(0)
+    art_overlay.add_overlay(play_btn)
+
+    # Hover controller: show/hide play button
+    motion = Gtk.EventControllerMotion.new()
+
+    def _on_enter(*_args):
+        play_btn.set_opacity(1)
+
+    def _on_leave(*_args):
+        play_btn.set_opacity(0)
+
+    motion.connect("enter", _on_enter)
+    motion.connect("leave", _on_leave)
+    row_box.add_controller(motion)
+
+    row_box.append(art_overlay)
 
     text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
     text_box.set_hexpand(True)
@@ -392,6 +454,7 @@ def _make_album_list_row(
     row._album_artist = artist
     row._art_icon = art_icon
     row._art_image = art_image
+    row._play_btn = play_btn
     return row
 
 
@@ -407,13 +470,47 @@ def _make_album_compact_row(
     row_box.set_margin_start(8)
     row_box.set_margin_end(8)
 
+    # Index number / play button swap container
+    num_play_box = Gtk.Box()
+    num_play_box.set_size_request(28, -1)
+    num_play_box.set_valign(Gtk.Align.CENTER)
+    num_play_box.set_halign(Gtk.Align.CENTER)
+
     num_label = Gtk.Label(label=str(index + 1))
     num_label.add_css_class("caption")
     num_label.add_css_class("dim-label")
     num_label.set_size_request(28, -1)
     num_label.set_xalign(1)
     num_label.set_valign(Gtk.Align.CENTER)
-    row_box.append(num_label)
+    num_play_box.append(num_label)
+
+    play_btn = Gtk.Button.new_from_icon_name(
+        "media-playback-start-symbolic"
+    )
+    play_btn.add_css_class("flat")
+    play_btn.add_css_class("album-row-play-overlay")
+    play_btn.set_valign(Gtk.Align.CENTER)
+    play_btn.set_tooltip_text(f"Play {album}")
+    play_btn.set_visible(False)
+    num_play_box.append(play_btn)
+
+    row_box.append(num_play_box)
+
+    # Hover controller: swap number ↔ play button
+    motion = Gtk.EventControllerMotion.new()
+
+    def _on_enter(*_args):
+        num_label.set_visible(False)
+        play_btn.set_visible(True)
+        play_btn.set_opacity(1)
+
+    def _on_leave(*_args):
+        num_label.set_visible(True)
+        play_btn.set_visible(False)
+
+    motion.connect("enter", _on_enter)
+    motion.connect("leave", _on_leave)
+    row_box.add_controller(motion)
 
     title_label = Gtk.Label(label=album)
     title_label.set_xalign(0)
@@ -440,6 +537,7 @@ def _make_album_compact_row(
     row.set_activatable(True)
     row._album_title = album
     row._album_artist = artist
+    row._play_btn = play_btn
     return row
 
 
@@ -540,13 +638,47 @@ def _make_artist_compact_row(
     row_box.set_margin_start(8)
     row_box.set_margin_end(8)
 
+    # Index number / play button swap container
+    num_play_box = Gtk.Box()
+    num_play_box.set_size_request(28, -1)
+    num_play_box.set_valign(Gtk.Align.CENTER)
+    num_play_box.set_halign(Gtk.Align.CENTER)
+
     num_label = Gtk.Label(label=str(index + 1))
     num_label.add_css_class("caption")
     num_label.add_css_class("dim-label")
     num_label.set_size_request(28, -1)
     num_label.set_xalign(1)
     num_label.set_valign(Gtk.Align.CENTER)
-    row_box.append(num_label)
+    num_play_box.append(num_label)
+
+    play_btn = Gtk.Button.new_from_icon_name(
+        "media-playback-start-symbolic"
+    )
+    play_btn.add_css_class("flat")
+    play_btn.add_css_class("album-row-play-overlay")
+    play_btn.set_valign(Gtk.Align.CENTER)
+    play_btn.set_tooltip_text(f"Play {artist}")
+    play_btn.set_visible(False)
+    num_play_box.append(play_btn)
+
+    row_box.append(num_play_box)
+
+    # Hover controller: swap number ↔ play button
+    motion = Gtk.EventControllerMotion.new()
+
+    def _on_enter(*_args):
+        num_label.set_visible(False)
+        play_btn.set_visible(True)
+        play_btn.set_opacity(1)
+
+    def _on_leave(*_args):
+        num_label.set_visible(True)
+        play_btn.set_visible(False)
+
+    motion.connect("enter", _on_enter)
+    motion.connect("leave", _on_leave)
+    row_box.add_controller(motion)
 
     name_label = Gtk.Label(label=artist)
     name_label.set_xalign(0)
@@ -564,6 +696,7 @@ def _make_artist_compact_row(
     row.set_child(row_box)
     row.set_activatable(True)
     row._artist_name = artist
+    row._play_btn = play_btn
     return row
 
 
@@ -1893,6 +2026,7 @@ class CollectionView(Gtk.Box):
                         on_artist_clicked=self._on_artist_clicked,
                     )
                     self._attach_album_context_gesture(row)
+                    self._attach_album_play_button(row)
                     self._album_list.append(row)
                 else:  # LIST
                     row = _make_album_list_row(
@@ -1903,6 +2037,7 @@ class CollectionView(Gtk.Box):
                         on_artist_clicked=self._on_artist_clicked,
                     )
                     self._attach_album_context_gesture(row)
+                    self._attach_album_play_button(row)
                     self._album_list.append(row)
                     cover_url = album_data.get("cover_url")
                     if cover_url and self._album_art_service is not None:
@@ -2011,6 +2146,7 @@ class CollectionView(Gtk.Box):
                         index=i,
                     )
                     self._attach_artist_context_gesture(row)
+                    self._attach_artist_play_button(row)
                     self._artist_list.append(row)
                 else:  # LIST
                     row = _make_artist_row(
@@ -2019,6 +2155,7 @@ class CollectionView(Gtk.Box):
                         sources=artist_data["sources"],
                     )
                     self._attach_artist_context_gesture(row)
+                    self._attach_artist_play_button(row)
                     self._artist_list.append(row)
                     if load_images:
                         self._load_artist_image_for_row(row)
@@ -2112,12 +2249,12 @@ class CollectionView(Gtk.Box):
 
         art_service.get_art_async(track, _on_loaded, width=40, height=40)
 
-    def _attach_artist_play_button(self, card: Gtk.FlowBoxChild) -> None:
-        """Wire the play overlay button on an artist grid card."""
-        play_btn = getattr(card, "_play_btn", None)
+    def _attach_artist_play_button(self, widget) -> None:
+        """Wire the play overlay button on an artist card or row."""
+        play_btn = getattr(widget, "_play_btn", None)
         if play_btn is None:
             return
-        artist_name = getattr(card, "_artist_name", None)
+        artist_name = getattr(widget, "_artist_name", None)
         if artist_name is None:
             return
 
@@ -2126,7 +2263,8 @@ class CollectionView(Gtk.Box):
                 self._on_artist_clicked(name)
 
         play_btn.connect("clicked", _on_play)
-        play_btn.set_can_target(False)
+        if isinstance(widget, Gtk.FlowBoxChild):
+            play_btn.set_can_target(False)
 
     def _refresh_tracks(self) -> None:
         """Rebuild the tracks display from current filter/sort state."""
