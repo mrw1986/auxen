@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     bit_depth       INTEGER,
     album_art_url   TEXT,
     match_group_id  TEXT,
+    explicit        INTEGER DEFAULT 0,
     added_at        TEXT    DEFAULT (datetime('now')),
     last_played_at  TEXT,
     play_count      INTEGER DEFAULT 0,
@@ -115,6 +116,19 @@ class Database:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(_CREATE_TABLES)
+
+        # -- Schema migrations for existing databases --
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Add columns that may be missing from older databases."""
+        cur = self._conn.execute("PRAGMA table_info(tracks)")
+        existing = {row["name"] for row in cur.fetchall()}
+        if "explicit" not in existing:
+            self._conn.execute(
+                "ALTER TABLE tracks ADD COLUMN explicit INTEGER DEFAULT 0"
+            )
+            self._conn.commit()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -200,8 +214,8 @@ class Database:
                     (title, artist, album, album_artist, genre, year,
                      duration, track_number, disc_number, source, source_id,
                      bitrate, format, sample_rate, bit_depth, album_art_url,
-                     match_group_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     match_group_id, explicit)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source, source_id) DO UPDATE SET
                     title       = excluded.title,
                     artist      = excluded.artist,
@@ -217,7 +231,8 @@ class Database:
                     sample_rate = excluded.sample_rate,
                     bit_depth   = excluded.bit_depth,
                     album_art_url = excluded.album_art_url,
-                    match_group_id = excluded.match_group_id
+                    match_group_id = excluded.match_group_id,
+                    explicit    = excluded.explicit
                 """,
                 (
                     track.title,
@@ -237,6 +252,7 @@ class Database:
                     track.bit_depth,
                     track.album_art_url,
                     track.match_group_id,
+                    int(track.explicit),
                 ),
             )
             self._commit()
@@ -1338,6 +1354,12 @@ class Database:
                 bitrate = bitrate or 320
                 sample_rate, bit_depth = 44100, 16
 
+        # Handle older databases that may not have the explicit column
+        try:
+            explicit_val = bool(row["explicit"])
+        except (IndexError, KeyError):
+            explicit_val = False
+
         return Track(
             id=row["id"],
             title=row["title"],
@@ -1357,6 +1379,7 @@ class Database:
             bit_depth=bit_depth,
             album_art_url=row["album_art_url"],
             match_group_id=row["match_group_id"],
+            explicit=explicit_val,
             added_at=row["added_at"],
             last_played_at=row["last_played_at"],
             play_count=row["play_count"],

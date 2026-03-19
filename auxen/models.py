@@ -54,6 +54,7 @@ class Track:
     bit_depth: Optional[int] = None
     album_art_url: Optional[str] = None
     match_group_id: Optional[str] = None
+    explicit: bool = False
 
     # Database fields
     id: Optional[int] = None

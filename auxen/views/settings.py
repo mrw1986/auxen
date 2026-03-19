@@ -12,9 +12,36 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 logger = logging.getLogger(__name__)
+
+# Module-level CSS provider for UI scaling
+_scale_css_provider: Gtk.CssProvider | None = None
+
+
+def _apply_ui_scale(percent: int) -> None:
+    """Apply a font-size multiplier to the root window via CSS."""
+    global _scale_css_provider
+    display = Gdk.Display.get_default()
+    if display is None:
+        return
+
+    if _scale_css_provider is not None:
+        Gtk.StyleContext.remove_provider_for_display(
+            display, _scale_css_provider
+        )
+
+    _scale_css_provider = Gtk.CssProvider()
+    factor = percent / 100.0
+    # Scale the base font-size (typically ~10pt)
+    css = f"* {{ font-size: {factor:.2f}rem; }}"
+    _scale_css_provider.load_from_string(css)
+    Gtk.StyleContext.add_provider_for_display(
+        display,
+        _scale_css_provider,
+        Gtk.STYLE_PROVIDER_PRIORITY_USER,
+    )
 
 
 class AuxenSettings(Adw.PreferencesWindow):
@@ -179,6 +206,29 @@ class AuxenSettings(Adw.PreferencesWindow):
             "notify::selected", self._on_theme_changed
         )
         group.add(self._theme_row)
+
+        # UI Scale slider: 80% to 150%
+        scale_row = Adw.ActionRow(
+            title="UI Scale",
+            subtitle="Adjust text and element sizing (80% – 150%)",
+        )
+        self._ui_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 80, 150, 5
+        )
+        self._ui_scale.set_value(100)
+        self._ui_scale.set_draw_value(True)
+        self._ui_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        self._ui_scale.set_hexpand(True)
+        self._ui_scale.set_size_request(200, -1)
+        self._ui_scale.set_valign(Gtk.Align.CENTER)
+        # Add marks at key positions
+        for mark in (80, 100, 125, 150):
+            self._ui_scale.add_mark(
+                mark, Gtk.PositionType.BOTTOM, None
+            )
+        self._ui_scale.connect("value-changed", self._on_ui_scale_changed)
+        scale_row.add_suffix(self._ui_scale)
+        group.add(scale_row)
 
         return group
 
@@ -583,6 +633,19 @@ class AuxenSettings(Adw.PreferencesWindow):
             )
 
         try:
+            # Load UI scale
+            scale_str = self._db.get_setting("ui_scale", "100")
+            scale_val = int(scale_str)
+            scale_val = max(80, min(150, scale_val))
+            self._ui_scale.set_value(scale_val)
+            if scale_val != 100:
+                _apply_ui_scale(scale_val)
+        except Exception:
+            logger.warning(
+                "Failed to load ui_scale setting", exc_info=True
+            )
+
+        try:
             # Load music directories
             raw = self._db.get_setting("music_dirs")
             dirs: list[str] = []
@@ -759,6 +822,20 @@ class AuxenSettings(Adw.PreferencesWindow):
         }
         color_scheme = scheme_map.get(scheme_name, Adw.ColorScheme.FORCE_DARK)
         Adw.StyleManager.get_default().set_color_scheme(color_scheme)
+
+    def _on_ui_scale_changed(self, scale: Gtk.Scale) -> None:
+        """Persist and apply the UI scale factor."""
+        if getattr(self, "_loading_settings", False):
+            return
+        value = int(scale.get_value())
+        if self._db is not None:
+            try:
+                self._db.set_setting("ui_scale", str(value))
+            except Exception:
+                logger.warning(
+                    "Failed to save ui_scale", exc_info=True
+                )
+        _apply_ui_scale(value)
 
     def _on_add_folder(self, _button: Gtk.Button) -> None:
         """Open a file chooser to add a music folder."""

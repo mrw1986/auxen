@@ -262,6 +262,7 @@ def make_standard_track_row(
     duration = _get_attr(track, "duration", None)
     source = _get_source_str(track)
     quality = _get_quality_str(track)
+    is_explicit = bool(_get_attr(track, "explicit", False))
 
     row_box = Gtk.Box(
         orientation=Gtk.Orientation.HORIZONTAL,
@@ -360,15 +361,31 @@ def make_standard_track_row(
     text_box.set_hexpand(True)
     text_box.set_valign(Gtk.Align.CENTER)
 
+    # Title row: title label + optional explicit badge
+    title_row = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL,
+        spacing=6,
+    )
+    title_row.set_hexpand(True)
+
     title_label = Gtk.Label()
     title_label.set_xalign(0)
     title_label.set_ellipsize(Pango.EllipsizeMode.END)
     title_label.set_max_width_chars(40)
+    title_label.set_hexpand(True)
     title_label.add_css_class("body")
     title_label.set_markup(
         f"<b>{GLib.markup_escape_text(str(title))}</b>"
     )
-    text_box.append(title_label)
+    title_row.append(title_label)
+
+    if is_explicit:
+        explicit_label = Gtk.Label(label="E")
+        explicit_label.add_css_class("explicit-badge")
+        explicit_label.set_valign(Gtk.Align.CENTER)
+        title_row.append(explicit_label)
+
+    text_box.append(title_row)
 
     # Subtitle: Artist -- Album (with optional click navigation)
     if not show_subtitle:
@@ -491,6 +508,7 @@ def make_compact_track_row(
     duration = _get_attr(track, "duration", None)
     source = _get_source_str(track)
     quality = _get_quality_str(track)
+    is_explicit = bool(_get_attr(track, "explicit", False))
 
     row_box = Gtk.Box(
         orientation=Gtk.Orientation.HORIZONTAL,
@@ -571,6 +589,13 @@ def make_compact_track_row(
         )
         text_label.set_valign(Gtk.Align.CENTER)
         row_box.append(text_label)
+
+    # -- Explicit badge --
+    if is_explicit:
+        explicit_label = Gtk.Label(label="E")
+        explicit_label.add_css_class("explicit-badge")
+        explicit_label.set_valign(Gtk.Align.CENTER)
+        row_box.append(explicit_label)
 
     # -- Duration --
     if isinstance(duration, str):

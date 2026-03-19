@@ -1827,6 +1827,7 @@ class TidalProvider(ContentProvider):
             bit_depth=bit_depth,
             album_art_url=album_art_url,
             added_at=added_at_str,
+            explicit=bool(getattr(tidal_track, "explicit", False)),
         )
 
     # ------------------------------------------------------------------

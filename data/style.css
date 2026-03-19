@@ -2470,3 +2470,19 @@ flowboxchild.now-playing-row:hover {
     margin-top: 16px;
     margin-bottom: 8px;
 }
+
+/* ═════════════════════════════════════════════════════════════
+   EXPLICIT BADGE
+   ============================================================= */
+
+.explicit-badge {
+    background-color: alpha(@theme_fg_color, 0.15);
+    color: @theme_fg_color;
+    border-radius: 3px;
+    padding: 0px 4px;
+    font-size: 0.6rem;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    min-width: 14px;
+    min-height: 14px;
+}

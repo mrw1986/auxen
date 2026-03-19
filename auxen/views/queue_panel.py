@@ -298,11 +298,12 @@ class QueuePanel(Gtk.Box):
         drop_target.connect("drop", self._on_drop, index)
         row.add_controller(drop_target)
 
-        # Queue position number
+        # Queue position number (right-aligned for column consistency)
         position_label = Gtk.Label(label=str(index + 1))
         position_label.add_css_class("queue-track-number")
         position_label.set_valign(Gtk.Align.CENTER)
-        position_label.set_size_request(22, -1)
+        position_label.set_xalign(1)
+        position_label.set_size_request(26, -1)
         row.append(position_label)
 
         # Track info (title + artist) — must expand to fill available space
@@ -330,10 +331,12 @@ class QueuePanel(Gtk.Box):
 
         row.append(text_box)
 
-        # Duration
+        # Duration (right-aligned, fixed width for column consistency)
         duration_label = Gtk.Label(label=_format_duration(track.duration))
         duration_label.add_css_class("queue-track-duration")
         duration_label.set_valign(Gtk.Align.CENTER)
+        duration_label.set_xalign(1)
+        duration_label.set_size_request(42, -1)
         row.append(duration_label)
 
         # Remove button

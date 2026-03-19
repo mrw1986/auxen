@@ -256,6 +256,17 @@ class AuxenApp(Adw.Application):
                 logger.warning("Failed to load color scheme preference", exc_info=True)
         style_manager.set_color_scheme(color_scheme)
 
+        # --- UI Scale (preference-driven, default: 100%) ---
+        if self.db is not None:
+            try:
+                scale_str = self.db.get_setting("ui_scale", "100")
+                scale_val = int(scale_str)
+                if scale_val != 100:
+                    from auxen.views.settings import _apply_ui_scale
+                    _apply_ui_scale(max(80, min(150, scale_val)))
+            except Exception:
+                logger.warning("Failed to load ui_scale preference", exc_info=True)
+
         # --- Smart Playlist Service ---
         if self.db is not None:
             try:
