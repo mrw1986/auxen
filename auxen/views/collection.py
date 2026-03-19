@@ -1439,6 +1439,7 @@ class CollectionView(Gtk.Box):
             "on_go_to_album": lambda t=track: self._context_callbacks.get("on_go_to_album", _noop)(t),
             "on_go_to_artist": lambda t=track: self._context_callbacks.get("on_go_to_artist", _noop)(t),
             "on_track_radio": lambda t=track: self._context_callbacks.get("on_track_radio", _noop)(t),
+            "on_track_mix": lambda t=track: self._context_callbacks.get("on_track_mix", _noop)(t),
             "on_view_lyrics": lambda t=track: self._context_callbacks.get("on_view_lyrics", _noop)(t),
             "on_credits": lambda t=track: self._context_callbacks.get("on_credits", _noop)(t),
         }
@@ -1574,6 +1575,7 @@ class CollectionView(Gtk.Box):
             "on_add_all_to_queue": lambda name=artist_name: cbs.get("on_add_all_to_queue", _noop)(name),
             "on_view_artist": lambda name=artist_name: cbs.get("on_view_artist", _noop)(name),
             "on_artist_radio": lambda name=artist_name: cbs.get("on_artist_radio", _noop)(name),
+            "on_artist_mix": lambda name=artist_name: cbs.get("on_artist_mix", _noop)(name),
             "on_follow_artist": lambda name=artist_name: cbs.get("on_follow_artist", _noop)(name),
             "on_unfollow_artist": lambda name=artist_name: cbs.get("on_unfollow_artist", _noop)(name),
             "on_shuffle_artist": lambda name=artist_name: cbs.get("on_shuffle_artist", _noop)(name),

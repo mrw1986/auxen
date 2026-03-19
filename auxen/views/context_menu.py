@@ -232,6 +232,9 @@ class TrackContextMenu(_BaseContextMenu):
         # Track Radio (Tidal only)
         if is_tidal and self._callbacks.get("on_track_radio"):
             nav_section.append("Go to Track Radio", "ctx.track-radio")
+        # Start Mix (Tidal only)
+        if is_tidal and self._callbacks.get("on_track_mix"):
+            nav_section.append("Start Mix", "ctx.track-mix")
         menu.append_section(None, nav_section)
 
         # Section 4: View Lyrics + Tidal extras (Credits)
@@ -263,6 +266,7 @@ class TrackContextMenu(_BaseContextMenu):
         self._add_action(group, "go-to-artist", self._on_go_to_artist)
         self._add_action(group, "new-playlist", self._on_new_playlist)
         self._add_action(group, "track-radio", self._on_track_radio)
+        self._add_action(group, "track-mix", self._on_track_mix)
         self._add_action(group, "view-lyrics", self._on_view_lyrics)
         self._add_action(group, "credits", self._on_credits)
 
@@ -326,6 +330,11 @@ class TrackContextMenu(_BaseContextMenu):
 
     def _on_track_radio(self, _action, _param) -> None:
         cb = self._callbacks.get("on_track_radio")
+        if cb is not None:
+            cb()
+
+    def _on_track_mix(self, _action, _param) -> None:
+        cb = self._callbacks.get("on_track_mix")
         if cb is not None:
             cb()
 
@@ -567,6 +576,10 @@ class ArtistContextMenu(_BaseContextMenu):
             nav_section.append(
                 "Go to Artist Radio", "ctx.artist-radio"
             )
+        if self._callbacks.get("on_artist_mix"):
+            nav_section.append(
+                "Start Mix", "ctx.artist-mix"
+            )
         menu.append_section(None, nav_section)
 
         # Section 3: Follow / Unfollow (Tidal)
@@ -601,6 +614,7 @@ class ArtistContextMenu(_BaseContextMenu):
         )
         self._add_action(group, "view-artist", self._on_view_artist)
         self._add_action(group, "artist-radio", self._on_artist_radio)
+        self._add_action(group, "artist-mix", self._on_artist_mix)
         self._add_action(group, "shuffle-artist", self._on_shuffle_artist)
         self._add_action(group, "follow-artist", self._on_follow_artist)
         self._add_action(group, "unfollow-artist", self._on_unfollow_artist)
@@ -625,6 +639,11 @@ class ArtistContextMenu(_BaseContextMenu):
 
     def _on_artist_radio(self, _action, _param) -> None:
         cb = self._callbacks.get("on_artist_radio")
+        if cb is not None:
+            cb()
+
+    def _on_artist_mix(self, _action, _param) -> None:
+        cb = self._callbacks.get("on_artist_mix")
         if cb is not None:
             cb()
 

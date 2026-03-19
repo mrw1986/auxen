@@ -668,6 +668,7 @@ class ExploreView(Gtk.ScrolledWindow):
             "on_go_to_album": lambda t=track: self._context_callbacks.get("on_go_to_album", _noop)(t),
             "on_go_to_artist": lambda t=track: self._context_callbacks.get("on_go_to_artist", _noop)(t),
             "on_track_radio": lambda t=track: self._context_callbacks.get("on_track_radio", _noop)(t),
+            "on_track_mix": lambda t=track: self._context_callbacks.get("on_track_mix", _noop)(t),
             "on_view_lyrics": lambda t=track: self._context_callbacks.get("on_view_lyrics", _noop)(t),
             "on_credits": lambda t=track: self._context_callbacks.get("on_credits", _noop)(t),
         }

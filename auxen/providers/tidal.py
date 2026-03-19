@@ -939,6 +939,34 @@ class TidalProvider(ContentProvider):
             except Exception:
                 logger.debug("get_artist_info: similar artists unavailable for '%s'", artist_name)
 
+            # Get videos
+            videos: list[dict] = []
+            try:
+                with self._session_lock:
+                    raw_videos = best.get_videos()
+                for v in raw_videos[:10]:
+                    thumb_url = None
+                    try:
+                        thumb_url = v.image(320)
+                    except Exception:
+                        if hasattr(v, "cover") and v.cover:
+                            thumb_url = (
+                                f"https://resources.tidal.com/images/"
+                                f"{v.cover.replace('-', '/')}/320x180.jpg"
+                            )
+                    videos.append({
+                        "title": getattr(v, "name", "") or "",
+                        "duration": getattr(v, "duration", 0) or 0,
+                        "thumbnail_url": thumb_url,
+                        "video_url": f"https://tidal.com/browse/video/{v.id}",
+                        "video_id": str(v.id) if v.id else None,
+                    })
+            except Exception:
+                logger.debug(
+                    "get_artist_info: videos unavailable for '%s'",
+                    artist_name,
+                )
+
             return {
                 "name": getattr(best, "name", artist_name),
                 "image_url": image_url,
@@ -947,6 +975,7 @@ class TidalProvider(ContentProvider):
                 "tidal_id": str(best.id),
                 "bio": bio_text,
                 "similar_artists": similar_artists,
+                "videos": videos,
             }
         except Exception:
             logger.debug("get_artist_info failed", exc_info=True)
@@ -1164,6 +1193,165 @@ class TidalProvider(ContentProvider):
             return [self._tidal_track_to_model(t) for t in radio_tracks]
         except Exception:
             logger.debug("get_artist_radio failed for %s", artist_name, exc_info=True)
+            return []
+
+    # ------------------------------------------------------------------
+    # Album enrichment
+    # ------------------------------------------------------------------
+
+    def get_album_review(self, album_id: int) -> str | None:
+        """Fetch the editorial review for a Tidal album.
+
+        Returns the review text or None if unavailable.
+        """
+        if not self.is_logged_in:
+            return None
+        try:
+            with self._session_lock:
+                album = self._session.album(album_id)
+                review = album.review()
+            if review:
+                return str(review)
+            return None
+        except Exception:
+            logger.debug(
+                "get_album_review failed for %s", album_id, exc_info=True
+            )
+            return None
+
+    def get_similar_albums(self, album_id: int) -> list:
+        """Fetch similar albums for a Tidal album.
+
+        Returns a list of dicts with keys: title, artist, cover_url, tidal_id,
+        num_tracks.
+        """
+        if not self.is_logged_in:
+            return []
+        try:
+            with self._session_lock:
+                album = self._session.album(album_id)
+                similar = album.similar()
+            result = []
+            for a in similar:
+                cover_url = None
+                try:
+                    cover_url = a.image(320)
+                except Exception:
+                    pass
+                artist_name = ""
+                if hasattr(a, "artist") and a.artist:
+                    artist_name = getattr(a.artist, "name", "") or ""
+                result.append({
+                    "title": a.name or "",
+                    "artist": artist_name,
+                    "cover_url": cover_url,
+                    "tidal_id": str(a.id) if a.id else None,
+                    "num_tracks": getattr(a, "num_tracks", 0) or 0,
+                })
+            return result
+        except Exception:
+            logger.debug(
+                "get_similar_albums failed for %s", album_id, exc_info=True
+            )
+            return []
+
+    # ------------------------------------------------------------------
+    # Artist videos
+    # ------------------------------------------------------------------
+
+    def get_artist_videos(self, artist_id: int) -> list:
+        """Fetch videos for a Tidal artist.
+
+        Returns a list of dicts with keys: title, duration, thumbnail_url,
+        video_url, video_id.
+        """
+        if not self.is_logged_in:
+            return []
+        try:
+            with self._session_lock:
+                artist = self._session.artist(artist_id)
+                videos = artist.get_videos()
+            result = []
+            for v in videos:
+                thumbnail_url = None
+                try:
+                    thumbnail_url = v.image(320)
+                except Exception:
+                    if hasattr(v, "cover") and v.cover:
+                        thumbnail_url = (
+                            f"https://resources.tidal.com/images/"
+                            f"{v.cover.replace('-', '/')}/320x180.jpg"
+                        )
+                duration = getattr(v, "duration", 0) or 0
+                video_url = f"https://tidal.com/browse/video/{v.id}"
+                result.append({
+                    "title": getattr(v, "name", "") or "",
+                    "duration": duration,
+                    "thumbnail_url": thumbnail_url,
+                    "video_url": video_url,
+                    "video_id": str(v.id) if v.id else None,
+                })
+            return result
+        except Exception:
+            logger.debug(
+                "get_artist_videos failed for %s", artist_id, exc_info=True
+            )
+            return []
+
+    # ------------------------------------------------------------------
+    # Mix (editorial curated)
+    # ------------------------------------------------------------------
+
+    def get_track_mix(self, track_id: str, limit: int = 50) -> list["Track"]:
+        """Get a curated mix based on a seed track.
+
+        Uses ``tidalapi.Track.get_track_radio()`` — the API may return
+        a curated editorial mix when available.  Falls back to algorithmic
+        radio otherwise.  Returns a list of Track models.
+        """
+        if not self.is_logged_in:
+            return []
+        try:
+            with self._session_lock:
+                tidal_track = self._session.track(int(track_id))
+                mix_tracks = tidal_track.get_track_radio(limit=limit)
+            return [self._tidal_track_to_model(t) for t in mix_tracks]
+        except Exception:
+            logger.debug(
+                "get_track_mix failed for %s", track_id, exc_info=True
+            )
+            return []
+
+    def get_artist_mix(self, artist_name: str, limit: int = 50) -> list["Track"]:
+        """Get a curated mix based on an artist.
+
+        Searches for the artist, then calls ``artist.get_radio()`` which
+        may return an editorial mix.  Returns a list of Track models.
+        """
+        if not self.is_logged_in:
+            return []
+        try:
+            with self._session_lock:
+                results = self._session.search(
+                    artist_name, models=[tidalapi.Artist], limit=5
+                )
+            artists = results.get("artists", [])
+            if not artists:
+                return []
+            best = None
+            for a in artists:
+                if (getattr(a, "name", "") or "").lower() == artist_name.lower():
+                    best = a
+                    break
+            if best is None:
+                best = artists[0]
+            with self._session_lock:
+                mix_tracks = best.get_radio(limit=limit)
+            return [self._tidal_track_to_model(t) for t in mix_tracks]
+        except Exception:
+            logger.debug(
+                "get_artist_mix failed for %s", artist_name, exc_info=True
+            )
             return []
 
     # ------------------------------------------------------------------

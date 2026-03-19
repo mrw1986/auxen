@@ -11,12 +11,13 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import Gdk, GdkPixbuf, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango
 
 from auxen.models import Track
 from auxen.views.context_menu import TrackContextMenu
 from auxen.views.widgets import (
     DragScrollHelper,
+    HorizontalCarousel,
     format_duration,
     make_source_badge,
     make_standard_track_row,
@@ -237,6 +238,74 @@ class AlbumDetailView(Gtk.ScrolledWindow):
 
         self._root.append(track_section)
 
+        # ---- Review section (collapsible) ----
+        self._review_section = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=8,
+        )
+        self._review_section.set_margin_start(32)
+        self._review_section.set_margin_end(32)
+        self._review_section.set_margin_bottom(24)
+        self._review_section.set_visible(False)
+
+        review_header_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+        )
+        review_header_label = Gtk.Label(label="Review")
+        review_header_label.set_xalign(0)
+        review_header_label.set_hexpand(True)
+        review_header_label.add_css_class("section-header")
+        review_header_row.append(review_header_label)
+
+        self._review_toggle_btn = Gtk.ToggleButton()
+        self._review_toggle_btn.set_icon_name("pan-down-symbolic")
+        self._review_toggle_btn.add_css_class("flat")
+        self._review_toggle_btn.add_css_class("circular")
+        self._review_toggle_btn.set_tooltip_text("Expand/Collapse")
+        self._review_toggle_btn.set_active(False)
+        self._review_toggle_btn.connect(
+            "toggled", self._on_review_toggle
+        )
+        review_header_row.append(self._review_toggle_btn)
+        self._review_section.append(review_header_row)
+
+        self._review_label = Gtk.Label(label="")
+        self._review_label.set_xalign(0)
+        self._review_label.set_yalign(0)
+        self._review_label.set_wrap(True)
+        self._review_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self._review_label.set_max_width_chars(80)
+        self._review_label.add_css_class("body")
+        self._review_label.set_selectable(True)
+        self._review_label.set_visible(False)
+        self._review_section.append(self._review_label)
+
+        self._root.append(self._review_section)
+
+        # ---- Similar Albums carousel ----
+        self._similar_albums_section = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=0,
+        )
+        self._similar_albums_section.set_margin_start(32)
+        self._similar_albums_section.set_margin_end(32)
+        self._similar_albums_section.set_margin_bottom(32)
+        self._similar_albums_section.set_visible(False)
+
+        self._similar_albums_carousel = HorizontalCarousel(
+            title="Similar Albums",
+        )
+        self._similar_albums_section.append(
+            self._similar_albums_carousel
+        )
+        self._root.append(self._similar_albums_section)
+
+        # Callback for navigating to an album from similar albums
+        self._on_similar_album_clicked: Optional[
+            Callable[..., None]
+        ] = None
+
         self.set_child(self._root)
 
     # ---- Public API ----
@@ -247,12 +316,14 @@ class AlbumDetailView(Gtk.ScrolledWindow):
         on_play_all: Callable[[list[Track]], None] | None = None,
         on_back: Callable[[], None] | None = None,
         on_artist_navigate: Callable[[str], None] | None = None,
+        on_similar_album_clicked: Callable[..., None] | None = None,
     ) -> None:
         """Set callback functions for user actions."""
         self._on_play_track = on_play_track
         self._on_play_all = on_play_all
         self._on_back = on_back
         self._on_artist_navigate = on_artist_navigate
+        self._on_similar_album_clicked = on_similar_album_clicked
 
     def set_context_callbacks(
         self,
@@ -304,6 +375,13 @@ class AlbumDetailView(Gtk.ScrolledWindow):
         # Source badge
         self._clear_box(self._source_badge_box)
         self._source_badge_box.append(_make_source_badge(source))
+
+        # Reset review and similar albums sections
+        self._review_section.set_visible(False)
+        self._review_label.set_visible(False)
+        self._review_toggle_btn.set_active(False)
+        self._similar_albums_section.set_visible(False)
+        self._similar_albums_carousel.clear()
 
         # Track list
         self._clear_list_box(self._track_list)
@@ -451,6 +529,7 @@ class AlbumDetailView(Gtk.ScrolledWindow):
             "on_go_to_album": lambda t=track: self._context_callbacks.get("on_go_to_album", _noop)(t),
             "on_go_to_artist": lambda t=track: self._context_callbacks.get("on_go_to_artist", _noop)(t),
             "on_track_radio": lambda t=track: self._context_callbacks.get("on_track_radio", _noop)(t),
+            "on_track_mix": lambda t=track: self._context_callbacks.get("on_track_mix", _noop)(t),
             "on_view_lyrics": lambda t=track: self._context_callbacks.get("on_view_lyrics", _noop)(t),
             "on_credits": lambda t=track: self._context_callbacks.get("on_credits", _noop)(t),
         }
@@ -484,6 +563,197 @@ class AlbumDetailView(Gtk.ScrolledWindow):
             return
         if self._on_artist_navigate is not None and self._current_artist:
             self._on_artist_navigate(self._current_artist)
+
+    # ------------------------------------------------------------------
+    # Review + Similar Albums (called from window after background fetch)
+    # ------------------------------------------------------------------
+
+    def set_review(self, review_text: str | None) -> None:
+        """Show or hide the album review section."""
+        if review_text:
+            self._review_label.set_label(review_text)
+            self._review_section.set_visible(True)
+            # Start collapsed
+            self._review_toggle_btn.set_active(False)
+            self._review_label.set_visible(False)
+        else:
+            self._review_section.set_visible(False)
+
+    def _on_review_toggle(self, btn: Gtk.ToggleButton) -> None:
+        """Toggle the review text visibility."""
+        expanded = btn.get_active()
+        self._review_label.set_visible(expanded)
+        btn.set_icon_name(
+            "pan-up-symbolic" if expanded else "pan-down-symbolic"
+        )
+
+    def set_similar_albums(self, albums: list[dict]) -> None:
+        """Populate the Similar Albums carousel.
+
+        Each dict should have keys: title, artist, cover_url, tidal_id,
+        num_tracks.
+        """
+        self._similar_albums_carousel.clear()
+        if not albums:
+            self._similar_albums_section.set_visible(False)
+            return
+
+        self._similar_albums_section.set_visible(True)
+        for album_data in albums:
+            card = self._make_similar_album_card(album_data)
+            self._similar_albums_carousel.append_card(card)
+
+    def _make_similar_album_card(self, album_data: dict) -> Gtk.Box:
+        """Build a clickable card for a similar album."""
+        card = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=6,
+        )
+        card.add_css_class("album-card")
+
+        # Album art placeholder
+        art_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER,
+        )
+        art_box.add_css_class("album-art-placeholder")
+        art_box.set_size_request(160, 160)
+        art_box.set_vexpand(False)
+
+        art_icon = Gtk.Image.new_from_icon_name(
+            "audio-x-generic-symbolic"
+        )
+        art_icon.set_pixel_size(48)
+        art_icon.set_opacity(0.4)
+        art_icon.set_halign(Gtk.Align.CENTER)
+        art_icon.set_valign(Gtk.Align.CENTER)
+        art_icon.set_vexpand(True)
+        art_box.append(art_icon)
+
+        art_image = Gtk.Image()
+        art_image.set_pixel_size(160)
+        art_image.set_size_request(160, 160)
+        art_image.set_halign(Gtk.Align.FILL)
+        art_image.set_valign(Gtk.Align.FILL)
+        art_image.add_css_class("album-card-art-image")
+        art_image.set_visible(False)
+        art_box.append(art_image)
+
+        card.append(art_box)
+
+        # Album title
+        title_label = Gtk.Label(
+            label=album_data.get("title", "")
+        )
+        title_label.set_xalign(0)
+        title_label.set_ellipsize(Pango.EllipsizeMode.END)
+        title_label.set_max_width_chars(18)
+        title_label.add_css_class("body")
+        title_label.set_margin_start(4)
+        title_label.set_margin_end(4)
+        card.append(title_label)
+
+        # Artist subtitle
+        artist_name = album_data.get("artist", "")
+        if artist_name:
+            artist_label = Gtk.Label(label=artist_name)
+            artist_label.set_xalign(0)
+            artist_label.set_ellipsize(Pango.EllipsizeMode.END)
+            artist_label.set_max_width_chars(18)
+            artist_label.add_css_class("caption")
+            artist_label.add_css_class("dim-label")
+            artist_label.set_margin_start(4)
+            artist_label.set_margin_end(4)
+            card.append(artist_label)
+
+        # Store data for click handling
+        card._album_title = album_data.get("title", "")  # type: ignore[attr-defined]
+        card._album_artist = artist_name  # type: ignore[attr-defined]
+        card._tidal_id = album_data.get("tidal_id")  # type: ignore[attr-defined]
+
+        # Click gesture
+        gesture = Gtk.GestureClick(button=1)
+        gesture.connect(
+            "released", self._on_similar_album_clicked_gesture, card
+        )
+        card.add_controller(gesture)
+
+        # Load cover art async
+        cover_url = album_data.get("cover_url")
+        if cover_url:
+            self._load_similar_album_cover(
+                card, art_icon, art_image, art_box, cover_url
+            )
+
+        return card
+
+    def _on_similar_album_clicked_gesture(
+        self,
+        _gesture: Gtk.GestureClick,
+        _n_press: int,
+        _x: float,
+        _y: float,
+        card: Gtk.Box,
+    ) -> None:
+        """Handle a similar album card click."""
+        title = getattr(card, "_album_title", None)
+        artist = getattr(card, "_album_artist", "")
+        tidal_id = getattr(card, "_tidal_id", None)
+        if title and self._on_similar_album_clicked:
+            self._on_similar_album_clicked(title, artist, tidal_id)
+
+    def _load_similar_album_cover(
+        self,
+        card: Gtk.Box,
+        icon: Gtk.Image,
+        img: Gtk.Image,
+        art_box: Gtk.Box,
+        url: str,
+    ) -> None:
+        """Load a similar album's cover art from URL."""
+        import threading
+        import urllib.request
+
+        request_token = object()
+        card._art_token = request_token  # type: ignore[attr-defined]
+
+        def _fetch() -> bytes | None:
+            try:
+                req = urllib.request.Request(
+                    url, headers={"User-Agent": "Auxen/1.0"}
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return resp.read()
+            except Exception:
+                return None
+
+        def _on_done(data: bytes | None) -> bool:
+            if getattr(card, "_art_token", None) is not request_token:
+                return False
+            if data is not None:
+                try:
+                    loader = GdkPixbuf.PixbufLoader()
+                    loader.write(data)
+                    loader.close()
+                    pixbuf = loader.get_pixbuf()
+                    if pixbuf:
+                        texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                        img.set_from_paintable(texture)
+                        img.set_visible(True)
+                        icon.set_visible(False)
+                        art_box.remove_css_class(
+                            "album-art-placeholder"
+                        )
+                except Exception:
+                    pass
+            return False
+
+        def _thread():
+            data = _fetch()
+            GLib.idle_add(_on_done, data)
+
+        threading.Thread(target=_thread, daemon=True).start()
 
     @staticmethod
     def _clear_list_box(list_box: Gtk.ListBox) -> None:

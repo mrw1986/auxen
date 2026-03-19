@@ -209,6 +209,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             on_play_all=self._on_album_play_all,
             on_back=self._on_album_back,
             on_artist_navigate=self._navigate_to_artist,
+            on_similar_album_clicked=self._on_album_clicked,
         )
         self._stack.add_named(self._album_detail, "album-detail")
 
@@ -356,6 +357,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             "on_go_to_album": self._on_context_go_to_album,
             "on_go_to_artist": self._on_context_go_to_artist,
             "on_track_radio": self._on_context_track_radio,
+            "on_track_mix": self._on_context_track_mix,
             "on_view_lyrics": self._on_context_view_lyrics,
             "on_credits": self._on_context_credits,
             "on_artist_properties": self._on_context_artist_properties,
@@ -430,6 +432,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             "on_add_all_to_queue": self._on_context_add_all_by_artist,
             "on_view_artist": self._on_context_view_artist,
             "on_artist_radio": self._on_context_artist_radio,
+            "on_artist_mix": self._on_context_artist_mix,
             "on_follow_artist": self._on_context_follow_artist,
             "on_unfollow_artist": self._on_context_unfollow_artist,
             "on_shuffle_artist": self._on_context_shuffle_artist,
@@ -1174,6 +1177,59 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._stack.set_visible_child_name("album-detail")
         self._push_nav("album-detail", f"{album_name}\x00{artist}")
 
+        # Enrich with Tidal review + similar albums in background
+        resolved_tidal_id = tidal_id
+        if not resolved_tidal_id and tracks:
+            # Try to get tidal_id from the first track's source_id
+            for t in tracks:
+                src = getattr(t, "source", None)
+                src_val = getattr(src, "value", str(src)) if src else ""
+                if str(src_val).lower() == "tidal":
+                    sid = getattr(t, "source_id", None)
+                    if sid:
+                        # source_id on tracks is the track ID, not album ID
+                        # We need to look up the album from the track
+                        resolved_tidal_id = None
+                        break
+
+        if (
+            resolved_tidal_id
+            and self._app_ref
+            and self._app_ref.tidal_provider is not None
+            and self._app_ref.tidal_provider.is_logged_in
+        ):
+            import threading
+
+            tidal = self._app_ref.tidal_provider
+            expected_album = (album_name, artist)
+
+            def _fetch_album_enrichment():
+                try:
+                    album_id = int(resolved_tidal_id)
+                    review = tidal.get_album_review(album_id)
+                    similar = tidal.get_similar_albums(album_id)
+
+                    def _apply():
+                        current = (
+                            self._album_detail._title_label.get_label(),
+                            self._album_detail._artist_label.get_label(),
+                        )
+                        if current == expected_album:
+                            self._album_detail.set_review(review)
+                            self._album_detail.set_similar_albums(similar)
+                        return False
+
+                    GLib.idle_add(_apply)
+                except Exception:
+                    logger.debug(
+                        "Failed to enrich album from Tidal",
+                        exc_info=True,
+                    )
+
+            threading.Thread(
+                target=_fetch_album_enrichment, daemon=True
+            ).start()
+
     def _on_album_play_track(self, track) -> None:
         """Play a single track from the album detail view."""
         if self._app_ref and self._app_ref.player is not None:
@@ -1326,6 +1382,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         artist_image_url = info.get("image_url")
         bio = info.get("bio")
         similar_artists = info.get("similar_artists", [])
+        videos = info.get("videos", [])
 
         # Merge Tidal albums with local, dedup by exact name
         seen_names: set[str] = {a["album"].lower() for a in albums}
@@ -1367,6 +1424,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             image_url=artist_image_url,
             bio=bio,
             similar_artists=similar_artists,
+            videos=videos,
         )
         return GLib.SOURCE_REMOVE
 
@@ -2793,6 +2851,69 @@ class AuxenWindow(Adw.ApplicationWindow):
             except Exception:
                 logger.warning(
                     "Failed to fetch track radio", exc_info=True
+                )
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _on_context_track_mix(self, track) -> None:
+        """Fetch and play a curated mix based on a track."""
+        if (
+            not self._app_ref
+            or self._app_ref.tidal_provider is None
+            or not self._app_ref.tidal_provider.is_logged_in
+        ):
+            logger.warning("Track mix: not logged in or no tidal provider")
+            return
+        source_id = getattr(track, "source_id", None)
+        if not source_id:
+            logger.warning("Track mix: no source_id on track %s", track)
+            return
+        import threading
+
+        tidal = self._app_ref.tidal_provider
+
+        def _fetch():
+            try:
+                mix_tracks = tidal.get_track_mix(str(source_id), limit=50)
+                if mix_tracks and self._app_ref and self._app_ref.player:
+                    def _play():
+                        self._app_ref.player.play_queue(mix_tracks, 0)
+                        return False
+                    GLib.idle_add(_play)
+                else:
+                    logger.warning(
+                        "Track mix: no tracks returned for %s", source_id
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to fetch track mix", exc_info=True
+                )
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _on_context_artist_mix(self, artist_name: str) -> None:
+        """Fetch and play a curated mix based on an artist."""
+        if (
+            not self._app_ref
+            or self._app_ref.tidal_provider is None
+            or not self._app_ref.tidal_provider.is_logged_in
+        ):
+            return
+        import threading
+
+        tidal = self._app_ref.tidal_provider
+
+        def _fetch():
+            try:
+                mix_tracks = tidal.get_artist_mix(artist_name, limit=50)
+                if mix_tracks and self._app_ref and self._app_ref.player:
+                    def _play():
+                        self._app_ref.player.play_queue(mix_tracks, 0)
+                        return False
+                    GLib.idle_add(_play)
+            except Exception:
+                logger.warning(
+                    "Failed to fetch artist mix", exc_info=True
                 )
 
         threading.Thread(target=_fetch, daemon=True).start()

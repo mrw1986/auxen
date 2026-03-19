@@ -442,6 +442,40 @@ class ArtistDetailView(Gtk.ScrolledWindow):
 
         self._root.append(self._similar_section)
 
+        # ---- Videos section ----
+        self._videos_section = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=8,
+        )
+        self._videos_section.set_margin_start(32)
+        self._videos_section.set_margin_end(32)
+        self._videos_section.set_margin_bottom(32)
+        self._videos_section.set_visible(False)
+
+        videos_header = Gtk.Label(label="Videos")
+        videos_header.set_xalign(0)
+        videos_header.add_css_class("section-header")
+        self._videos_section.append(videos_header)
+
+        self._videos_scroll = Gtk.ScrolledWindow()
+        self._videos_scroll.set_policy(
+            Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER
+        )
+        self._videos_scroll.set_min_content_height(180)
+
+        self._videos_grid = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=16,
+        )
+
+        self._videos_scroll.set_child(self._videos_grid)
+        self._videos_section.append(self._videos_scroll)
+
+        # Drag-to-scroll with kinetic momentum
+        self._videos_drag_helper = DragScrollHelper(self._videos_scroll)
+
+        self._root.append(self._videos_section)
+
         self.set_child(self._root)
 
     # ---- Public API ----
@@ -516,6 +550,7 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         image_url: str | None = None,
         bio: str | None = None,
         similar_artists: list[dict] | None = None,
+        videos: list[dict] | None = None,
     ) -> None:
         """Populate the view with artist data.
 
@@ -535,6 +570,8 @@ class ArtistDetailView(Gtk.ScrolledWindow):
             Optional biography text.
         similar_artists:
             Optional list of similar artist dicts with keys: name, image_url, tidal_id.
+        videos:
+            Optional list of video dicts with keys: title, duration, thumbnail_url, video_url.
         """
         self._artist_name = artist_name
         self._albums = list(albums)
@@ -635,6 +672,16 @@ class ArtistDetailView(Gtk.ScrolledWindow):
                 self._similar_grid.append(card)
         else:
             self._similar_section.set_visible(False)
+
+        # Videos
+        self._clear_box(self._videos_grid)
+        if videos:
+            self._videos_section.set_visible(True)
+            for video in videos:
+                card = self._make_video_card(video)
+                self._videos_grid.append(card)
+        else:
+            self._videos_section.set_visible(False)
 
     def _load_artist_image(self, url: str) -> None:
         """Load artist image from URL in a background thread."""
@@ -1046,6 +1093,7 @@ class ArtistDetailView(Gtk.ScrolledWindow):
             "on_go_to_album": lambda t=track: self._context_callbacks.get("on_go_to_album", _noop)(t),
             "on_go_to_artist": lambda t=track: self._context_callbacks.get("on_go_to_artist", _noop)(t),
             "on_track_radio": lambda t=track: self._context_callbacks.get("on_track_radio", _noop)(t),
+            "on_track_mix": lambda t=track: self._context_callbacks.get("on_track_mix", _noop)(t),
             "on_view_lyrics": lambda t=track: self._context_callbacks.get("on_view_lyrics", _noop)(t),
             "on_credits": lambda t=track: self._context_callbacks.get("on_credits", _noop)(t),
         }
@@ -1066,6 +1114,147 @@ class ArtistDetailView(Gtk.ScrolledWindow):
             playlists=playlists,
         )
         self._current_menu.show(widget, x, y)
+
+    def _make_video_card(self, video: dict) -> Gtk.Box:
+        """Build a clickable card for a video."""
+        card = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=6,
+        )
+        card.add_css_class("album-card")
+
+        # Thumbnail placeholder
+        thumb_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER,
+        )
+        thumb_box.add_css_class("album-art-placeholder")
+        thumb_box.set_size_request(220, 124)
+        thumb_box.set_vexpand(False)
+
+        thumb_icon = Gtk.Image.new_from_icon_name(
+            "video-x-generic-symbolic"
+        )
+        thumb_icon.set_pixel_size(48)
+        thumb_icon.set_opacity(0.4)
+        thumb_icon.set_halign(Gtk.Align.CENTER)
+        thumb_icon.set_valign(Gtk.Align.CENTER)
+        thumb_icon.set_vexpand(True)
+        thumb_box.append(thumb_icon)
+
+        thumb_image = Gtk.Image()
+        thumb_image.set_pixel_size(220)
+        thumb_image.set_size_request(220, 124)
+        thumb_image.set_halign(Gtk.Align.FILL)
+        thumb_image.set_valign(Gtk.Align.FILL)
+        thumb_image.add_css_class("album-card-art-image")
+        thumb_image.set_visible(False)
+        thumb_box.append(thumb_image)
+
+        card.append(thumb_box)
+
+        # Video title
+        title_label = Gtk.Label(
+            label=video.get("title", "")
+        )
+        title_label.set_xalign(0)
+        title_label.set_ellipsize(Pango.EllipsizeMode.END)
+        title_label.set_max_width_chars(24)
+        title_label.add_css_class("body")
+        title_label.set_margin_start(4)
+        title_label.set_margin_end(4)
+        card.append(title_label)
+
+        # Duration
+        duration = video.get("duration", 0)
+        if duration:
+            dur_label = Gtk.Label(
+                label=_format_duration(duration)
+            )
+            dur_label.set_xalign(0)
+            dur_label.add_css_class("caption")
+            dur_label.add_css_class("dim-label")
+            dur_label.set_margin_start(4)
+            dur_label.set_margin_end(4)
+            card.append(dur_label)
+
+        # Click opens video externally
+        video_url = video.get("video_url", "")
+        if video_url:
+            gesture = Gtk.GestureClick(button=1)
+
+            def _on_click(
+                _g, _n, _x, _y, url=video_url
+            ):
+                launcher = Gtk.UriLauncher.new(url)
+                launcher.launch(None, None, None)
+
+            gesture.connect("released", _on_click)
+            card.add_controller(gesture)
+            card.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+
+        # Load thumbnail async
+        thumbnail_url = video.get("thumbnail_url")
+        if thumbnail_url:
+            self._load_video_thumbnail(
+                card, thumb_icon, thumb_image, thumb_box,
+                thumbnail_url,
+            )
+
+        return card
+
+    def _load_video_thumbnail(
+        self,
+        card: Gtk.Box,
+        icon: Gtk.Image,
+        img: Gtk.Image,
+        thumb_box: Gtk.Box,
+        url: str,
+    ) -> None:
+        """Load a video thumbnail from URL."""
+        import threading
+        import urllib.request
+
+        request_token = object()
+        card._thumb_token = request_token  # type: ignore[attr-defined]
+
+        def _fetch() -> bytes | None:
+            try:
+                req = urllib.request.Request(
+                    url, headers={"User-Agent": "Auxen/1.0"}
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return resp.read()
+            except Exception:
+                return None
+
+        def _on_done(data: bytes | None) -> bool:
+            if getattr(card, "_thumb_token", None) is not request_token:
+                return False
+            if data is not None:
+                try:
+                    loader = GdkPixbuf.PixbufLoader()
+                    loader.write(data)
+                    loader.close()
+                    pixbuf = loader.get_pixbuf()
+                    if pixbuf:
+                        texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                        img.set_from_paintable(texture)
+                        img.set_visible(True)
+                        icon.set_visible(False)
+                        thumb_box.remove_css_class(
+                            "album-art-placeholder"
+                        )
+                except Exception:
+                    pass
+            return False
+
+        def _thread():
+            data = _fetch()
+            GLib.idle_add(_on_done, data)
+
+        threading.Thread(target=_thread, daemon=True).start()
 
     @staticmethod
     def _format_bio(bio: str) -> str:

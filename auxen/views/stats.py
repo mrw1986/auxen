@@ -517,6 +517,7 @@ class StatsView(Gtk.ScrolledWindow):
                 else None
             ),
             "on_artist_radio": lambda a=artist: self._context_callbacks.get("on_artist_radio", _noop)(a),
+            "on_artist_mix": lambda a=artist: self._context_callbacks.get("on_artist_mix", _noop)(a),
             "on_follow_artist": lambda a=artist: self._context_callbacks.get("on_follow_artist", _noop)(a),
             "on_unfollow_artist": lambda a=artist: self._context_callbacks.get("on_unfollow_artist", _noop)(a),
             "on_shuffle_artist": lambda a=artist: self._context_callbacks.get("on_shuffle_artist", _noop)(a),
@@ -619,6 +620,11 @@ class StatsView(Gtk.ScrolledWindow):
             "on_track_radio": lambda t=track: (
                 self._context_callbacks.get(
                     "on_track_radio", _noop
+                )(t)
+            ),
+            "on_track_mix": lambda t=track: (
+                self._context_callbacks.get(
+                    "on_track_mix", _noop
                 )(t)
             ),
             "on_view_lyrics": lambda t=track: (
