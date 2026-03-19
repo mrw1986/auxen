@@ -117,10 +117,16 @@ def _install_stderr_filter() -> None:
     t.start()
 
 
+import logging
+
 from auxen.app import AuxenApp
 
 
 def main() -> int:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
     _install_stderr_filter()
     app = AuxenApp()
     return app.run(sys.argv)

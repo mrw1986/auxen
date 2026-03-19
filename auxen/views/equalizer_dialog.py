@@ -51,12 +51,36 @@ class EqualizerDialog(Adw.Window):
         self._updating = False  # guard against signal loops
 
         self.set_default_size(620, 480)
+        self.set_deletable(True)
         self.add_css_class("equalizer-dialog")
 
         # ---- Toolbar view with header bar for close button ----
         toolbar_view = Adw.ToolbarView()
         header_bar = Adw.HeaderBar()
+        header_bar.set_show_start_title_buttons(True)
+        header_bar.set_show_end_title_buttons(True)
+        header_bar.set_title_widget(Gtk.Label(label="Equalizer"))
+
+        # Explicit close button as fallback for environments where
+        # window controls are not rendered by the CSD header bar.
+        close_btn = Gtk.Button(icon_name="window-close-symbolic")
+        close_btn.add_css_class("flat")
+        close_btn.set_tooltip_text("Close")
+        close_btn.connect("clicked", lambda *_: self.close())
+        header_bar.pack_end(close_btn)
+
         toolbar_view.add_top_bar(header_bar)
+
+        # Close on Escape key
+        esc_controller = Gtk.ShortcutController.new()
+        esc_controller.set_scope(Gtk.ShortcutScope.LOCAL)
+        esc_controller.add_shortcut(
+            Gtk.Shortcut.new(
+                Gtk.ShortcutTrigger.parse_string("Escape"),
+                Gtk.CallbackAction.new(lambda *_: self.close() or True),
+            )
+        )
+        self.add_controller(esc_controller)
 
         # ---- Root layout ----
         root = Gtk.Box(

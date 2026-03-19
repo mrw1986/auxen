@@ -1322,6 +1322,22 @@ class Database:
     @staticmethod
     def _row_to_track(row: sqlite3.Row) -> Track:
         """Convert a sqlite3.Row to a Track dataclass."""
+        bitrate = row["bitrate"]
+        sample_rate = row["sample_rate"]
+        bit_depth = row["bit_depth"]
+        fmt = row["format"]
+
+        # Infer quality metadata for Tidal tracks missing DB values
+        if row["source"] == "tidal" and not sample_rate:
+            if fmt == "Hi-Res":
+                bitrate, sample_rate, bit_depth = 4608, 96000, 24
+            elif fmt in ("FLAC", "ALAC"):
+                bitrate = bitrate or 1411
+                sample_rate, bit_depth = 44100, 16
+            elif fmt == "AAC":
+                bitrate = bitrate or 320
+                sample_rate, bit_depth = 44100, 16
+
         return Track(
             id=row["id"],
             title=row["title"],
@@ -1335,10 +1351,10 @@ class Database:
             disc_number=row["disc_number"],
             source=Source(row["source"]),
             source_id=row["source_id"],
-            bitrate=row["bitrate"],
-            format=row["format"],
-            sample_rate=row["sample_rate"],
-            bit_depth=row["bit_depth"],
+            bitrate=bitrate,
+            format=fmt,
+            sample_rate=sample_rate,
+            bit_depth=bit_depth,
             album_art_url=row["album_art_url"],
             match_group_id=row["match_group_id"],
             added_at=row["added_at"],

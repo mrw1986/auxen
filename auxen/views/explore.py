@@ -361,9 +361,10 @@ class ExploreView(Gtk.ScrolledWindow):
         badge.set_halign(Gtk.Align.END)
         badge.set_valign(Gtk.Align.START)
         badge.set_margin_top(8)
-        badge.set_margin_end(8)
+        badge.set_margin_end(12)
         badge.set_tooltip_text("Streaming from Tidal")
         overlay.add_overlay(badge)
+        overlay.set_clip_overlay(badge, True)
 
         # -- Hover overlay (darkens art) --
         hover_overlay = Gtk.Box()
@@ -705,6 +706,7 @@ class ExploreView(Gtk.ScrolledWindow):
             "on_add_to_favorites": lambda a=album_name, ar=artist: cbs.get("on_add_to_favorites", _noop)(a, ar),
             "on_go_to_artist": lambda a=album_name, ar=artist: cbs.get("on_go_to_artist", _noop)(a, ar),
             "on_shuffle_album": lambda a=album_name, ar=artist: cbs.get("on_shuffle_album", _noop)(a, ar),
+            "on_properties": lambda a=album_name, ar=artist: cbs.get("on_properties", _noop)(a, ar),
         }
 
         album_data = {"album": album_name, "artist": artist}

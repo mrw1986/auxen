@@ -461,6 +461,34 @@ class PlaylistView(Gtk.ScrolledWindow):
 
     # ---- Public API ----
 
+    def highlight_playing_track(self, track) -> None:
+        """Highlight the currently playing track in the playlist."""
+        if not hasattr(self, "_track_list"):
+            return
+        playing_sid = getattr(track, "source_id", None) if track else None
+        playing_key = (
+            (getattr(track, "title", ""), getattr(track, "artist", ""))
+            if track
+            else None
+        )
+        row = self._track_list.get_first_child()
+        while row is not None:
+            td = getattr(row, "_track_data", None)
+            match = False
+            if td is not None and track is not None:
+                td_sid = getattr(td, "source_id", None)
+                if playing_sid and td_sid and playing_sid == td_sid:
+                    match = True
+                elif playing_key and (
+                    getattr(td, "title", ""), getattr(td, "artist", "")
+                ) == playing_key:
+                    match = True
+            if match:
+                row.add_css_class("now-playing-row")
+            else:
+                row.remove_css_class("now-playing-row")
+            row = row.get_next_sibling()
+
     def set_context_callbacks(
         self,
         callbacks: dict,

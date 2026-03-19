@@ -47,8 +47,11 @@ class TidalProvider(ContentProvider):
         """Load a previously saved OAuth session from disk.
 
         Returns True on success, False otherwise.  Corrupt session files
-        are deleted automatically.
+        are deleted automatically.  Network errors are treated as
+        transient — the session file is kept for the next attempt.
         """
+        import requests
+
         if not SESSION_FILE.exists():
             self._logged_in = False
             return False
@@ -67,8 +70,15 @@ class TidalProvider(ContentProvider):
                 )
             self._logged_in = True
             return True
+        except (requests.ConnectionError, requests.Timeout, OSError) as e:
+            # Network failure — keep the session file for next attempt
+            logger.warning("Tidal session restore failed (network): %s", e)
+            self._logged_in = False
+            return False
         except Exception:
-            logger.warning("Corrupt Tidal session file — removing it.", exc_info=True)
+            logger.warning(
+                "Corrupt Tidal session file — removing it.", exc_info=True
+            )
             self._logged_in = False
             try:
                 SESSION_FILE.unlink()
@@ -184,11 +194,53 @@ class TidalProvider(ContentProvider):
         tidal_tracks = results.get("tracks", [])
         return [self._tidal_track_to_model(t) for t in tidal_tracks]
 
+    def search_all(
+        self, query: str, limit: int = 10
+    ) -> dict[str, list]:
+        """Search Tidal for tracks, albums, and artists.
+
+        Returns a dict with keys ``"tracks"``, ``"albums"``, ``"artists"``
+        where each value is a list of raw tidalapi objects.
+        """
+        with self._session_lock:
+            results = self._session.search(
+                query,
+                models=[tidalapi.Track, tidalapi.Album, tidalapi.Artist],
+                limit=limit,
+            )
+        return {
+            "tracks": [
+                self._tidal_track_to_model(t)
+                for t in results.get("tracks", [])
+            ],
+            "albums": results.get("albums", []),
+            "artists": results.get("artists", []),
+        }
+
     def get_stream_uri(self, track: Track) -> str:
         """Resolve a playable stream URL for a Tidal track."""
+        import time as _time
+
+        t0 = _time.monotonic()
         with self._session_lock:
+            logger.info(
+                "[stream-uri] acquired lock in %.0fms for '%s'",
+                (_time.monotonic() - t0) * 1000, track.title,
+            )
+            t1 = _time.monotonic()
             tidal_track = self._session.track(int(track.source_id))
-            return tidal_track.get_url()
+            logger.info(
+                "[stream-uri] session.track() took %.0fms",
+                (_time.monotonic() - t1) * 1000,
+            )
+            t2 = _time.monotonic()
+            url = tidal_track.get_url()
+            logger.info(
+                "[stream-uri] get_url() took %.0fms — total %.0fms",
+                (_time.monotonic() - t2) * 1000,
+                (_time.monotonic() - t0) * 1000,
+            )
+            return url
 
     # ------------------------------------------------------------------
     # Favorites
@@ -316,12 +368,22 @@ class TidalProvider(ContentProvider):
             or getattr(item, "number_of_tracks", 0)
             or 0
         )
+        # Capture when the user added this album to favorites
+        date_added_str = ""
+        user_date = getattr(item, "user_date_added", None)
+        if user_date is not None:
+            try:
+                date_added_str = user_date.isoformat()
+            except Exception:
+                pass
+
         return {
             "title": item.name,
             "artist": artist_name,
             "cover_url": cover_url,
             "tidal_id": str(item.id),
             "num_tracks": num_tracks,
+            "date_added": date_added_str,
         }
 
     def get_new_releases(self, limit: int = 12) -> list[dict]:
@@ -534,7 +596,40 @@ class TidalProvider(ContentProvider):
                     try:
                         cover_url = item.image(dimensions=640)
                     except Exception:
-                        pass
+                        logger.debug(
+                            "Mix %s image() failed",
+                            getattr(item, "id", "?"),
+                            exc_info=True,
+                        )
+                    # Fallback: access images attribute directly
+                    if not cover_url:
+                        images = getattr(item, "images", None)
+                        if images is not None:
+                            cover_url = (
+                                getattr(images, "medium", None)
+                                or getattr(images, "large", None)
+                                or getattr(images, "small", None)
+                            )
+                    # Fallback: try sharing_images
+                    if not cover_url:
+                        sharing = getattr(
+                            item, "sharing_images", None
+                        )
+                        if isinstance(sharing, dict):
+                            cover_url = (
+                                sharing.get("640x640")
+                                or sharing.get("320x320")
+                                or sharing.get("1500x1500")
+                            )
+                    # Fallback: construct from picture attribute
+                    if not cover_url:
+                        picture = getattr(item, "picture", None)
+                        if picture:
+                            cover_url = (
+                                "https://resources.tidal.com/images/"
+                                f"{picture.replace('-', '/')}"
+                                "/640x640.jpg"
+                            )
                     item_id = getattr(item, "id", "") or ""
                     track_count = getattr(
                         item, "num_tracks", None
@@ -583,13 +678,43 @@ class TidalProvider(ContentProvider):
                                 or getattr(item, "description", None)
                                 or ""
                             )
-                            cover = getattr(item, "cover", None) or ""
                             cover_url = None
-                            if cover:
-                                cover_url = (
-                                    f"https://resources.tidal.com/images/"
-                                    f"{cover.replace('-', '/')}/640x640.jpg"
+                            try:
+                                cover_url = item.image(
+                                    dimensions=640
                                 )
+                            except Exception:
+                                pass
+                            if not cover_url:
+                                imgs = getattr(item, "images", None)
+                                if imgs is not None:
+                                    cover_url = (
+                                        getattr(imgs, "medium", None)
+                                        or getattr(imgs, "large", None)
+                                        or getattr(imgs, "small", None)
+                                    )
+                            if not cover_url:
+                                cover = (
+                                    getattr(item, "cover", None) or ""
+                                )
+                                if cover:
+                                    cover_url = (
+                                        "https://resources.tidal.com"
+                                        "/images/"
+                                        f"{cover.replace('-', '/')}"
+                                        "/640x640.jpg"
+                                    )
+                            if not cover_url:
+                                pic = getattr(
+                                    item, "picture", None
+                                )
+                                if pic:
+                                    cover_url = (
+                                        "https://resources.tidal.com"
+                                        "/images/"
+                                        f"{pic.replace('-', '/')}"
+                                        "/640x640.jpg"
+                                    )
                             item_id = getattr(item, "id", "") or ""
                             track_count = getattr(
                                 item, "num_tracks", None
@@ -783,14 +908,17 @@ class TidalProvider(ContentProvider):
             except Exception:
                 logger.debug("get_artist_info: top tracks failed", exc_info=True)
 
-            # Get biography
+            # Get biography — 404s are expected for lesser-known artists
             bio_text: str | None = None
             try:
                 bio_text = best.get_bio()
             except Exception:
-                logger.debug("get_artist_info: bio failed", exc_info=True)
+                logger.debug("get_artist_info: bio unavailable for '%s'", artist_name)
 
-            # Get similar artists
+            # Get similar artists — 404s are expected for lesser-known artists
+            # Only fetch lightweight data (name, image, id) — do NOT fetch
+            # bio/similar/albums/tracks for each similar artist to avoid
+            # cascading API calls.
             similar_artists: list[dict] = []
             try:
                 with self._session_lock:
@@ -809,7 +937,7 @@ class TidalProvider(ContentProvider):
                         "tidal_id": str(sa.id),
                     })
             except Exception:
-                logger.debug("get_artist_info: similar artists failed", exc_info=True)
+                logger.debug("get_artist_info: similar artists unavailable for '%s'", artist_name)
 
             return {
                 "name": getattr(best, "name", artist_name),
@@ -822,6 +950,52 @@ class TidalProvider(ContentProvider):
             }
         except Exception:
             logger.debug("get_artist_info failed", exc_info=True)
+            return None
+
+    def get_artist_image_url(self, artist_name: str) -> str | None:
+        """Return only the image URL for an artist (lightweight).
+
+        Unlike ``get_artist_info`` this does NOT fetch albums, tracks,
+        bio, or similar artists — it only searches for the artist and
+        returns their image URL.  Use this when you only need the image
+        (e.g. for the artist image cache service).
+        """
+        try:
+            if not self.is_logged_in:
+                return None
+            with self._session_lock:
+                results = self._session.search(
+                    artist_name, models=[tidalapi.Artist], limit=5
+                )
+            artists = results.get("artists", [])
+            if not artists:
+                return None
+
+            # Find best match
+            best = None
+            for a in artists:
+                a_name = getattr(a, "name", "") or ""
+                if a_name.lower() == artist_name.lower():
+                    best = a
+                    break
+            if best is None:
+                best = artists[0]
+
+            # Get artist image
+            try:
+                img_fn = getattr(best, "image", None)
+                if callable(img_fn):
+                    return img_fn(480)
+                elif isinstance(img_fn, str) and img_fn:
+                    return (
+                        f"https://resources.tidal.com/images/"
+                        f"{img_fn.replace('-', '/')}/480x480.jpg"
+                    )
+            except Exception:
+                pass
+            return None
+        except Exception:
+            logger.debug("get_artist_image_url failed for '%s'", artist_name)
             return None
 
     def get_playlist_tracks(self, playlist_id: str) -> list["Track"]:
@@ -1166,6 +1340,47 @@ class TidalProvider(ContentProvider):
                 f"{cover.replace('-', '/')}/640x640.jpg"
             )
 
+        # Capture when the user added this track to favorites
+        added_at_str: str | None = None
+        tidal_date = getattr(tidal_track, "date_added", None) or getattr(
+            tidal_track, "user_date_added", None
+        )
+        if tidal_date is not None:
+            try:
+                added_at_str = tidal_date.isoformat()
+            except Exception:
+                pass
+
+        # Audio quality metadata from Tidal
+        audio_quality = getattr(tidal_track, "audio_quality", None) or ""
+        media_tags = getattr(tidal_track, "media_metadata_tags", None) or []
+        fmt = "FLAC"
+        bitrate: int | None = None
+        sample_rate: int | None = None
+        bit_depth: int | None = None
+        if "HI_RES_LOSSLESS" in audio_quality or (
+            hasattr(tidalapi.media, "MediaMetadataTags")
+            and tidalapi.media.MediaMetadataTags.hi_res_lossless in media_tags
+        ):
+            fmt = "Hi-Res"
+            sample_rate = 96000
+            bit_depth = 24
+            bitrate = 4608
+        elif "LOSSLESS" in audio_quality:
+            fmt = "FLAC"
+            sample_rate = 44100
+            bit_depth = 16
+            bitrate = 1411
+        elif "HIGH" in audio_quality:
+            fmt = "AAC"
+            sample_rate = 44100
+            bit_depth = 16
+            bitrate = 320
+        elif audio_quality:
+            fmt = "AAC"
+            sample_rate = 44100
+            bitrate = 96
+
         return Track(
             title=tidal_track.name,
             artist=tidal_track.artist.name,
@@ -1173,6 +1388,10 @@ class TidalProvider(ContentProvider):
             source=Source.TIDAL,
             source_id=str(tidal_track.id),
             duration=tidal_track.duration,
-            format="FLAC",
+            format=fmt,
+            bitrate=bitrate,
+            sample_rate=sample_rate,
+            bit_depth=bit_depth,
             album_art_url=album_art_url,
+            added_at=added_at_str,
         )

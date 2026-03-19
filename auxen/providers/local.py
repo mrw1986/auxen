@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from pathlib import Path
@@ -15,6 +16,13 @@ from ..models import Source, Track
 from .base import ContentProvider
 
 logger = logging.getLogger(__name__)
+
+# Directory for caching extracted embedded album art.
+_ART_CACHE_DIR = os.path.join(
+    os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
+    "auxen",
+    "embedded_art",
+)
 
 # Extensions recognised as audio files.
 SUPPORTED_EXTENSIONS: set[str] = {
@@ -152,6 +160,9 @@ class LocalProvider(ContentProvider):
             except Exception:
                 pass
 
+        # --- Extract and cache embedded album art ---
+        album_art_url = _extract_and_cache_art(filepath, artist, album)
+
         return Track(
             title=title,
             artist=artist,
@@ -168,6 +179,7 @@ class LocalProvider(ContentProvider):
             format=fmt,
             sample_rate=sample_rate,
             bit_depth=bit_depth,
+            album_art_url=album_art_url,
         )
 
 
@@ -195,3 +207,108 @@ def _parse_number_tag(audio: Optional[mutagen.FileType], key: str) -> Optional[i
         return int(raw.split("/")[0])
     except (ValueError, IndexError):
         return None
+
+
+def _extract_and_cache_art(
+    filepath: str,
+    artist: Optional[str],
+    album: Optional[str],
+) -> Optional[str]:
+    """Extract embedded cover art from *filepath* and save to the disk cache.
+
+    Returns the absolute path to the cached JPEG, or ``None`` if the file
+    has no embedded art.  Uses a hash of ``artist + album`` as the cache
+    filename so that tracks from the same album share one cached image.
+    """
+    # Build a stable cache key from artist+album so all tracks in the
+    # same album reuse a single cached image file.
+    cache_key = f"{artist or ''}\x00{album or ''}"
+    hexdigest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:24]
+    cache_path = os.path.join(_ART_CACHE_DIR, f"{hexdigest}.jpg")
+
+    # If we already extracted art for this album, reuse it.
+    if os.path.isfile(cache_path):
+        return cache_path
+
+    # Extract embedded art bytes using the same helpers as AlbumArtService.
+    art_bytes = _extract_embedded_art_bytes(filepath)
+    if art_bytes is None:
+        return None
+
+    try:
+        os.makedirs(_ART_CACHE_DIR, exist_ok=True)
+
+        # Write to a temp file first, then rename for atomicity.
+        tmp_path = cache_path + ".tmp"
+        with open(tmp_path, "wb") as fh:
+            fh.write(art_bytes)
+        os.replace(tmp_path, cache_path)
+
+        logger.debug("Cached embedded art for %s - %s -> %s", artist, album, cache_path)
+        return cache_path
+    except Exception:
+        logger.debug("Failed to cache embedded art from %s", filepath, exc_info=True)
+        # Clean up partial write
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        return None
+
+
+def _extract_embedded_art_bytes(filepath: str) -> Optional[bytes]:
+    """Return raw image bytes from the embedded art tag of *filepath*.
+
+    Supports FLAC, MP3 (ID3), OGG/Opus, and M4A/AAC/MP4.
+    """
+    ext = os.path.splitext(filepath)[1].lower()
+    try:
+        if ext == ".flac":
+            from mutagen.flac import FLAC
+
+            audio = FLAC(filepath)
+            if audio.pictures:
+                return bytes(audio.pictures[0].data)
+
+        elif ext == ".mp3":
+            from mutagen.id3 import ID3
+
+            tags = ID3(filepath)
+            for key, frame in tags.items():
+                if key.startswith("APIC") and frame.data:
+                    return bytes(frame.data)
+
+        elif ext in (".ogg", ".opus"):
+            audio = MutagenFile(filepath)
+            if audio is None:
+                return None
+            pictures = getattr(audio, "pictures", None)
+            if pictures:
+                return bytes(pictures[0].data)
+            # Fallback: METADATA_BLOCK_PICTURE tag
+            if audio.tags:
+                import base64
+
+                from mutagen.flac import Picture
+
+                for b64_data in audio.tags.get("METADATA_BLOCK_PICTURE", []):
+                    try:
+                        pic = Picture(base64.b64decode(b64_data))
+                        if pic.data:
+                            return bytes(pic.data)
+                    except Exception:
+                        pass
+
+        elif ext in (".m4a", ".aac", ".mp4"):
+            from mutagen.mp4 import MP4
+
+            audio = MP4(filepath)
+            if audio.tags is not None:
+                covers = audio.tags.get("covr")
+                if covers:
+                    return bytes(covers[0])
+    except Exception:
+        logger.debug(
+            "Failed to extract embedded art from %s", filepath, exc_info=True
+        )
+    return None

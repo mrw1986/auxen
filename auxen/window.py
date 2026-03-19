@@ -35,6 +35,11 @@ from auxen.views.sleep_timer_dialog import SleepTimerDialog
 from auxen.views.mini_player import MiniPlayerWindow
 from auxen.views.smart_playlist_view import SmartPlaylistView
 from auxen.views.stats import StatsView
+from auxen.views.properties_dialog import (
+    show_album_properties,
+    show_artist_properties,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +137,10 @@ class AuxenWindow(Adw.ApplicationWindow):
         # Allow stack to size based on visible page only, so wide pages
         # (like Stats with 4-column stat cards) don't force a wide minimum.
         self._stack.set_hhomogeneous(False)
+        self._stack.connect(
+            "notify::visible-child-name",
+            self._on_stack_page_changed,
+        )
         self._stack.set_vhomogeneous(False)
 
         for name, title in _PAGES:
@@ -341,6 +350,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             "on_track_radio": self._on_context_track_radio,
             "on_view_lyrics": self._on_context_view_lyrics,
             "on_credits": self._on_context_credits,
+            "on_artist_properties": self._on_context_artist_properties,
         }
 
         self._home_page.set_context_callbacks(
@@ -351,6 +361,10 @@ class AuxenWindow(Adw.ApplicationWindow):
         )
         self._search_view.set_context_callbacks(
             context_callbacks, self._get_playlists
+        )
+        self._search_view.set_navigation_callbacks(
+            on_artist_clicked=self._navigate_to_artist,
+            on_album_clicked=self._on_album_clicked,
         )
         self._collection_view.set_context_callbacks(
             context_callbacks, self._get_playlists
@@ -384,6 +398,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             "on_new_playlist": self._on_context_new_playlist_with_album,
             "on_add_to_favorites": self._on_context_add_album_to_favorites,
             "on_go_to_artist": self._on_context_album_go_to_artist,
+            "on_properties": self._on_context_album_properties,
         }
         self._home_page.set_album_context_callbacks(
             album_context_callbacks, self._get_playlists
@@ -410,6 +425,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             "on_follow_artist": self._on_context_follow_artist,
             "on_unfollow_artist": self._on_context_unfollow_artist,
             "on_shuffle_artist": self._on_context_shuffle_artist,
+            "on_properties": self._on_context_artist_properties,
         }
         self._library_view.set_artist_context_callbacks(
             artist_context_callbacks
@@ -604,6 +620,11 @@ class AuxenWindow(Adw.ApplicationWindow):
 
         # --- Home Page -> Album Art Service ---
         self._home_page.set_album_art_service(self._album_art_service)
+
+        # --- Album Art / Artist Image Services -> Database (custom art lookups) ---
+        if app.db is not None:
+            self._album_art_service.set_database(app.db)
+            self._artist_image_service.set_database(app.db)
 
         # --- Artist Image Service -> Tidal Provider ---
         if app.tidal_provider is not None:
@@ -822,6 +843,7 @@ class AuxenWindow(Adw.ApplicationWindow):
                 quality_label=track.quality_label,
                 source=track.source.value,
                 album=track.album or "",
+                track=track,
             )
             # Load album art asynchronously for the now-playing bar.
             # Wrap callbacks to discard stale results for a different track.
@@ -883,6 +905,27 @@ class AuxenWindow(Adw.ApplicationWindow):
                     width=art_48,
                     height=art_48,
                 )
+            # Highlight the playing track in the currently visible view
+            self._highlight_playing_in_visible_view(track)
+
+    def _highlight_playing_in_visible_view(self, track) -> None:
+        """Call highlight_playing_track on the currently visible view."""
+        visible = self._stack.get_visible_child_name()
+        view_map = {
+            "home": self._home_page,
+            "library": self._library_view,
+            "collection": self._collection_view,
+            "artist-detail": self._artist_detail,
+            "playlist-detail": self._playlist_view,
+        }
+        view = view_map.get(visible)
+        if view is not None and hasattr(view, "highlight_playing_track"):
+            view.highlight_playing_track(track)
+
+    def _on_stack_page_changed(self, _stack, _pspec) -> None:
+        """Re-highlight the playing track when the user switches views."""
+        track = getattr(self, "_current_track", None)
+        self._highlight_playing_in_visible_view(track)
 
     def _on_position_updated(self, _player, position, duration) -> None:
         """Update the now-playing bar progress."""
@@ -1130,6 +1173,12 @@ class AuxenWindow(Adw.ApplicationWindow):
 
     def _on_artist_clicked(self, artist_name: str) -> None:
         """Handle an artist row click from the library view."""
+        import time
+        import threading
+
+        t0 = time.monotonic()
+        logger.info("[artist-click] START '%s'", artist_name)
+
         # Store current page for back navigation
         visible = self._stack.get_visible_child_name()
         if visible and visible != "artist-detail":
@@ -1137,7 +1186,6 @@ class AuxenWindow(Adw.ApplicationWindow):
 
         albums: list[dict] = []
         tracks: list = []
-        source = "local"
         artist_image_url: str | None = None
         bio: str | None = None
         similar_artists: list[dict] = []
@@ -1146,6 +1194,10 @@ class AuxenWindow(Adw.ApplicationWindow):
             try:
                 albums = self._app_ref.db.get_artist_albums(artist_name)
                 tracks = self._app_ref.db.get_artist_tracks(artist_name)
+                logger.info(
+                    "[artist-click] DB done in %.1fms — %d albums, %d tracks",
+                    (time.monotonic() - t0) * 1000, len(albums), len(tracks),
+                )
             except Exception:
                 logger.warning(
                     "Failed to fetch artist data", exc_info=True
@@ -1161,58 +1213,13 @@ class AuxenWindow(Adw.ApplicationWindow):
             if "cover_url" not in alb:
                 alb["cover_url"] = album_art_map.get(alb["album"])
 
-        # Enrich with Tidal data if available
-        if (
-            self._app_ref
-            and self._app_ref.tidal_provider is not None
-            and self._app_ref.tidal_provider.is_logged_in
-        ):
-            try:
-                info = self._app_ref.tidal_provider.get_artist_info(
-                    artist_name
-                )
-                if info:
-                    artist_image_url = info.get("image_url")
-                    bio = info.get("bio")
-                    similar_artists = info.get("similar_artists", [])
-                    # Merge Tidal albums with local, dedup by exact name
-                    seen_names: set[str] = {
-                        a["album"].lower() for a in albums
-                    }
-                    for tidal_alb in info.get("albums", []):
-                        key = tidal_alb["title"].lower()
-                        if key not in seen_names:
-                            seen_names.add(key)
-                            albums.append({
-                                "album": tidal_alb["title"],
-                                "track_count": tidal_alb.get("num_tracks", 0),
-                                "year": None,
-                                "source": "tidal",
-                                "cover_url": tidal_alb.get("cover_url"),
-                                "tidal_id": tidal_alb.get("tidal_id"),
-                            })
-                    # Use Tidal top tracks first (popularity order),
-                    # then append any unique local tracks after
-                    tidal_top = info.get("tracks", [])
-                    if tidal_top:
-                        tidal_ids = {
-                            getattr(t, "source_id", None)
-                            for t in tidal_top
-                            if getattr(t, "source_id", None)
-                        }
-                        local_extras = [
-                            t for t in tracks
-                            if getattr(t, "source_id", None) not in tidal_ids
-                        ]
-                        tracks = list(tidal_top) + local_extras
-            except Exception:
-                logger.debug(
-                    "Failed to enrich artist from Tidal", exc_info=True
-                )
+        source = tracks[0].source.value if tracks else "local"
 
-        if tracks:
-            source = tracks[0].source.value
-
+        # Show artist detail immediately with local data
+        logger.info(
+            "[artist-click] showing local data at %.1fms",
+            (time.monotonic() - t0) * 1000,
+        )
         self._artist_detail.show_artist(
             artist_name=artist_name,
             albums=albums,
@@ -1224,6 +1231,100 @@ class AuxenWindow(Adw.ApplicationWindow):
         )
         self._stack.set_visible_child_name("artist-detail")
         self._push_nav("artist-detail", artist_name)
+        logger.info(
+            "[artist-click] page switch done at %.1fms",
+            (time.monotonic() - t0) * 1000,
+        )
+
+        # Enrich with Tidal data in background thread
+        if (
+            self._app_ref
+            and self._app_ref.tidal_provider is not None
+            and self._app_ref.tidal_provider.is_logged_in
+        ):
+            def _fetch_tidal_info():
+                t1 = time.monotonic()
+                try:
+                    info = self._app_ref.tidal_provider.get_artist_info(
+                        artist_name
+                    )
+                    logger.info(
+                        "[artist-click] Tidal fetch done in %.1fms",
+                        (time.monotonic() - t1) * 1000,
+                    )
+                    if info:
+                        GLib.idle_add(
+                            self._apply_tidal_artist_info,
+                            artist_name, albums, tracks, info,
+                        )
+                except Exception:
+                    logger.debug(
+                        "Failed to enrich artist from Tidal",
+                        exc_info=True,
+                    )
+
+            threading.Thread(
+                target=_fetch_tidal_info, daemon=True
+            ).start()
+
+    def _apply_tidal_artist_info(
+        self,
+        artist_name: str,
+        albums: list[dict],
+        tracks: list,
+        info: dict,
+    ) -> bool:
+        """Apply Tidal enrichment data to artist detail (main thread)."""
+        # Only update if we're still looking at this artist
+        if self._stack.get_visible_child_name() != "artist-detail":
+            return GLib.SOURCE_REMOVE
+
+        artist_image_url = info.get("image_url")
+        bio = info.get("bio")
+        similar_artists = info.get("similar_artists", [])
+
+        # Merge Tidal albums with local, dedup by exact name
+        seen_names: set[str] = {a["album"].lower() for a in albums}
+        for tidal_alb in info.get("albums", []):
+            key = tidal_alb["title"].lower()
+            if key not in seen_names:
+                seen_names.add(key)
+                albums.append({
+                    "album": tidal_alb["title"],
+                    "track_count": tidal_alb.get("num_tracks", 0),
+                    "year": None,
+                    "source": "tidal",
+                    "cover_url": tidal_alb.get("cover_url"),
+                    "tidal_id": tidal_alb.get("tidal_id"),
+                })
+
+        # Use Tidal top tracks first (popularity order),
+        # then append any unique local tracks after
+        tidal_top = info.get("tracks", [])
+        if tidal_top:
+            tidal_ids = {
+                getattr(t, "source_id", None)
+                for t in tidal_top
+                if getattr(t, "source_id", None)
+            }
+            local_extras = [
+                t for t in tracks
+                if getattr(t, "source_id", None) not in tidal_ids
+            ]
+            tracks = list(tidal_top) + local_extras
+
+        source = tracks[0].source.value if tracks else "local"
+
+        self._artist_detail.show_artist(
+            artist_name=artist_name,
+            albums=albums,
+            tracks=tracks,
+            source=source,
+            image_url=artist_image_url,
+            bio=bio,
+            similar_artists=similar_artists,
+        )
+        return GLib.SOURCE_REMOVE
 
     def _on_artist_play_track(self, track) -> None:
         """Play a single track from the artist detail view."""
@@ -1253,6 +1354,13 @@ class AuxenWindow(Adw.ApplicationWindow):
         self, track_id: int, title: str, artist: str
     ) -> None:
         """Play a track from the stats view using its database ID."""
+        import time
+
+        t0 = time.monotonic()
+        logger.info(
+            "[stats-track-click] START id=%s '%s' by '%s'",
+            track_id, title, artist,
+        )
         if self._app_ref is None or self._app_ref.player is None:
             return
         if self._app_ref.db is None:
@@ -1260,12 +1368,27 @@ class AuxenWindow(Adw.ApplicationWindow):
         try:
             # Primary lookup: by track ID (exact match)
             track = self._app_ref.db.get_track(track_id)
+            logger.info(
+                "[stats-track-click] DB lookup in %.1fms — found=%s source=%s",
+                (time.monotonic() - t0) * 1000,
+                track is not None,
+                getattr(track, "source", "?") if track else "N/A",
+            )
             if track is not None:
+                logger.info(
+                    "[stats-track-click] calling play_queue source_id=%s",
+                    getattr(track, "source_id", "?"),
+                )
                 self._app_ref.player.play_queue(
                     [track], start_index=0
                 )
+                logger.info(
+                    "[stats-track-click] play_queue returned in %.1fms",
+                    (time.monotonic() - t0) * 1000,
+                )
                 return
             # Fallback: search by title + artist
+            logger.info("[stats-track-click] falling back to artist search")
             tracks = self._app_ref.db.get_artist_tracks(artist)
             for t in tracks:
                 if t.title == title:
@@ -2656,6 +2779,43 @@ class AuxenWindow(Adw.ApplicationWindow):
         dialog.set_close_response("close")
         dialog.present(self)
         return GLib.SOURCE_REMOVE
+
+    # ------------------------------------------------------------------
+    # Properties dialogs
+    # ------------------------------------------------------------------
+
+    def _on_context_album_properties(
+        self, album_name: str, artist: str
+    ) -> None:
+        """Show properties dialog for an album."""
+        if not self._app_ref or self._app_ref.db is None:
+            return
+        show_album_properties(
+            self, album_name, artist, self._app_ref.db,
+            on_art_changed=self._on_custom_art_changed,
+        )
+
+    def _on_context_artist_properties(
+        self, artist_name: str
+    ) -> None:
+        """Show properties dialog for an artist."""
+        if not self._app_ref or self._app_ref.db is None:
+            return
+        show_artist_properties(
+            self, artist_name, self._app_ref.db,
+            on_art_changed=self._on_custom_art_changed,
+        )
+
+    def _on_custom_art_changed(self) -> None:
+        """Refresh the current view after custom art is set or cleared."""
+        # Clear art caches so the new custom art is loaded fresh
+        if self._album_art_service is not None:
+            self._album_art_service.clear_cache()
+        if self._artist_image_service is not None:
+            self._artist_image_service.clear_cache()
+        visible = self._stack.get_visible_child_name()
+        if visible:
+            self._refresh_page(visible)
 
     # ------------------------------------------------------------------
     # Shuffle album

@@ -54,12 +54,17 @@ class ArtistImageService:
 
     def __init__(self, tidal_provider=None) -> None:
         self._tidal = tidal_provider
+        self._db = None
         cache_base = GLib.get_user_cache_dir()
         self._cache_dir = Path(cache_base) / "auxen" / "artist_images"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._mem_cache: OrderedDict[tuple[str, int], Any] = OrderedDict()
         self._mem_cache_bytes: int = 0
         self._lock = threading.Lock()
+
+    def set_database(self, db) -> None:
+        """Set the database instance for custom art lookups."""
+        self._db = db
 
     def set_tidal_provider(self, provider) -> None:
         """Set or update the Tidal provider for image fetching."""
@@ -99,6 +104,24 @@ class ArtistImageService:
         disk_path = self._cache_dir / f"{slug}.jpg"
         cache_key = (artist_name.lower(), size)
 
+        # 0. Check for custom art override from DB
+        if self._db is not None:
+            try:
+                custom_key = f"custom_art:artist:{artist_name}"
+                custom_path = self._db.get_setting(custom_key)
+                if custom_path and Path(custom_path).is_file():
+                    pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                        custom_path, size, size, True
+                    )
+                    self._put_mem_cache(cache_key, pixbuf)
+                    return pixbuf
+            except Exception:
+                logger.debug(
+                    "Failed to load custom artist image for %s",
+                    artist_name,
+                    exc_info=True,
+                )
+
         # 1. Check disk cache (not stale)
         if disk_path.exists():
             age = time.time() - disk_path.stat().st_mtime
@@ -116,18 +139,15 @@ class ArtistImageService:
                         exc_info=True,
                     )
 
-        # 2. Fetch from Tidal
+        # 2. Fetch from Tidal (lightweight — image URL only, no albums/bio/similar)
         if self._tidal is None or not self._tidal.is_logged_in:
             self._put_mem_cache(cache_key, None)
             return None
 
         try:
-            info = self._tidal.get_artist_info(artist_name)
-            if info is None:
-                self._put_mem_cache(cache_key, None)
-                return None
-
-            image_url = info.get("image_url")
+            # Use lightweight method to avoid fetching albums, tracks,
+            # bio, and similar artists just for an image URL.
+            image_url = self._tidal.get_artist_image_url(artist_name)
             if not image_url:
                 self._put_mem_cache(cache_key, None)
                 return None
@@ -192,3 +212,9 @@ class ArtistImageService:
             ):
                 _, evicted = self._mem_cache.popitem(last=False)
                 self._mem_cache_bytes -= _pixbuf_bytes(evicted)
+
+    def clear_cache(self) -> None:
+        """Clear the in-memory image cache."""
+        with self._lock:
+            self._mem_cache.clear()
+            self._mem_cache_bytes = 0

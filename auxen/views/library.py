@@ -146,8 +146,9 @@ def _make_album_card(
     badge.set_halign(Gtk.Align.END)
     badge.set_valign(Gtk.Align.START)
     badge.set_margin_top(8)
-    badge.set_margin_end(8)
+    badge.set_margin_end(12)
     overlay.add_overlay(badge)
+    overlay.set_clip_overlay(badge, True)
 
     # -- Hover overlay (darkens art) --
     hover_overlay = Gtk.Box()
@@ -206,10 +207,6 @@ def _make_artist_row(
         spacing=12,
     )
     row_box.add_css_class("library-artist-row")
-    row_box.set_margin_top(4)
-    row_box.set_margin_bottom(4)
-    row_box.set_margin_start(8)
-    row_box.set_margin_end(8)
 
     # Art overlay: placeholder + loaded image + play button
     art_overlay = Gtk.Overlay()
@@ -283,6 +280,7 @@ def _make_artist_row(
     row_box.append(count_label)
 
     row = Gtk.ListBoxRow()
+    row.add_css_class("track-row-hover")
     row.set_child(row_box)
     row.set_activatable(True)
     row._artist_name = artist
@@ -301,10 +299,6 @@ def _make_album_list_row(
         orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
     )
     row_box.add_css_class("library-album-list-row")
-    row_box.set_margin_top(4)
-    row_box.set_margin_bottom(4)
-    row_box.set_margin_start(8)
-    row_box.set_margin_end(8)
 
     # Album art with play overlay
     art_overlay = Gtk.Overlay()
@@ -338,6 +332,7 @@ def _make_album_list_row(
     play_btn.set_halign(Gtk.Align.CENTER)
     play_btn.set_valign(Gtk.Align.CENTER)
     play_btn.set_tooltip_text(f"Play {album}")
+    play_btn.set_opacity(0)  # hidden until hover
     art_overlay.add_overlay(play_btn)
 
     row_box.append(art_overlay)
@@ -390,6 +385,7 @@ def _make_album_list_row(
         row_box.append(count_label)
 
     row = Gtk.ListBoxRow()
+    row.add_css_class("track-row-hover")
     row.set_child(row_box)
     row.set_activatable(True)
     row._album_title = album
@@ -409,10 +405,6 @@ def _make_album_compact_row(
         orientation=Gtk.Orientation.HORIZONTAL, spacing=8,
     )
     row_box.add_css_class("compact-track-row")
-    row_box.set_margin_top(2)
-    row_box.set_margin_bottom(2)
-    row_box.set_margin_start(8)
-    row_box.set_margin_end(8)
 
     # Index number / play button swap container
     num_play_box = Gtk.Box()
@@ -477,6 +469,7 @@ def _make_album_compact_row(
     row_box.append(badge)
 
     row = Gtk.ListBoxRow()
+    row.add_css_class("track-row-hover")
     row.set_child(row_box)
     row.set_activatable(True)
     row._album_title = album
@@ -534,7 +527,7 @@ def _make_artist_card(artist: str, track_count: int, sources: list[str]) -> Gtk.
         badge.set_halign(Gtk.Align.END)
         badge.set_valign(Gtk.Align.START)
         badge.set_margin_top(8)
-        badge.set_margin_end(8)
+        badge.set_margin_end(12)
         overlay.add_overlay(badge)
         break  # Only show first source badge
 
@@ -594,10 +587,6 @@ def _make_artist_compact_row(
         orientation=Gtk.Orientation.HORIZONTAL, spacing=8,
     )
     row_box.add_css_class("compact-track-row")
-    row_box.set_margin_top(2)
-    row_box.set_margin_bottom(2)
-    row_box.set_margin_start(8)
-    row_box.set_margin_end(8)
 
     # Index number / play button swap container
     num_play_box = Gtk.Box()
@@ -663,6 +652,7 @@ def _make_artist_compact_row(
         row_box.append(count_label)
 
     row = Gtk.ListBoxRow()
+    row.add_css_class("track-row-hover")
     row.set_child(row_box)
     row.set_activatable(True)
     row._artist_name = artist
@@ -719,7 +709,7 @@ def _make_track_grid_card(
     badge.set_halign(Gtk.Align.END)
     badge.set_valign(Gtk.Align.START)
     badge.set_margin_top(8)
-    badge.set_margin_end(8)
+    badge.set_margin_end(12)
     overlay.add_overlay(badge)
 
     hover_overlay = Gtk.Box()
@@ -1260,6 +1250,51 @@ class LibraryView(Gtk.Box):
         if hasattr(self, "_scrolled"):
             self._scrolled.get_vadjustment().set_value(value)
 
+    def highlight_playing_track(self, track) -> None:
+        """Highlight the currently playing track in the track list/grid."""
+        playing_sid = getattr(track, "source_id", None) if track else None
+        playing_key = (
+            (getattr(track, "title", ""), getattr(track, "artist", ""))
+            if track
+            else None
+        )
+
+        def _match_track(td):
+            if td is None or track is None:
+                return False
+            td_sid = getattr(td, "source_id", None)
+            if playing_sid and td_sid and playing_sid == td_sid:
+                return True
+            if playing_key and (
+                getattr(td, "title", ""), getattr(td, "artist", "")
+            ) == playing_key:
+                return True
+            return False
+
+        # Highlight in list view
+        if hasattr(self, "_track_list"):
+            row = self._track_list.get_first_child()
+            while row is not None:
+                td = getattr(row, "_track_data", None)
+                if _match_track(td):
+                    row.add_css_class("now-playing-row")
+                else:
+                    row.remove_css_class("now-playing-row")
+                row = row.get_next_sibling()
+
+        # Highlight in grid view
+        if hasattr(self, "_tracks_album_grid"):
+            child = self._tracks_album_grid.get_first_child()
+            while child is not None:
+                td = getattr(child, "_track_obj", None) or getattr(
+                    child, "_track_data", None
+                )
+                if _match_track(td):
+                    child.add_css_class("now-playing-row")
+                else:
+                    child.remove_css_class("now-playing-row")
+                child = child.get_next_sibling()
+
     def set_context_callbacks(
         self,
         callbacks: dict,
@@ -1503,6 +1538,7 @@ class LibraryView(Gtk.Box):
             "on_add_to_favorites": lambda a=album_name, ar=artist: cbs.get("on_add_to_favorites", _noop)(a, ar),
             "on_go_to_artist": lambda a=album_name, ar=artist: cbs.get("on_go_to_artist", _noop)(a, ar),
             "on_shuffle_album": lambda a=album_name, ar=artist: cbs.get("on_shuffle_album", _noop)(a, ar),
+            "on_properties": lambda a=album_name, ar=artist: cbs.get("on_properties", _noop)(a, ar),
         }
 
         album_data = {
@@ -1566,6 +1602,7 @@ class LibraryView(Gtk.Box):
             "on_follow_artist": lambda name=artist_name: cbs.get("on_follow_artist", _noop)(name),
             "on_unfollow_artist": lambda name=artist_name: cbs.get("on_unfollow_artist", _noop)(name),
             "on_shuffle_artist": lambda name=artist_name: cbs.get("on_shuffle_artist", _noop)(name),
+            "on_properties": lambda name=artist_name: cbs.get("on_properties", _noop)(name),
         }
 
         artist_data = {"artist": artist_name}

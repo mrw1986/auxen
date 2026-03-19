@@ -53,6 +53,11 @@ _SAMPLE_DURATIONS = [
     "2:55",
 ]
 
+# Result type constants
+_TYPE_TRACK = "track"
+_TYPE_ALBUM = "album"
+_TYPE_ARTIST = "artist"
+
 
 def _format_duration(seconds: float | None) -> str:
     """Format seconds as M:SS."""
@@ -66,6 +71,8 @@ def _make_result_row(
     source: str,
     duration: str,
     track=None,
+    on_artist_clicked=None,
+    on_album_clicked=None,
 ) -> Gtk.ListBoxRow:
     """Build a single search result row using the shared widget."""
     # Build a dict-like track for the shared function
@@ -84,9 +91,195 @@ def _make_result_row(
         show_duration=True,
         art_size=40,
         css_class="search-result-row",
+        on_artist_clicked=on_artist_clicked,
+        on_album_clicked=on_album_clicked,
     )
     # Store the real track object for context menu use
     row._track_data = track  # type: ignore[attr-defined]
+    return row
+
+
+def _make_album_result_row(
+    name: str,
+    artist_name: str,
+    num_tracks: int | None = None,
+    on_clicked=None,
+    tidal_id: str | None = None,
+) -> Gtk.ListBoxRow:
+    """Build a search result row for an album."""
+    row = Gtk.ListBoxRow()
+    row.add_css_class("search-result-row")
+    row.add_css_class("track-row-hover")
+
+    box = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL,
+        spacing=12,
+    )
+    box.set_margin_top(8)
+    box.set_margin_bottom(8)
+    box.set_margin_start(12)
+    box.set_margin_end(12)
+
+    # Album art placeholder
+    art_box = Gtk.Box()
+    art_box.set_size_request(40, 40)
+    art_box.add_css_class("album-art-placeholder")
+    art_box.set_valign(Gtk.Align.CENTER)
+
+    art_icon = Gtk.Image.new_from_icon_name("media-optical-symbolic")
+    art_icon.set_pixel_size(20)
+    art_icon.set_halign(Gtk.Align.CENTER)
+    art_icon.set_valign(Gtk.Align.CENTER)
+    art_box.append(art_icon)
+
+    art_image = Gtk.Image()
+    art_image.set_pixel_size(40)
+    art_image.set_size_request(40, 40)
+    art_image.set_visible(False)
+    art_box.append(art_image)
+
+    row._art_icon = art_icon  # type: ignore[attr-defined]
+    row._art_image = art_image  # type: ignore[attr-defined]
+    row._art_box = art_box  # type: ignore[attr-defined]
+
+    box.append(art_box)
+
+    # Text column
+    text_box = Gtk.Box(
+        orientation=Gtk.Orientation.VERTICAL,
+        spacing=2,
+    )
+    text_box.set_hexpand(True)
+    text_box.set_valign(Gtk.Align.CENTER)
+
+    title_label = Gtk.Label(label=name)
+    title_label.set_xalign(0)
+    title_label.set_ellipsize(Pango.EllipsizeMode.END)
+    title_label.add_css_class("heading")
+    text_box.append(title_label)
+
+    subtitle = artist_name
+    if num_tracks is not None:
+        subtitle += f"  \u00b7  {num_tracks} tracks"
+    sub_label = Gtk.Label(label=subtitle)
+    sub_label.set_xalign(0)
+    sub_label.set_ellipsize(Pango.EllipsizeMode.END)
+    sub_label.add_css_class("caption")
+    sub_label.add_css_class("dim-label")
+    text_box.append(sub_label)
+
+    box.append(text_box)
+
+    # Type badge
+    badge = Gtk.Label(label="Album")
+    badge.add_css_class("caption")
+    badge.add_css_class("dim-label")
+    badge.set_valign(Gtk.Align.CENTER)
+    box.append(badge)
+
+    row.set_child(box)
+
+    # Make the entire row clickable to navigate to album detail
+    if on_clicked is not None:
+        row.set_cursor_from_name("pointer")
+        gesture = Gtk.GestureClick.new()
+        gesture.set_button(1)
+
+        def _on_album_row_click(
+            gest, n_press, _x, _y,
+            _cb=on_clicked, _name=name, _artist=artist_name,
+            _tid=tidal_id,
+        ):
+            if n_press != 1:
+                return
+            gest.set_state(Gtk.EventSequenceState.CLAIMED)
+            _cb(_name, _artist, _tid)
+
+        gesture.connect("released", _on_album_row_click)
+        row.add_controller(gesture)
+
+    return row
+
+
+def _make_artist_result_row(
+    name: str,
+    on_clicked=None,
+) -> Gtk.ListBoxRow:
+    """Build a search result row for an artist."""
+    row = Gtk.ListBoxRow()
+    row.add_css_class("search-result-row")
+    row.add_css_class("track-row-hover")
+
+    box = Gtk.Box(
+        orientation=Gtk.Orientation.HORIZONTAL,
+        spacing=12,
+    )
+    box.set_margin_top(8)
+    box.set_margin_bottom(8)
+    box.set_margin_start(12)
+    box.set_margin_end(12)
+
+    # Artist image placeholder
+    art_box = Gtk.Box()
+    art_box.set_size_request(40, 40)
+    art_box.add_css_class("album-art-placeholder")
+    art_box.set_valign(Gtk.Align.CENTER)
+
+    art_icon = Gtk.Image.new_from_icon_name(
+        "avatar-default-symbolic"
+    )
+    art_icon.set_pixel_size(20)
+    art_icon.set_halign(Gtk.Align.CENTER)
+    art_icon.set_valign(Gtk.Align.CENTER)
+    art_box.append(art_icon)
+
+    art_image = Gtk.Image()
+    art_image.set_pixel_size(40)
+    art_image.set_size_request(40, 40)
+    art_image.set_visible(False)
+    art_box.append(art_image)
+
+    row._art_icon = art_icon  # type: ignore[attr-defined]
+    row._art_image = art_image  # type: ignore[attr-defined]
+    row._art_box = art_box  # type: ignore[attr-defined]
+
+    box.append(art_box)
+
+    # Artist name
+    name_label = Gtk.Label(label=name)
+    name_label.set_xalign(0)
+    name_label.set_hexpand(True)
+    name_label.set_ellipsize(Pango.EllipsizeMode.END)
+    name_label.add_css_class("heading")
+    name_label.set_valign(Gtk.Align.CENTER)
+    box.append(name_label)
+
+    # Type badge
+    badge = Gtk.Label(label="Artist")
+    badge.add_css_class("caption")
+    badge.add_css_class("dim-label")
+    badge.set_valign(Gtk.Align.CENTER)
+    box.append(badge)
+
+    row.set_child(box)
+
+    # Make the entire row clickable to navigate to artist detail
+    if on_clicked is not None:
+        row.set_cursor_from_name("pointer")
+        gesture = Gtk.GestureClick.new()
+        gesture.set_button(1)
+
+        def _on_artist_row_click(
+            gest, n_press, _x, _y, _cb=on_clicked, _name=name
+        ):
+            if n_press != 1:
+                return
+            gest.set_state(Gtk.EventSequenceState.CLAIMED)
+            _cb(_name)
+
+        gesture.connect("released", _on_artist_row_click)
+        row.add_controller(gesture)
+
     return row
 
 
@@ -114,12 +307,21 @@ class SearchView(Gtk.Box):
         self._get_playlists: object = None
         self._current_menu: object = None
 
+        # Navigation callbacks for clickable artist/album labels
+        self._on_nav_artist_clicked = None
+        self._on_nav_album_clicked = None
+
+        # Filter state — "all", "track", "album", "artist"
+        self._active_filter: str = "all"
+        # Cache of latest search results for re-filtering without re-searching
+        self._cached_results: list[dict] = []
+
         # ---- Search entry ----
         entry_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
         )
         entry_box.set_margin_top(24)
-        entry_box.set_margin_bottom(16)
+        entry_box.set_margin_bottom(8)
         entry_box.set_margin_start(32)
         entry_box.set_margin_end(32)
 
@@ -151,6 +353,35 @@ class SearchView(Gtk.Box):
         entry_box.append(self._search_entry)
 
         self.append(entry_box)
+
+        # ---- Filter tab buttons ----
+        self._filter_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=4,
+        )
+        self._filter_box.set_margin_start(32)
+        self._filter_box.set_margin_end(32)
+        self._filter_box.set_margin_bottom(12)
+        self._filter_box.set_visible(False)  # Hidden until results arrive
+
+        self._filter_buttons: list[Gtk.ToggleButton] = []
+        for label_text, filter_name in [
+            ("All", "all"),
+            ("Tracks", _TYPE_TRACK),
+            ("Albums", _TYPE_ALBUM),
+            ("Artists", _TYPE_ARTIST),
+        ]:
+            btn = Gtk.ToggleButton(label=label_text)
+            btn.add_css_class("filter-btn")
+            btn._filter_name = filter_name  # type: ignore[attr-defined]
+            btn.connect("toggled", self._on_filter_toggled)
+            self._filter_box.append(btn)
+            self._filter_buttons.append(btn)
+
+        # Default: "All" is active
+        self._filter_buttons[0].set_active(True)
+
+        self.append(self._filter_box)
 
         # ---- Scrollable results area ----
         self._scroll = Gtk.ScrolledWindow()
@@ -239,6 +470,164 @@ class SearchView(Gtk.Box):
         """Set callback functions for the right-click context menu."""
         self._context_callbacks = callbacks
         self._get_playlists = get_playlists
+
+    def set_navigation_callbacks(
+        self,
+        on_artist_clicked=None,
+        on_album_clicked=None,
+    ) -> None:
+        """Set callbacks for clickable artist/album navigation.
+
+        Parameters
+        ----------
+        on_artist_clicked:
+            Callback receiving (artist_name: str).
+        on_album_clicked:
+            Callback receiving (album_name: str, artist: str,
+            tidal_id: str | None).
+        """
+        self._on_nav_artist_clicked = on_artist_clicked
+        self._on_nav_album_clicked = on_album_clicked
+
+    def _nav_album_from_track(
+        self, album_name: str, artist: str
+    ) -> None:
+        """Bridge for track-row album clicks (2-arg) to nav callback (3-arg)."""
+        if self._on_nav_album_clicked is not None:
+            self._on_nav_album_clicked(album_name, artist, None)
+
+    # ---- Filter tab handlers ----
+
+    def _on_filter_toggled(
+        self, toggled_btn: Gtk.ToggleButton
+    ) -> None:
+        """Enforce radio-button behavior for filter tab buttons."""
+        if not toggled_btn.get_active():
+            # Prevent un-toggling the last active button
+            any_active = any(
+                b.get_active() for b in self._filter_buttons
+            )
+            if not any_active:
+                toggled_btn.set_active(True)
+            return
+
+        # Deactivate all other buttons
+        for btn in self._filter_buttons:
+            if btn is not toggled_btn and btn.get_active():
+                btn.set_active(False)
+
+        filter_name = getattr(
+            toggled_btn, "_filter_name", "all"
+        )
+        self._active_filter = filter_name
+        # Re-filter displayed results from cache (no re-search)
+        self._apply_filter()
+
+    def _apply_filter(self) -> None:
+        """Show/hide result rows based on the active filter tab.
+
+        Uses ``_cached_results`` so we never re-search, just re-render
+        the visible subset.
+        """
+        self._clear_results()
+
+        filtered = self._cached_results
+        if self._active_filter != "all":
+            filtered = [
+                r
+                for r in self._cached_results
+                if r.get("_result_type") == self._active_filter
+            ]
+
+        if not filtered:
+            if self._cached_results:
+                # Results exist but none match the current filter
+                self._results_stack.set_visible_child_name(
+                    "empty-no-results"
+                )
+            return
+
+        for result in filtered:
+            result_type = result.get("_result_type", _TYPE_TRACK)
+
+            if result_type == _TYPE_ALBUM:
+                tidal_obj = result.get("_tidal_obj")
+                tidal_id = None
+                if tidal_obj is not None:
+                    tidal_id = str(getattr(tidal_obj, "id", ""))
+                row = _make_album_result_row(
+                    name=result["title"],
+                    artist_name=result.get("artist", ""),
+                    num_tracks=result.get("_num_tracks"),
+                    on_clicked=self._on_nav_album_clicked,
+                    tidal_id=tidal_id or None,
+                )
+                row._result_type = _TYPE_ALBUM  # type: ignore[attr-defined]
+                if tidal_obj is not None:
+                    row._tidal_album = tidal_obj  # type: ignore[attr-defined]
+                    self._load_album_art_from_tidal(row, tidal_obj)
+                self._results_list.append(row)
+
+            elif result_type == _TYPE_ARTIST:
+                row = _make_artist_result_row(
+                    name=result["title"],
+                    on_clicked=self._on_nav_artist_clicked,
+                )
+                row._result_type = _TYPE_ARTIST  # type: ignore[attr-defined]
+                tidal_obj = result.get("_tidal_obj")
+                if tidal_obj is not None:
+                    row._tidal_artist = tidal_obj  # type: ignore[attr-defined]
+                    self._load_artist_image_from_tidal(row, tidal_obj)
+                self._results_list.append(row)
+
+            else:
+                # Track result
+                track = result.get("_track")
+                row = _make_result_row(
+                    title=result["title"],
+                    artist=result.get("artist", ""),
+                    album=result.get("album", ""),
+                    source=result["source"],
+                    duration=result["duration"],
+                    track=track,
+                    on_artist_clicked=self._on_nav_artist_clicked,
+                    on_album_clicked=self._nav_album_from_track,
+                )
+                row._result_type = _TYPE_TRACK  # type: ignore[attr-defined]
+                self._attach_context_gesture(row, track)
+                self._attach_drag_source_to_row(row, track)
+                self._results_list.append(row)
+                self._load_row_art(row, track)
+
+        self._results_stack.set_visible_child_name("results")
+
+    def _update_filter_counts(self) -> None:
+        """Update filter button labels with counts from cached results."""
+        counts: dict[str, int] = {
+            "all": len(self._cached_results),
+            _TYPE_TRACK: 0,
+            _TYPE_ALBUM: 0,
+            _TYPE_ARTIST: 0,
+        }
+        for r in self._cached_results:
+            rtype = r.get("_result_type", _TYPE_TRACK)
+            if rtype in counts:
+                counts[rtype] += 1
+
+        label_map = {
+            "all": "All",
+            _TYPE_TRACK: "Tracks",
+            _TYPE_ALBUM: "Albums",
+            _TYPE_ARTIST: "Artists",
+        }
+        for btn in self._filter_buttons:
+            fname = getattr(btn, "_filter_name", "all")
+            count = counts.get(fname, 0)
+            base = label_map.get(fname, fname.title())
+            if count > 0:
+                btn.set_label(f"{base} ({count})")
+            else:
+                btn.set_label(base)
 
     # ---- Drag source helpers ----
 
@@ -416,10 +805,6 @@ class SearchView(Gtk.Box):
             spacing=12,
         )
         row_box.add_css_class("search-history-row")
-        row_box.set_margin_top(2)
-        row_box.set_margin_bottom(2)
-        row_box.set_margin_start(8)
-        row_box.set_margin_end(8)
 
         # Clock icon
         clock_icon = Gtk.Image.new_from_icon_name(
@@ -456,6 +841,7 @@ class SearchView(Gtk.Box):
         row_box.append(remove_btn)
 
         row = Gtk.ListBoxRow()
+        row.add_css_class("track-row-hover")
         row.set_child(row_box)
 
         # Click gesture for the row to trigger search
@@ -558,6 +944,9 @@ class SearchView(Gtk.Box):
         if not query:
             self._search_generation += 1
             self._clear_results()
+            self._cached_results = []
+            self._filter_box.set_visible(False)
+            self._reset_filter_buttons()
             self._refresh_history()
             return
 
@@ -604,36 +993,43 @@ class SearchView(Gtk.Box):
                 break
             self._results_list.remove(row)
 
+    def _reset_filter_buttons(self) -> None:
+        """Reset filter buttons to 'All' active with base labels."""
+        self._active_filter = "all"
+        for btn in self._filter_buttons:
+            fname = getattr(btn, "_filter_name", "all")
+            btn.set_active(fname == "all")
+            label_map = {
+                "all": "All",
+                _TYPE_TRACK: "Tracks",
+                _TYPE_ALBUM: "Albums",
+                _TYPE_ARTIST: "Artists",
+            }
+            btn.set_label(label_map.get(fname, fname.title()))
+
     def _populate_results(
         self,
-        results: list[dict[str, str]],
+        results: list[dict],
         gen: int | None = None,
     ) -> None:
         """Fill the result list with search result rows."""
         if gen is not None and gen != self._search_generation:
             return
-        self._clear_results()
+
+        # Cache results for filter switching
+        self._cached_results = results
 
         if not results:
+            self._filter_box.set_visible(False)
             self._results_stack.set_visible_child_name("empty-no-results")
             return
 
-        for result in results:
-            track = result.get("_track")
-            row = _make_result_row(
-                title=result["title"],
-                artist=result["artist"],
-                album=result["album"],
-                source=result["source"],
-                duration=result["duration"],
-                track=track,
-            )
-            self._attach_context_gesture(row, track)
-            self._attach_drag_source_to_row(row, track)
-            self._results_list.append(row)
-            self._load_row_art(row, track)
+        # Show filter tabs and update counts
+        self._filter_box.set_visible(True)
+        self._update_filter_counts()
 
-        self._results_stack.set_visible_child_name("results")
+        # Apply current filter (renders the rows)
+        self._apply_filter()
 
     def _load_row_art(self, row: Gtk.ListBoxRow, track) -> None:
         """Load album art asynchronously for a search result row."""
@@ -667,9 +1063,105 @@ class SearchView(Gtk.Box):
             track, _on_art_loaded, width=art_px, height=art_px
         )
 
+    def _load_album_art_from_tidal(
+        self, row: Gtk.ListBoxRow, tidal_album
+    ) -> None:
+        """Load album cover art from a tidalapi Album object."""
+        art_icon = getattr(row, "_art_icon", None)
+        art_image = getattr(row, "_art_image", None)
+        if art_icon is None or art_image is None:
+            return
+
+        try:
+            image_url = tidal_album.image(160)
+        except Exception:
+            return
+        if not image_url:
+            return
+
+        from auxen.album_art import AlbumArtService
+
+        request_token = object()
+        row._art_request_token = request_token  # type: ignore[attr-defined]
+
+        def _load() -> None:
+            try:
+                pixbuf = AlbumArtService.load_pixbuf_from_url(
+                    image_url, 40
+                )
+            except Exception:
+                pixbuf = None
+            if getattr(row, "_art_request_token", None) is not request_token:
+                return
+
+            def _apply(pb=pixbuf):
+                if pb is not None:
+                    texture = Gdk.Texture.new_for_pixbuf(pb)
+                    art_image.set_from_paintable(texture)
+                    art_image.set_visible(True)
+                    art_icon.set_visible(False)
+                    art_box = getattr(row, "_art_box", None)
+                    if art_box is not None:
+                        art_box.remove_css_class(
+                            "album-art-placeholder"
+                        )
+
+            GLib.idle_add(_apply)
+
+        thread = threading.Thread(target=_load, daemon=True)
+        thread.start()
+
+    def _load_artist_image_from_tidal(
+        self, row: Gtk.ListBoxRow, tidal_artist
+    ) -> None:
+        """Load artist image from a tidalapi Artist object."""
+        art_icon = getattr(row, "_art_icon", None)
+        art_image = getattr(row, "_art_image", None)
+        if art_icon is None or art_image is None:
+            return
+
+        try:
+            image_url = tidal_artist.image(160)
+        except Exception:
+            return
+        if not image_url:
+            return
+
+        from auxen.album_art import AlbumArtService
+
+        request_token = object()
+        row._art_request_token = request_token  # type: ignore[attr-defined]
+
+        def _load() -> None:
+            try:
+                pixbuf = AlbumArtService.load_pixbuf_from_url(
+                    image_url, 40
+                )
+            except Exception:
+                pixbuf = None
+            if getattr(row, "_art_request_token", None) is not request_token:
+                return
+
+            def _apply(pb=pixbuf):
+                if pb is not None:
+                    texture = Gdk.Texture.new_for_pixbuf(pb)
+                    art_image.set_from_paintable(texture)
+                    art_image.set_visible(True)
+                    art_icon.set_visible(False)
+                    art_box = getattr(row, "_art_box", None)
+                    if art_box is not None:
+                        art_box.remove_css_class(
+                            "album-art-placeholder"
+                        )
+
+            GLib.idle_add(_apply)
+
+        thread = threading.Thread(target=_load, daemon=True)
+        thread.start()
+
     # ---- Search logic ----
 
-    def _do_search(self, query: str) -> list[dict[str, str]]:
+    def _do_search(self, query: str) -> list[dict]:
         """Search the database and optionally Tidal for matching tracks.
 
         Falls back to placeholder results if no providers are wired.
@@ -684,11 +1176,11 @@ class SearchView(Gtk.Box):
         # Fallback: placeholder search
         return self._do_placeholder_search(query)
 
-    def _do_real_search(self, query: str) -> list[dict[str, str]]:
+    def _do_real_search(self, query: str) -> list[dict]:
         """Perform a real search using the database and Tidal."""
-        results: list[dict[str, str]] = []
+        results: list[dict] = []
 
-        # Search local database
+        # Search local database (tracks only)
         try:
             db_tracks = self._db.search(query)
             for track in db_tracks:
@@ -700,6 +1192,7 @@ class SearchView(Gtk.Box):
                     "duration": _format_duration(track.duration),
                     "_track": track,
                     "_source_id": track.source_id,
+                    "_result_type": _TYPE_TRACK,
                 })
         except Exception:
             logger.warning("Database search failed", exc_info=True)
@@ -708,10 +1201,17 @@ class SearchView(Gtk.Box):
         if self._tidal_provider is not None:
             try:
                 if self._tidal_provider.is_logged_in:
-                    tidal_tracks = self._tidal_provider.search(query, limit=10)
-                    # Track source_ids already seen to avoid duplicates
-                    seen_ids = {r["_source_id"] for r in results if r.get("_source_id")}
-                    for track in tidal_tracks:
+                    tidal_results = self._tidal_provider.search_all(
+                        query, limit=10
+                    )
+
+                    # Add track results (deduplicated)
+                    seen_ids = {
+                        r["_source_id"]
+                        for r in results
+                        if r.get("_source_id")
+                    }
+                    for track in tidal_results.get("tracks", []):
                         if track.source_id not in seen_ids:
                             seen_ids.add(track.source_id)
                             results.append({
@@ -719,17 +1219,56 @@ class SearchView(Gtk.Box):
                                 "artist": track.artist,
                                 "album": track.album or "",
                                 "source": track.source.value,
-                                "duration": _format_duration(track.duration),
+                                "duration": _format_duration(
+                                    track.duration
+                                ),
                                 "_track": track,
                                 "_source_id": track.source_id,
+                                "_result_type": _TYPE_TRACK,
                             })
+
+                    # Add album results
+                    for album in tidal_results.get("albums", []):
+                        artist_name = ""
+                        if hasattr(album, "artist") and album.artist:
+                            artist_name = getattr(
+                                album.artist, "name", ""
+                            )
+                        elif hasattr(album, "artists") and album.artists:
+                            artist_name = ", ".join(
+                                a.name for a in album.artists
+                            )
+                        results.append({
+                            "title": getattr(album, "name", ""),
+                            "artist": artist_name,
+                            "album": "",
+                            "source": "tidal",
+                            "duration": "",
+                            "_result_type": _TYPE_ALBUM,
+                            "_tidal_obj": album,
+                            "_num_tracks": getattr(
+                                album, "num_tracks", None
+                            ),
+                        })
+
+                    # Add artist results
+                    for artist in tidal_results.get("artists", []):
+                        results.append({
+                            "title": getattr(artist, "name", ""),
+                            "artist": "",
+                            "album": "",
+                            "source": "tidal",
+                            "duration": "",
+                            "_result_type": _TYPE_ARTIST,
+                            "_tidal_obj": artist,
+                        })
             except Exception:
                 logger.warning("Tidal search failed", exc_info=True)
 
         return results
 
     @staticmethod
-    def _do_placeholder_search(query: str) -> list[dict[str, str]]:
+    def _do_placeholder_search(query: str) -> list[dict]:
         """Generate placeholder search results based on the query.
 
         This method returns fake results that incorporate the query text
@@ -744,7 +1283,7 @@ class SearchView(Gtk.Box):
         rng = random.Random(query.lower())  # noqa: S311
         count = rng.randint(3, 5)
 
-        results: list[dict[str, str]] = []
+        results: list[dict] = []
         for i in range(count):
             artist = rng.choice(_SAMPLE_ARTISTS)
             album = rng.choice(_SAMPLE_ALBUMS)
@@ -759,6 +1298,7 @@ class SearchView(Gtk.Box):
                     "album": album,
                     "source": source,
                     "duration": duration,
+                    "_result_type": _TYPE_TRACK,
                 }
             )
 

@@ -115,6 +115,7 @@ def _make_album_card(
     badge.set_margin_top(8)
     badge.set_margin_start(8)
     overlay.add_overlay(badge)
+    overlay.set_clip_overlay(badge, True)
 
     card.append(overlay)
 
@@ -329,7 +330,7 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         )
         self._albums_section.set_margin_start(32)
         self._albums_section.set_margin_end(32)
-        self._albums_section.set_margin_bottom(16)
+        self._albums_section.set_margin_bottom(24)
 
         albums_header = Gtk.Label(label="Albums")
         albums_header.set_xalign(0)
@@ -459,6 +460,34 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         self._on_back = on_back
         self._on_album_clicked = on_album_clicked
         self._on_similar_artist_clicked = on_similar_artist_clicked
+
+    def highlight_playing_track(self, track) -> None:
+        """Highlight the currently playing track in the top tracks list."""
+        if not hasattr(self, "_track_list"):
+            return
+        playing_sid = getattr(track, "source_id", None) if track else None
+        playing_key = (
+            (getattr(track, "title", ""), getattr(track, "artist", ""))
+            if track
+            else None
+        )
+        row = self._track_list.get_first_child()
+        while row is not None:
+            td = getattr(row, "_track_data", None)
+            match = False
+            if td is not None and track is not None:
+                td_sid = getattr(td, "source_id", None)
+                if playing_sid and td_sid and playing_sid == td_sid:
+                    match = True
+                elif playing_key and (
+                    getattr(td, "title", ""), getattr(td, "artist", "")
+                ) == playing_key:
+                    match = True
+            if match:
+                row.add_css_class("now-playing-row")
+            else:
+                row.remove_css_class("now-playing-row")
+            row = row.get_next_sibling()
 
     def set_context_callbacks(
         self,
@@ -706,10 +735,6 @@ class ArtistDetailView(Gtk.ScrolledWindow):
             spacing=12,
         )
         row_box.add_css_class("album-detail-track-row")
-        row_box.set_margin_top(4)
-        row_box.set_margin_bottom(4)
-        row_box.set_margin_start(8)
-        row_box.set_margin_end(8)
 
         # Track number
         track_num = track.track_number if track.track_number else index + 1
@@ -757,8 +782,10 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         row_box.append(dur_label)
 
         row = Gtk.ListBoxRow()
+        row.add_css_class("track-row-hover")
         row.set_child(row_box)
         row.set_activatable(True)
+        row._track_data = track  # type: ignore[attr-defined]
         return row
 
     def _make_similar_artist_card(
@@ -940,6 +967,7 @@ class ArtistDetailView(Gtk.ScrolledWindow):
             "on_add_to_favorites": lambda a=album_name, ar=artist: cbs.get("on_add_to_favorites", _noop)(a, ar),
             "on_go_to_artist": lambda a=album_name, ar=artist: cbs.get("on_go_to_artist", _noop)(a, ar),
             "on_shuffle_album": lambda a=album_name, ar=artist: cbs.get("on_shuffle_album", _noop)(a, ar),
+            "on_properties": lambda a=album_name, ar=artist: cbs.get("on_properties", _noop)(a, ar),
         }
         album_data = {"album": album_name, "artist": artist}
         self._current_menu = AlbumContextMenu(

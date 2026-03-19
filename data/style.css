@@ -447,8 +447,8 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     color: #0c0b0f;
     border-radius: 9999px;
     padding: 2px 8px;
-    margin-top: 6px;
-    margin-right: 6px;
+    margin-top: 0;
+    margin-right: 0;
     font-size: 0.65rem;
     font-weight: 700;
     letter-spacing: 0.3px;
@@ -466,8 +466,8 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     color: #0c0b0f;
     border-radius: 9999px;
     padding: 2px 8px;
-    margin-top: 6px;
-    margin-right: 6px;
+    margin-top: 0;
+    margin-right: 0;
     font-size: 0.65rem;
     font-weight: 700;
     letter-spacing: 0.3px;
@@ -486,12 +486,6 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 
 .recently-played-row {
     padding: 8px 12px;
-    border-radius: 6px;
-    transition: background-color 150ms ease;
-}
-
-.recently-played-row:hover {
-    background-color: alpha(@theme_fg_color, 0.05);
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -726,12 +720,6 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 
 .search-result-row {
     padding: 10px 12px;
-    border-radius: 8px;
-    transition: background-color 150ms ease;
-}
-
-.search-result-row:hover {
-    background-color: alpha(@theme_fg_color, 0.05);
 }
 
 .search-empty-state {
@@ -757,12 +745,6 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 
 .search-history-row {
     padding: 10px 12px;
-    border-radius: 8px;
-    transition: background-color 150ms ease;
-}
-
-.search-history-row:hover {
-    background-color: alpha(@theme_fg_color, 0.04);
 }
 
 .search-history-row image {
@@ -773,7 +755,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     color: alpha(@theme_fg_color, 0.6);
 }
 
-.search-history-row:hover label {
+row.track-row-hover:hover .search-history-row label {
     color: @theme_fg_color;
 }
 
@@ -786,7 +768,7 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
     transition: all 200ms ease;
 }
 
-.search-history-row:hover button {
+row.track-row-hover:hover .search-history-row button {
     opacity: 1;
 }
 
@@ -823,12 +805,6 @@ scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
 
 .collection-row {
     padding: 10px 12px;
-    border-radius: 8px;
-    transition: background-color 150ms ease;
-}
-
-.collection-row:hover {
-    background-color: alpha(@theme_fg_color, 0.05);
 }
 
 .collection-heart-btn {
@@ -969,6 +945,20 @@ row.activatable:hover {
     background-color: alpha(@theme_fg_color, 0.04);
 }
 
+/* ── Unified track/artist/album row hover ────────────────
+   All list rows delegate hover to the ListBoxRow itself.
+   Inner boxes carry padding for content spacing; the row
+   carries the hover background so it covers edge-to-edge. */
+row.track-row-hover {
+    border-radius: 8px;
+    padding: 4px 8px;
+    transition: background-color 150ms ease;
+}
+
+row.track-row-hover:hover {
+    background-color: alpha(@theme_fg_color, 0.05);
+}
+
 /* ═══════════════════════════════════════════════════════════
    FLAT BUTTON GLOBAL REFINEMENT
    ═══════════════════════════════════════════════════════════ */
@@ -1003,12 +993,6 @@ button.flat:hover {
 
 .library-artist-row {
     padding: 10px 12px;
-    border-radius: 8px;
-    transition: background-color 150ms ease;
-}
-
-.library-artist-row:hover {
-    background-color: alpha(@theme_fg_color, 0.05);
 }
 
 .artist-row-image {
@@ -1019,12 +1003,6 @@ button.flat:hover {
 
 .library-track-row {
     padding: 10px 12px;
-    border-radius: 8px;
-    transition: background-color 150ms ease;
-}
-
-.library-track-row:hover {
-    background-color: alpha(@theme_fg_color, 0.05);
 }
 
 /* -- Dim count text -- */
@@ -1116,12 +1094,6 @@ button.flat:hover {
 
 .album-detail-track-row {
     padding: 10px 12px;
-    border-radius: 6px;
-    transition: background-color 150ms ease;
-}
-
-.album-detail-track-row:hover {
-    background-color: alpha(@theme_fg_color, 0.05);
 }
 
 /* -- Track number (dim, fixed width) -- */
@@ -1252,12 +1224,6 @@ button.flat:hover {
 
 .playlist-track-row {
     padding: 10px 12px;
-    border-radius: 6px;
-    transition: background-color 150ms ease;
-}
-
-.playlist-track-row:hover {
-    background-color: alpha(@theme_fg_color, 0.05);
 }
 
 /* -- Small remove (x) button, red on hover -- */
@@ -1465,12 +1431,6 @@ button.flat:hover {
 
 .explore-track-row {
     padding: 10px 12px;
-    border-radius: 6px;
-    transition: background-color 150ms ease;
-}
-
-.explore-track-row:hover {
-    background-color: alpha(@theme_fg_color, 0.05);
 }
 
 /* =============================================================
@@ -1940,6 +1900,12 @@ button.flat:hover {
     color: #d4a039;
 }
 
+/* -- Stats list row (inner padding to match old spacing) -- */
+
+.stats-list-row {
+    padding: 4px 4px;
+}
+
 /* -- Horizontal bar for top artists/tracks -- */
 
 .stats-bar trough {
@@ -2278,10 +2244,7 @@ button.flat:hover {
 }
 
 /* ── Source Badge Containment — keep badge inside art bounds ── */
-
-.album-card-art-container {
-    border-radius: 10px 10px 0 0;
-}
+/* GTK4 CSS has no overflow property; instead we inset the badge margins */
 
 /* ── Drag-and-drop highlight on sidebar playlist rows ── */
 .playlist-drop-highlight {
@@ -2396,10 +2359,6 @@ tooltip.background {
     padding: 4px 8px;
 }
 
-.standard-track-row:hover {
-    background-color: alpha(@theme_fg_color, 0.04);
-}
-
 /* ── Grid Mode Album Card ─────────────────────────── */
 
 .grid-album-card {
@@ -2470,4 +2429,16 @@ dialog.about .comments {
 
 :root:not(.dark) .splash-tagline {
     color: #7a5820;
+}
+
+/* -- Now-playing track highlight -- */
+
+row.now-playing-row,
+flowboxchild.now-playing-row {
+    background-color: rgba(212, 160, 57, 0.08);
+}
+
+row.now-playing-row:hover,
+flowboxchild.now-playing-row:hover {
+    background-color: rgba(212, 160, 57, 0.14);
 }

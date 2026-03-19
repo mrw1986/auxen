@@ -96,6 +96,7 @@ class Player(GObject.Object):
         self._cache_lock = threading.Lock()  # protects _uri_cache
         self._gapless_pending: bool = False  # set by about-to-finish
         self._gapless_saved_duration: float = 0.0  # old track's duration
+        self._audio_sink_name: str = "auto"  # "auto" or a GStreamer sink name
 
         # --- ReplayGain + Equalizer + Spectrum audio chain (optional) ---
         self._rgvolume_element: Optional[Gst.Element] = None
@@ -228,6 +229,182 @@ class Player(GObject.Object):
     ) -> None:
         """Set the crossfade service for fade-in/fade-out transitions."""
         self._crossfade = crossfade
+
+    # ------------------------------------------------------------------
+    # Audio output sink
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_available_sinks() -> list[tuple[str, str]]:
+        """Return a list of (factory_name, display_name) for audio sinks.
+
+        The first entry is always ("auto", "Automatic") which uses
+        GStreamer's autoaudiosink.
+        """
+        Gst.init(None)
+        sinks: list[tuple[str, str]] = [("auto", "Automatic")]
+
+        # Preferred sink names in display order
+        _DISPLAY_NAMES: dict[str, str] = {
+            "pipewireaudiosink": "PipeWire",
+            "pipewiresink": "PipeWire",
+            "pulsesink": "PulseAudio",
+            "alsasink": "ALSA",
+            "jackaudiosink": "JACK",
+            "osssink": "OSS",
+            "oss4sink": "OSS4",
+        }
+
+        registry = Gst.Registry.get()
+        factories = registry.get_feature_list(Gst.ElementFactory)
+        seen_display: set[str] = set()
+        for factory in factories:
+            if not isinstance(factory, Gst.ElementFactory):
+                continue
+            # Must be an audio sink
+            klass = factory.get_metadata("klass") or ""
+            if "Sink" not in klass or "Audio" not in klass:
+                continue
+            name = factory.get_name()
+            # Skip autoaudiosink (covered by "Automatic"), fake sinks, etc.
+            if name in ("autoaudiosink", "fakesink"):
+                continue
+            display = _DISPLAY_NAMES.get(name)
+            if display is None:
+                continue
+            # Deduplicate display names (e.g. pipewireaudiosink and
+            # pipewiresink both map to "PipeWire")
+            if display in seen_display:
+                continue
+            seen_display.add(display)
+            sinks.append((name, display))
+        return sinks
+
+    def set_audio_sink(self, sink_name: str) -> None:
+        """Rebuild the audio bin using the specified GStreamer sink.
+
+        Parameters
+        ----------
+        sink_name:
+            A GStreamer element factory name (e.g. "pulsesink",
+            "pipewireaudiosink") or "auto" for autoaudiosink.
+        """
+        self._audio_sink_name = sink_name
+        self._rebuild_audio_bin()
+
+    def _rebuild_audio_bin(self) -> None:
+        """(Re)construct the audio processing bin and set it on playbin.
+
+        Chain: [rgvolume -> rglimiter ->] eq [-> spectrum] -> sink
+        """
+        sink_factory = (
+            "autoaudiosink"
+            if self._audio_sink_name == "auto"
+            else self._audio_sink_name
+        )
+
+        try:
+            audio_sink = Gst.ElementFactory.make(sink_factory, "audio-out")
+            if audio_sink is None:
+                logger.warning(
+                    "Could not create sink '%s'; falling back to "
+                    "autoaudiosink",
+                    sink_factory,
+                )
+                audio_sink = Gst.ElementFactory.make(
+                    "autoaudiosink", "audio-out"
+                )
+            if audio_sink is None:
+                logger.error("No audio sink available")
+                return
+
+            # Pause the pipeline while swapping the audio sink
+            was_playing = self._state == PlayerState.PLAYING
+            if was_playing:
+                self._pipeline.set_state(Gst.State.PAUSED)
+
+            # Re-create processing elements for the new bin
+            rgvolume = Gst.ElementFactory.make("rgvolume", "rgvolume")
+            rglimiter = Gst.ElementFactory.make("rglimiter", "rglimiter")
+            eq = Gst.ElementFactory.make("equalizer-10bands", "eq")
+            spectrum = Gst.ElementFactory.make("spectrum", "spectrum")
+
+            if spectrum is not None:
+                spectrum.set_property("bands", self._spectrum_bands)
+                spectrum.set_property("threshold", self._spectrum_threshold)
+                spectrum.set_property("interval", 66666666)
+                spectrum.set_property("post-messages", True)
+                spectrum.set_property("message-magnitude", True)
+                self._spectrum_element = spectrum
+
+            if eq is not None:
+                audio_bin = Gst.Bin.new("audio-bin")
+
+                if rgvolume is not None and rglimiter is not None:
+                    audio_bin.add(rgvolume)
+                    audio_bin.add(rglimiter)
+                    audio_bin.add(eq)
+                    if spectrum is not None:
+                        audio_bin.add(spectrum)
+                    audio_bin.add(audio_sink)
+
+                    rgvolume.link(rglimiter)
+                    rglimiter.link(eq)
+                    if spectrum is not None:
+                        eq.link(spectrum)
+                        spectrum.link(audio_sink)
+                    else:
+                        eq.link(audio_sink)
+
+                    pad = rgvolume.get_static_pad("sink")
+                    ghost = Gst.GhostPad.new("sink", pad)
+                    audio_bin.add_pad(ghost)
+
+                    self._rgvolume_element = rgvolume
+                    self._rglimiter_element = rglimiter
+                    # Re-apply ReplayGain settings
+                    album_mode = self._replaygain_mode == "album"
+                    rgvolume.set_property("album-mode", album_mode)
+                    rgvolume.set_property("pre-amp", 0.0)
+                    if not self._replaygain_enabled:
+                        rgvolume.set_property("pre-amp", -60.0)
+                else:
+                    audio_bin.add(eq)
+                    if spectrum is not None:
+                        audio_bin.add(spectrum)
+                    audio_bin.add(audio_sink)
+                    if spectrum is not None:
+                        eq.link(spectrum)
+                        spectrum.link(audio_sink)
+                    else:
+                        eq.link(audio_sink)
+                    pad = eq.get_static_pad("sink")
+                    ghost = Gst.GhostPad.new("sink", pad)
+                    audio_bin.add_pad(ghost)
+                    self._rgvolume_element = None
+                    self._rglimiter_element = None
+
+                self._pipeline.set_property("audio-sink", audio_bin)
+                self._equalizer_element = eq
+                logger.info(
+                    "Audio bin rebuilt with sink '%s'", sink_factory
+                )
+            else:
+                logger.warning(
+                    "equalizer-10bands not available; "
+                    "setting raw sink on pipeline"
+                )
+                self._pipeline.set_property("audio-sink", audio_sink)
+
+            if was_playing:
+                self._pipeline.set_state(Gst.State.PLAYING)
+
+        except Exception:
+            logger.warning(
+                "Failed to rebuild audio bin with sink '%s'",
+                sink_factory,
+                exc_info=True,
+            )
 
     # ------------------------------------------------------------------
     # Equalizer
@@ -387,7 +564,14 @@ class Player(GObject.Object):
         self._play_generation += 1
         self._gapless_pending = False
         gen = self._play_generation
+
+        # Check if this track's URI was already prefetched before clearing
+        # the cache — avoids resolving the same track twice (once from
+        # prefetch, once here).
+        prefetched_uri: Optional[str] = None
         with self._cache_lock:
+            if track.source_id and track.source_id in self._uri_cache:
+                prefetched_uri = self._uri_cache.pop(track.source_id)
             self._uri_cache.clear()
 
         def _resolve_and_play() -> None:
@@ -395,7 +579,7 @@ class Player(GObject.Object):
             if gen != self._play_generation:
                 return
 
-            uri = self._resolve_uri(track)
+            uri = prefetched_uri or self._resolve_uri(track)
             if uri is None:
                 logger.warning(
                     "Skipping unavailable track: %s",

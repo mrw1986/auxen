@@ -418,6 +418,12 @@ class AlbumContextMenu(_BaseContextMenu):
             nav_section.append("Go to Artist", "ctx.go-to-artist")
             menu.append_section(None, nav_section)
 
+        # Section 4: Properties
+        if self._callbacks.get("on_properties"):
+            props_section = Gio.Menu()
+            props_section.append("Properties\u2026", "ctx.properties")
+            menu.append_section(None, props_section)
+
         return menu
 
     def _build_action_group(self) -> Gio.SimpleActionGroup:
@@ -437,6 +443,7 @@ class AlbumContextMenu(_BaseContextMenu):
         )
         self._add_action(group, "go-to-artist", self._on_go_to_artist)
         self._add_action(group, "new-playlist", self._on_new_playlist)
+        self._add_action(group, "properties", self._on_properties)
 
         # Per-playlist actions
         for playlist in self._playlists:
@@ -489,6 +496,11 @@ class AlbumContextMenu(_BaseContextMenu):
 
     def _on_new_playlist(self, _action, _param) -> None:
         cb = self._callbacks.get("on_new_playlist")
+        if cb is not None:
+            cb()
+
+    def _on_properties(self, _action, _param) -> None:
+        cb = self._callbacks.get("on_properties")
         if cb is not None:
             cb()
 
@@ -571,6 +583,12 @@ class ArtistContextMenu(_BaseContextMenu):
                 )
             menu.append_section(None, follow_section)
 
+        # Properties section
+        if self._callbacks.get("on_properties"):
+            props_section = Gio.Menu()
+            props_section.append("Properties\u2026", "ctx.properties")
+            menu.append_section(None, props_section)
+
         return menu
 
     def _build_action_group(self) -> Gio.SimpleActionGroup:
@@ -586,6 +604,7 @@ class ArtistContextMenu(_BaseContextMenu):
         self._add_action(group, "shuffle-artist", self._on_shuffle_artist)
         self._add_action(group, "follow-artist", self._on_follow_artist)
         self._add_action(group, "unfollow-artist", self._on_unfollow_artist)
+        self._add_action(group, "properties", self._on_properties)
 
         return group
 
@@ -621,5 +640,10 @@ class ArtistContextMenu(_BaseContextMenu):
 
     def _on_unfollow_artist(self, _action, _param) -> None:
         cb = self._callbacks.get("on_unfollow_artist")
+        if cb is not None:
+            cb()
+
+    def _on_properties(self, _action, _param) -> None:
+        cb = self._callbacks.get("on_properties")
         if cb is not None:
             cb()

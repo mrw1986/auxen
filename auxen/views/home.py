@@ -68,7 +68,7 @@ def _make_source_badge(source: str) -> Gtk.Widget:
     badge.set_halign(Gtk.Align.END)
     badge.set_valign(Gtk.Align.START)
     badge.set_margin_top(8)
-    badge.set_margin_end(8)
+    badge.set_margin_end(12)
     return badge
 
 
@@ -127,6 +127,7 @@ def _make_album_card(title: str, artist: str, source: str) -> Gtk.FlowBoxChild:
 
     badge = _make_source_badge(source)
     overlay.add_overlay(badge)
+    overlay.set_clip_overlay(badge, True)
 
     # -- Hover overlay (darkens art) --
     hover_overlay = Gtk.Box()
@@ -708,6 +709,34 @@ class HomePage(Gtk.ScrolledWindow):
         """Restore a previously saved scroll position."""
         self.get_vadjustment().set_value(value)
 
+    def highlight_playing_track(self, track) -> None:
+        """Highlight the currently playing track in the recent list."""
+        if not hasattr(self, "_recent_list"):
+            return
+        playing_sid = getattr(track, "source_id", None) if track else None
+        playing_key = (
+            (getattr(track, "title", ""), getattr(track, "artist", ""))
+            if track
+            else None
+        )
+        row = self._recent_list.get_first_child()
+        while row is not None:
+            td = getattr(row, "_track_data", None)
+            match = False
+            if td is not None and track is not None:
+                td_sid = getattr(td, "source_id", None)
+                if playing_sid and td_sid and playing_sid == td_sid:
+                    match = True
+                elif playing_key and (
+                    getattr(td, "title", ""), getattr(td, "artist", "")
+                ) == playing_key:
+                    match = True
+            if match:
+                row.add_css_class("now-playing-row")
+            else:
+                row.remove_css_class("now-playing-row")
+            row = row.get_next_sibling()
+
     def set_context_callbacks(
         self,
         callbacks: dict,
@@ -980,6 +1009,7 @@ class HomePage(Gtk.ScrolledWindow):
             "on_add_to_favorites": lambda a=album_name, ar=artist: cbs.get("on_add_to_favorites", _noop)(a, ar),
             "on_go_to_artist": lambda a=album_name, ar=artist: cbs.get("on_go_to_artist", _noop)(a, ar),
             "on_shuffle_album": lambda a=album_name, ar=artist: cbs.get("on_shuffle_album", _noop)(a, ar),
+            "on_properties": lambda a=album_name, ar=artist: cbs.get("on_properties", _noop)(a, ar),
         }
 
         album_data = {

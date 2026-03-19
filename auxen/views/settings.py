@@ -53,9 +53,6 @@ class AuxenSettings(Adw.PreferencesWindow):
         )
         self.add_controller(esc_controller)
 
-        # Close when window loses focus (click outside)
-        self.connect("notify::is-active", self._on_active_changed)
-
         page = Adw.PreferencesPage()
         page.set_icon_name("emblem-system-symbolic")
         page.set_title("Settings")
@@ -69,10 +66,30 @@ class AuxenSettings(Adw.PreferencesWindow):
 
         self.add(page)
 
+        # Null out ComboRow models on close to prevent GListStore
+        # assertion failure during teardown.
+        self.connect("close-request", self._on_close_request)
+
         # Add a close button to the internal header bar.
         # Adw.PreferencesWindow doesn't expose its header bar directly,
         # so walk the widget tree to find it.
         GLib.idle_add(self._inject_close_button)
+
+    def _on_close_request(self, *_args) -> bool:
+        """Detach ComboRow models before teardown to prevent GLib criticals."""
+        for attr in (
+            "_audio_sink_row",
+            "_source_priority",
+            "_audio_quality",
+            "_replaygain_mode",
+        ):
+            combo = getattr(self, attr, None)
+            if combo is not None:
+                try:
+                    combo.set_model(None)
+                except Exception:
+                    pass
+        return False  # allow default close
 
     def _inject_close_button(self) -> bool:
         """Walk widget tree to find the header bar and add a close button."""
@@ -98,11 +115,6 @@ class AuxenSettings(Adw.PreferencesWindow):
                 return result
             child = child.get_next_sibling()
         return None
-
-    def _on_active_changed(self, *_args) -> None:
-        """Close the settings window when it loses focus."""
-        if not self.is_active():
-            self.close()
 
     # ---- Public API ----
 
@@ -226,6 +238,28 @@ class AuxenSettings(Adw.PreferencesWindow):
 
     def _build_playback_group(self) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup(title="Playback")
+
+        # Audio output sink
+        self._audio_sink_row = Adw.ComboRow(
+            title="Audio Output",
+            subtitle="Select the audio output device",
+        )
+        self._audio_sink_items: list[tuple[str, str]] = []
+        try:
+            from auxen.player import Player
+
+            self._audio_sink_items = Player.get_available_sinks()
+        except Exception:
+            self._audio_sink_items = [("auto", "Automatic")]
+        sink_model = Gtk.StringList.new(
+            [display for _, display in self._audio_sink_items]
+        )
+        self._audio_sink_row.set_model(sink_model)
+        self._audio_sink_row.set_selected(0)
+        self._audio_sink_row.connect(
+            "notify::selected", self._on_audio_sink_changed
+        )
+        group.add(self._audio_sink_row)
 
         # Source priority
         self._source_priority = Adw.ComboRow(
@@ -407,55 +441,15 @@ class AuxenSettings(Adw.PreferencesWindow):
     # ── Last.fm ──────────────────────────────────────────
 
     def _build_lastfm_group(self) -> Adw.PreferencesGroup:
-        group = Adw.PreferencesGroup(title="Last.fm")
+        group = Adw.PreferencesGroup(
+            title="Last.fm",
+            description=(
+                "Scrobble your listening history to Last.fm. "
+                "Connect your account to get started."
+            ),
+        )
 
-        # API Key entry
-        self._lastfm_api_key_row = Adw.EntryRow(
-            title="API Key",
-        )
-        self._lastfm_api_key_row.set_tooltip_text(
-            "Register at https://www.last.fm/api/account/create"
-        )
-        # Save on focus-out instead of every keystroke to avoid
-        # partial saves and session invalidation while typing.
-        key_focus_ctrl = Gtk.EventControllerFocus()
-        key_focus_ctrl.connect(
-            "leave", self._on_lastfm_key_focus_out
-        )
-        self._lastfm_api_key_row.add_controller(key_focus_ctrl)
-        group.add(self._lastfm_api_key_row)
-
-        # API Secret entry
-        self._lastfm_api_secret_row = Adw.PasswordEntryRow(
-            title="Shared Secret",
-        )
-        self._lastfm_api_secret_row.set_tooltip_text(
-            "The Shared Secret from your Last.fm API application"
-        )
-        secret_focus_ctrl = Gtk.EventControllerFocus()
-        secret_focus_ctrl.connect(
-            "leave", self._on_lastfm_secret_focus_out
-        )
-        self._lastfm_api_secret_row.add_controller(secret_focus_ctrl)
-        group.add(self._lastfm_api_secret_row)
-
-        # Help text for registering an API application
-        self._lastfm_help_row = Adw.ActionRow(
-            title="Get API credentials",
-            subtitle="Register at last.fm/api/account/create",
-        )
-        self._lastfm_help_row.set_icon_name("dialog-information-symbolic")
-        help_link_btn = Gtk.Button(
-            icon_name="go-next-symbolic",
-            valign=Gtk.Align.CENTER,
-        )
-        help_link_btn.add_css_class("flat")
-        help_link_btn.connect("clicked", self._on_lastfm_help_clicked)
-        self._lastfm_help_row.add_suffix(help_link_btn)
-        self._lastfm_help_row.set_activatable_widget(help_link_btn)
-        group.add(self._lastfm_help_row)
-
-        # Account status
+        # Account status — this is the primary interaction
         self._lastfm_account_row = Adw.ActionRow(
             title="Account",
             subtitle="Not connected",
@@ -481,6 +475,62 @@ class AuxenSettings(Adw.PreferencesWindow):
             "notify::active", self._on_lastfm_scrobble_toggled
         )
         group.add(self._lastfm_scrobble_switch)
+
+        # Advanced section — custom API credentials (hidden by default)
+        self._lastfm_advanced_row = Adw.ExpanderRow(
+            title="Advanced",
+            subtitle="Use your own Last.fm API credentials",
+            show_enable_switch=False,
+        )
+        self._lastfm_advanced_row.set_icon_name(
+            "applications-engineering-symbolic"
+        )
+
+        # API Key entry
+        self._lastfm_api_key_row = Adw.EntryRow(
+            title="API Key",
+        )
+        self._lastfm_api_key_row.set_tooltip_text(
+            "Leave blank to use the built-in Auxen credentials"
+        )
+        key_focus_ctrl = Gtk.EventControllerFocus()
+        key_focus_ctrl.connect(
+            "leave", self._on_lastfm_key_focus_out
+        )
+        self._lastfm_api_key_row.add_controller(key_focus_ctrl)
+        self._lastfm_advanced_row.add_row(self._lastfm_api_key_row)
+
+        # API Secret entry
+        self._lastfm_api_secret_row = Adw.PasswordEntryRow(
+            title="Shared Secret",
+        )
+        self._lastfm_api_secret_row.set_tooltip_text(
+            "Leave blank to use the built-in Auxen credentials"
+        )
+        secret_focus_ctrl = Gtk.EventControllerFocus()
+        secret_focus_ctrl.connect(
+            "leave", self._on_lastfm_secret_focus_out
+        )
+        self._lastfm_api_secret_row.add_controller(secret_focus_ctrl)
+        self._lastfm_advanced_row.add_row(self._lastfm_api_secret_row)
+
+        # Help text for registering an API application
+        self._lastfm_help_row = Adw.ActionRow(
+            title="Get your own API credentials",
+            subtitle="Register at last.fm/api/account/create",
+        )
+        self._lastfm_help_row.set_icon_name("dialog-information-symbolic")
+        help_link_btn = Gtk.Button(
+            icon_name="go-next-symbolic",
+            valign=Gtk.Align.CENTER,
+        )
+        help_link_btn.add_css_class("flat")
+        help_link_btn.connect("clicked", self._on_lastfm_help_clicked)
+        self._lastfm_help_row.add_suffix(help_link_btn)
+        self._lastfm_help_row.set_activatable_widget(help_link_btn)
+        self._lastfm_advanced_row.add_row(self._lastfm_help_row)
+
+        group.add(self._lastfm_advanced_row)
 
         return group
 
@@ -568,6 +618,19 @@ class AuxenSettings(Adw.PreferencesWindow):
                 self._audio_quality.set_selected(idx)
         except Exception:
             logger.warning("Failed to load tidal_quality", exc_info=True)
+
+        try:
+            # Load audio output sink
+            saved_sink = self._db.get_setting("audio_sink")
+            if saved_sink is not None:
+                for i, (name, _display) in enumerate(
+                    self._audio_sink_items
+                ):
+                    if name == saved_sink:
+                        self._audio_sink_row.set_selected(i)
+                        break
+        except Exception:
+            logger.warning("Failed to load audio_sink", exc_info=True)
 
         try:
             # Load ReplayGain enabled
@@ -825,6 +888,32 @@ class AuxenSettings(Adw.PreferencesWindow):
         self._rescan_btn.set_sensitive(True)
         return False
 
+    def _on_audio_sink_changed(self, row: Adw.ComboRow, _pspec) -> None:
+        """Persist and apply the selected audio output sink."""
+        if getattr(self, "_loading_settings", False):
+            return
+        idx = row.get_selected()
+        if idx < 0 or idx >= len(self._audio_sink_items):
+            return
+        sink_name, display_name = self._audio_sink_items[idx]
+        if self._db is not None:
+            try:
+                self._db.set_setting("audio_sink", sink_name)
+            except Exception:
+                logger.warning(
+                    "Failed to save audio_sink", exc_info=True
+                )
+        if self._player is not None:
+            try:
+                self._player.set_audio_sink(sink_name)
+            except Exception:
+                logger.warning(
+                    "Failed to apply audio sink '%s'",
+                    sink_name,
+                    exc_info=True,
+                )
+        logger.info("Audio output changed to %s (%s)", display_name, sink_name)
+
     def _on_replaygain_toggled(self, row: Adw.SwitchRow, _pspec) -> None:
         """Persist and apply ReplayGain enabled/disabled."""
         enabled = row.get_active()
@@ -916,11 +1005,10 @@ class AuxenSettings(Adw.PreferencesWindow):
             parent.open_equalizer()
 
     def _on_open_about(self, _button: Gtk.Button) -> None:
-        """Open the About dialog."""
+        """Open the About dialog on top of the Settings window."""
         from auxen.views.about_dialog import show_about_dialog
 
-        parent = self.get_transient_for()
-        show_about_dialog(parent or self)
+        show_about_dialog(self)
 
     def _fetch_tidal_subscription(self) -> None:
         """Fetch Tidal subscription info in a background thread and update the UI."""
@@ -1031,9 +1119,10 @@ class AuxenSettings(Adw.PreferencesWindow):
     def _save_lastfm_credentials(self) -> None:
         """Persist updated Last.fm API credentials to the service.
 
-        Only saves when both fields are non-empty. Does NOT reset
-        the existing session -- that only happens when the user
-        explicitly disconnects or connects with new credentials.
+        When both fields are empty, reverts to the built-in defaults.
+        When both fields have content, saves custom credentials.
+        Does NOT reset the existing session -- that only happens when
+        the user explicitly disconnects or connects with new credentials.
         """
         if self._lastfm_service is None:
             return
@@ -1041,12 +1130,9 @@ class AuxenSettings(Adw.PreferencesWindow):
         api_key = self._lastfm_api_key_row.get_text().strip()
         api_secret = self._lastfm_api_secret_row.get_text().strip()
 
-        # Only save if both fields have content
-        if api_key and api_secret:
-            try:
-                # Persist credentials without resetting the session.
-                # The session is only invalidated when the user clicks
-                # Connect/Disconnect explicitly.
+        try:
+            if api_key and api_secret:
+                # Save custom credentials
                 if self._lastfm_service._db is not None:
                     self._lastfm_service._db.set_setting(
                         "lastfm_api_key", api_key
@@ -1056,12 +1142,31 @@ class AuxenSettings(Adw.PreferencesWindow):
                     )
                 self._lastfm_service._api_key = api_key
                 self._lastfm_service._api_secret = api_secret
-                logger.info("Last.fm API credentials saved")
-            except Exception:
-                logger.warning(
-                    "Failed to save Last.fm credentials",
-                    exc_info=True,
+                logger.info("Last.fm custom API credentials saved")
+            elif not api_key and not api_secret:
+                # Both empty — revert to built-in defaults
+                if self._lastfm_service._db is not None:
+                    self._lastfm_service._db.set_setting(
+                        "lastfm_api_key", ""
+                    )
+                    self._lastfm_service._db.set_setting(
+                        "lastfm_api_secret", ""
+                    )
+                from auxen.lastfm import (
+                    _DEFAULT_API_KEY,
+                    _DEFAULT_API_SECRET,
                 )
+
+                self._lastfm_service._api_key = _DEFAULT_API_KEY
+                self._lastfm_service._api_secret = _DEFAULT_API_SECRET
+                logger.info(
+                    "Last.fm credentials cleared, using built-in defaults"
+                )
+        except Exception:
+            logger.warning(
+                "Failed to save Last.fm credentials",
+                exc_info=True,
+            )
 
     def _on_lastfm_help_clicked(self, _button: Gtk.Button) -> None:
         """Open the Last.fm API registration page in the default browser."""

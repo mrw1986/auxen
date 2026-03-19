@@ -220,14 +220,16 @@ def _make_album_card(
     badge.set_halign(Gtk.Align.END)
     badge.set_valign(Gtk.Align.START)
     badge.set_margin_top(8)
-    badge.set_margin_end(8)
+    badge.set_margin_end(12)
     overlay.add_overlay(badge)
+    overlay.set_clip_overlay(badge, True)
 
     # -- Hover overlay (darkens art) --
     hover_overlay = Gtk.Box()
     hover_overlay.add_css_class("album-card-hover-overlay")
     hover_overlay.set_halign(Gtk.Align.FILL)
     hover_overlay.set_valign(Gtk.Align.FILL)
+    hover_overlay.set_can_target(False)  # Let clicks pass through to play btn
     overlay.add_overlay(hover_overlay)
 
     # -- Play button (centered, revealed on hover) --
@@ -237,6 +239,8 @@ def _make_album_card(
     play_btn.add_css_class("album-card-play-btn")
     play_btn.set_halign(Gtk.Align.CENTER)
     play_btn.set_valign(Gtk.Align.CENTER)
+    play_btn.set_can_target(True)
+    play_btn.set_focusable(True)
     play_btn.set_tooltip_text(f"Play {album}")
     overlay.add_overlay(play_btn)
 
@@ -259,6 +263,7 @@ def _make_album_card(
     card.append(artist_label)
 
     child = Gtk.FlowBoxChild()
+    child.set_activatable(False)  # Prevent FlowBoxChild from stealing clicks
     child.set_child(card)
     # Store album/artist data for click handling
     child._album_title = album  # type: ignore[attr-defined]
@@ -280,10 +285,6 @@ def _make_artist_row(
         spacing=12,
     )
     row_box.add_css_class("library-artist-row")
-    row_box.set_margin_top(4)
-    row_box.set_margin_bottom(4)
-    row_box.set_margin_start(8)
-    row_box.set_margin_end(8)
 
     # Art overlay: placeholder + loaded image + play button
     art_overlay = Gtk.Overlay()
@@ -348,6 +349,7 @@ def _make_artist_row(
         row_box.append(badge)
 
     row = Gtk.ListBoxRow()
+    row.add_css_class("track-row-hover")
     row.set_child(row_box)
     row.set_activatable(True)
     row._artist_name = artist
@@ -364,10 +366,6 @@ def _make_album_list_row(
     """Build a list-mode row for an album (art + title + artist + count)."""
     row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
     row_box.add_css_class("library-album-list-row")
-    row_box.set_margin_top(4)
-    row_box.set_margin_bottom(4)
-    row_box.set_margin_start(8)
-    row_box.set_margin_end(8)
 
     # Art overlay: placeholder + loaded image + play button
     art_overlay = Gtk.Overlay()
@@ -448,6 +446,7 @@ def _make_album_list_row(
         row_box.append(count_label)
 
     row = Gtk.ListBoxRow()
+    row.add_css_class("track-row-hover")
     row.set_child(row_box)
     row.set_activatable(True)
     row._album_title = album
@@ -465,10 +464,6 @@ def _make_album_compact_row(
     """Build a compact row for an album."""
     row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
     row_box.add_css_class("compact-track-row")
-    row_box.set_margin_top(2)
-    row_box.set_margin_bottom(2)
-    row_box.set_margin_start(8)
-    row_box.set_margin_end(8)
 
     # Index number / play button swap container
     num_play_box = Gtk.Box()
@@ -533,6 +528,7 @@ def _make_album_compact_row(
     row_box.append(badge)
 
     row = Gtk.ListBoxRow()
+    row.add_css_class("track-row-hover")
     row.set_child(row_box)
     row.set_activatable(True)
     row._album_title = album
@@ -590,7 +586,7 @@ def _make_artist_card(
         badge.set_halign(Gtk.Align.END)
         badge.set_valign(Gtk.Align.START)
         badge.set_margin_top(8)
-        badge.set_margin_end(8)
+        badge.set_margin_end(12)
         overlay.add_overlay(badge)
         break
 
@@ -598,12 +594,15 @@ def _make_artist_card(
     hover_overlay.add_css_class("album-card-hover-overlay")
     hover_overlay.set_halign(Gtk.Align.FILL)
     hover_overlay.set_valign(Gtk.Align.FILL)
+    hover_overlay.set_can_target(False)  # Let clicks pass through to play btn
     overlay.add_overlay(hover_overlay)
 
     play_btn = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
     play_btn.add_css_class("album-card-play-btn")
     play_btn.set_halign(Gtk.Align.CENTER)
     play_btn.set_valign(Gtk.Align.CENTER)
+    play_btn.set_can_target(True)
+    play_btn.set_focusable(True)
     play_btn.set_tooltip_text(f"Play {artist}")
     overlay.add_overlay(play_btn)
 
@@ -619,6 +618,7 @@ def _make_artist_card(
     card.append(name_label)
 
     child = Gtk.FlowBoxChild()
+    child.set_activatable(False)  # Prevent FlowBoxChild from stealing clicks
     child.set_child(card)
     child._artist_name = artist
     child._art_icon = art_icon
@@ -633,10 +633,6 @@ def _make_artist_compact_row(
     """Build a compact row for an artist."""
     row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
     row_box.add_css_class("compact-track-row")
-    row_box.set_margin_top(2)
-    row_box.set_margin_bottom(2)
-    row_box.set_margin_start(8)
-    row_box.set_margin_end(8)
 
     # Index number / play button swap container
     num_play_box = Gtk.Box()
@@ -693,6 +689,7 @@ def _make_artist_compact_row(
         row_box.append(badge)
 
     row = Gtk.ListBoxRow()
+    row.add_css_class("track-row-hover")
     row.set_child(row_box)
     row.set_activatable(True)
     row._artist_name = artist
@@ -748,19 +745,22 @@ def _make_track_grid_card(
     badge.set_halign(Gtk.Align.END)
     badge.set_valign(Gtk.Align.START)
     badge.set_margin_top(8)
-    badge.set_margin_end(8)
+    badge.set_margin_end(12)
     overlay.add_overlay(badge)
 
     hover_overlay = Gtk.Box()
     hover_overlay.add_css_class("album-card-hover-overlay")
     hover_overlay.set_halign(Gtk.Align.FILL)
     hover_overlay.set_valign(Gtk.Align.FILL)
+    hover_overlay.set_can_target(False)  # Let clicks pass through to play btn
     overlay.add_overlay(hover_overlay)
 
     play_btn = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
     play_btn.add_css_class("album-card-play-btn")
     play_btn.set_halign(Gtk.Align.CENTER)
     play_btn.set_valign(Gtk.Align.CENTER)
+    play_btn.set_can_target(True)
+    play_btn.set_focusable(True)
     play_btn.set_tooltip_text(f"Play {title}")
     overlay.add_overlay(play_btn)
 
@@ -781,6 +781,7 @@ def _make_track_grid_card(
     card.append(artist_label)
 
     child = Gtk.FlowBoxChild()
+    child.set_activatable(False)  # Prevent FlowBoxChild from stealing clicks
     child.set_child(card)
     child._art_icon = art_icon
     child._art_image = art_image
@@ -997,10 +998,7 @@ class CollectionView(Gtk.Box):
         self._album_grid.set_max_children_per_line(6)
         self._album_grid.set_column_spacing(16)
         self._album_grid.set_row_spacing(16)
-        self._album_grid.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self._album_grid.connect(
-            "child-activated", self._on_album_card_activated
-        )
+        self._album_grid.set_selection_mode(Gtk.SelectionMode.NONE)
         albums_container.append(self._album_grid)
 
         self._content_stack.add_named(albums_container, "albums")
@@ -1044,10 +1042,7 @@ class CollectionView(Gtk.Box):
         self._favorites_grid.set_max_children_per_line(6)
         self._favorites_grid.set_row_spacing(16)
         self._favorites_grid.set_column_spacing(16)
-        self._favorites_grid.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self._favorites_grid.connect(
-            "child-activated", self._on_track_grid_card_activated
-        )
+        self._favorites_grid.set_selection_mode(Gtk.SelectionMode.NONE)
 
         grid_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         grid_container.set_margin_top(16)
@@ -1086,10 +1081,7 @@ class CollectionView(Gtk.Box):
         self._artist_grid.set_max_children_per_line(6)
         self._artist_grid.set_column_spacing(16)
         self._artist_grid.set_row_spacing(16)
-        self._artist_grid.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self._artist_grid.connect(
-            "child-activated", self._on_artist_card_activated
-        )
+        self._artist_grid.set_selection_mode(Gtk.SelectionMode.NONE)
         artists_grid_container.append(self._artist_grid)
         self._content_stack.add_named(artists_grid_container, "artists-grid")
 
@@ -1232,6 +1224,53 @@ class CollectionView(Gtk.Box):
         """Restore a previously saved scroll position."""
         if hasattr(self, "_scrolled"):
             self._scrolled.get_vadjustment().set_value(value)
+
+    def highlight_playing_track(self, track) -> None:
+        """Highlight the currently playing track in the favorites list/grid."""
+        playing_sid = getattr(track, "source_id", None) if track else None
+        playing_key = (
+            (getattr(track, "title", ""), getattr(track, "artist", ""))
+            if track
+            else None
+        )
+
+        def _match_track(td):
+            if td is None or track is None:
+                return False
+            td_sid = getattr(td, "source_id", None)
+            if playing_sid and td_sid and playing_sid == td_sid:
+                return True
+            if playing_key and (
+                getattr(td, "title", ""), getattr(td, "artist", "")
+            ) == playing_key:
+                return True
+            return False
+
+        # Highlight in list view
+        if hasattr(self, "_favorites_list"):
+            row = self._favorites_list.get_first_child()
+            while row is not None:
+                td = getattr(row, "_track_data", None) or getattr(
+                    row, "_track_obj", None
+                )
+                if _match_track(td):
+                    row.add_css_class("now-playing-row")
+                else:
+                    row.remove_css_class("now-playing-row")
+                row = row.get_next_sibling()
+
+        # Highlight in grid view
+        if hasattr(self, "_favorites_grid"):
+            child = self._favorites_grid.get_first_child()
+            while child is not None:
+                td = getattr(child, "_track_obj", None) or getattr(
+                    child, "_track_data", None
+                )
+                if _match_track(td):
+                    child.add_css_class("now-playing-row")
+                else:
+                    child.remove_css_class("now-playing-row")
+                child = child.get_next_sibling()
 
     def set_context_callbacks(
         self,
@@ -1476,6 +1515,7 @@ class CollectionView(Gtk.Box):
             "on_add_to_favorites": lambda a=album_name, ar=artist: cbs.get("on_add_to_favorites", _noop)(a, ar),
             "on_go_to_artist": lambda a=album_name, ar=artist: cbs.get("on_go_to_artist", _noop)(a, ar),
             "on_shuffle_album": lambda a=album_name, ar=artist: cbs.get("on_shuffle_album", _noop)(a, ar),
+            "on_properties": lambda a=album_name, ar=artist: cbs.get("on_properties", _noop)(a, ar),
         }
 
         album_data = {
@@ -1537,6 +1577,7 @@ class CollectionView(Gtk.Box):
             "on_follow_artist": lambda name=artist_name: cbs.get("on_follow_artist", _noop)(name),
             "on_unfollow_artist": lambda name=artist_name: cbs.get("on_unfollow_artist", _noop)(name),
             "on_shuffle_artist": lambda name=artist_name: cbs.get("on_shuffle_artist", _noop)(name),
+            "on_properties": lambda name=artist_name: cbs.get("on_properties", _noop)(name),
         }
 
         artist_data = {"artist": artist_name}
@@ -1568,14 +1609,75 @@ class CollectionView(Gtk.Box):
 
     # ---- Navigation callbacks ----
 
-    def _on_album_card_activated(
-        self, _flow_box: Gtk.FlowBox, child: Gtk.FlowBoxChild
+    def _attach_album_card_click_gesture(
+        self, child: Gtk.FlowBoxChild
     ) -> None:
-        """Handle album card click — navigate to album detail."""
-        album = getattr(child, "_album_title", None)
-        artist = getattr(child, "_album_artist", None)
-        if album and artist and self._on_album_clicked:
-            self._on_album_clicked(album, artist)
+        """Attach a left-click gesture for album card navigation.
+
+        This replaces FlowBox child-activated for cards with
+        ``set_activatable(False)``, so the play button can receive
+        clicks without the FlowBoxChild stealing them.
+        """
+        gesture = Gtk.GestureClick.new()
+        gesture.set_button(1)
+        gesture.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
+
+        def _on_click(g, n_press, _x, _y):
+            if n_press != 1:
+                return
+            # Don't navigate if the play button was clicked
+            seq = g.get_last_updated_sequence()
+            if seq is not None and g.get_sequence_state(seq) == Gtk.EventSequenceState.DENIED:
+                return
+            play_btn = getattr(child, "_play_btn", None)
+            if play_btn is not None:
+                btn_native = play_btn.get_native()
+                if btn_native is not None:
+                    success, bx, by = play_btn.compute_point(child, 0, 0)
+                    if success:
+                        w = play_btn.get_width()
+                        h = play_btn.get_height()
+                        if bx <= _x <= bx + w and by <= _y <= by + h:
+                            return
+            album = getattr(child, "_album_title", None)
+            artist = getattr(child, "_album_artist", None)
+            if album and artist and self._on_album_clicked:
+                self._on_album_clicked(album, artist)
+
+        gesture.connect("released", _on_click)
+        child.add_controller(gesture)
+
+    def _attach_artist_card_click_gesture(
+        self, child: Gtk.FlowBoxChild
+    ) -> None:
+        """Attach a left-click gesture for artist card navigation."""
+        gesture = Gtk.GestureClick.new()
+        gesture.set_button(1)
+        gesture.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
+
+        def _on_click(g, n_press, _x, _y):
+            if n_press != 1:
+                return
+            # Don't navigate if the play button was clicked
+            seq = g.get_last_updated_sequence()
+            if seq is not None and g.get_sequence_state(seq) == Gtk.EventSequenceState.DENIED:
+                return
+            play_btn = getattr(child, "_play_btn", None)
+            if play_btn is not None:
+                btn_native = play_btn.get_native()
+                if btn_native is not None:
+                    success, bx, by = play_btn.compute_point(child, 0, 0)
+                    if success:
+                        w = play_btn.get_width()
+                        h = play_btn.get_height()
+                        if bx <= _x <= bx + w and by <= _y <= by + h:
+                            return
+            artist_name = getattr(child, "_artist_name", None)
+            if artist_name and self._on_artist_clicked:
+                self._on_artist_clicked(artist_name)
+
+        gesture.connect("released", _on_click)
+        child.add_controller(gesture)
 
     def _on_album_row_activated(
         self, _list_box: Gtk.ListBox, row: Gtk.ListBoxRow
@@ -1594,14 +1696,6 @@ class CollectionView(Gtk.Box):
         if artist_name and self._on_artist_clicked:
             self._on_artist_clicked(artist_name)
 
-    def _on_artist_card_activated(
-        self, _flow_box: Gtk.FlowBox, child: Gtk.FlowBoxChild
-    ) -> None:
-        """Handle artist card click — navigate to artist detail."""
-        artist_name = getattr(child, "_artist_name", None)
-        if artist_name and self._on_artist_clicked:
-            self._on_artist_clicked(artist_name)
-
     def _on_track_row_activated(
         self, _list_box: Gtk.ListBox, row: Gtk.ListBoxRow
     ) -> None:
@@ -1609,14 +1703,6 @@ class CollectionView(Gtk.Box):
         track_obj = getattr(row, "_track_obj", None)
         if track_obj is not None and self._on_play_track is not None:
             self._on_play_track(track_obj)
-
-    def _on_track_grid_card_activated(
-        self, _flow_box: Gtk.FlowBox, child: Gtk.FlowBoxChild
-    ) -> None:
-        """Handle a track grid card being clicked to play."""
-        track = getattr(child, "_track_obj", None)
-        if track is not None and self._on_play_track is not None:
-            self._on_play_track(track)
 
     # ---- Internal helpers ----
 
@@ -1727,7 +1813,7 @@ class CollectionView(Gtk.Box):
                 "artist": key[1],
                 "source": "tidal",
                 "track_count": ta.get("num_tracks", 0) or 0,
-                "date_added": "",
+                "date_added": ta.get("date_added", ""),
                 "cover_url": ta.get("cover_url"),
                 "tidal_id": ta.get("tidal_id"),
             }
@@ -1841,9 +1927,15 @@ class CollectionView(Gtk.Box):
             reverse = not self._sort_ascending
         else:
             reverse = not self._sort_ascending
-        return sorted(
-            tracks, key=lambda t: str(t.get(sort_field, "")), reverse=reverse
-        )
+
+        def _sort_key(t: dict) -> tuple[int, str]:
+            val = str(t.get(sort_field, "") or "")
+            # Items with no value sort last regardless of direction
+            if not val:
+                return (1, "")
+            return (0, val)
+
+        return sorted(tracks, key=_sort_key, reverse=reverse)
 
     def _get_sorted_albums(self, albums: list[dict]) -> list[dict]:
         """Sort albums by the active sort criterion and direction."""
@@ -1860,10 +1952,16 @@ class CollectionView(Gtk.Box):
                 key=lambda a: (a["artist"] or "").lower(),
                 reverse=reverse,
             )
-        # Recently Added
+        # Recently Added — items with no date sort last
+        def _date_key(a: dict) -> tuple[int, str]:
+            val = a.get("date_added", "") or ""
+            if not val:
+                return (1, "")
+            return (0, val)
+
         return sorted(
             albums,
-            key=lambda a: a.get("date_added", ""),
+            key=_date_key,
             reverse=not reverse,  # desc by default for dates
         )
 
@@ -2007,6 +2105,7 @@ class CollectionView(Gtk.Box):
                     card._tidal_id = album_data.get("tidal_id")
                     self._attach_album_context_gesture(card)
                     self._attach_album_play_button(card)
+                    self._attach_album_card_click_gesture(card)
                     self._album_grid.append(card)
 
                     cover_url = album_data.get("cover_url")
@@ -2136,6 +2235,7 @@ class CollectionView(Gtk.Box):
                     )
                     self._attach_artist_context_gesture(card)
                     self._attach_artist_play_button(card)
+                    self._attach_artist_card_click_gesture(card)
                     self._artist_grid.append(card)
                     if load_images:
                         self._load_artist_image_for_card(card)
@@ -2263,8 +2363,6 @@ class CollectionView(Gtk.Box):
                 self._on_artist_clicked(name)
 
         play_btn.connect("clicked", _on_play)
-        if isinstance(widget, Gtk.FlowBoxChild):
-            play_btn.set_can_target(False)
 
     def _refresh_tracks(self) -> None:
         """Rebuild the tracks display from current filter/sort state."""

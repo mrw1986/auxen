@@ -54,6 +54,8 @@ class AuxenApp(Adw.Application):
     # ------------------------------------------------------------------
 
     def do_startup(self) -> None:
+        _t_start = time.monotonic()
+        logger.info("[startup] BEGIN do_startup")
         # Temporarily suppress the specific Adwaita warning about
         # gtk-application-prefer-dark-theme (user's settings.ini may
         # enable it; we use AdwStyleManager instead).  Only the known
@@ -226,6 +228,7 @@ class AuxenApp(Adw.Application):
             icon_theme.add_search_path(icon_dir)
 
         # --- Database ---
+        logger.info("[startup] %.0fms — init DB", (time.monotonic() - _t_start) * 1000)
         try:
             from auxen.db import Database
 
@@ -264,6 +267,7 @@ class AuxenApp(Adw.Application):
                 )
 
         # --- Player ---
+        logger.info("[startup] %.0fms — init Player", (time.monotonic() - _t_start) * 1000)
         try:
             gi.require_version("Gst", "1.0")
             from auxen.player import Player
@@ -285,21 +289,22 @@ class AuxenApp(Adw.Application):
             )
 
         # --- Tidal Provider ---
+        logger.info("[startup] %.0fms — init Tidal", (time.monotonic() - _t_start) * 1000)
         try:
             from auxen.providers.tidal import TidalProvider
 
             self.tidal_provider = TidalProvider()
-            try:
-                self.tidal_provider.restore_session()
-            except Exception:
-                logger.warning(
-                    "Failed to restore Tidal session", exc_info=True
-                )
+            # Restore session in background — it makes a network call
+            self._tidal_restore_thread = threading.Thread(
+                target=self._restore_tidal_session_bg, daemon=True
+            )
+            self._tidal_restore_thread.start()
         except Exception:
             logger.warning(
                 "Failed to initialize Tidal provider", exc_info=True
             )
 
+        logger.info("[startup] %.0fms — init FavSync", (time.monotonic() - _t_start) * 1000)
         # --- Favorites Sync Service ---
         if self.db is not None and self.tidal_provider is not None:
             try:
@@ -358,6 +363,7 @@ class AuxenApp(Adw.Application):
                     exc_info=True,
                 )
 
+        logger.info("[startup] %.0fms — init MPRIS", (time.monotonic() - _t_start) * 1000)
         # --- MPRIS ---
         try:
             from auxen.mpris import MprisService
@@ -439,24 +445,86 @@ class AuxenApp(Adw.Application):
                     exc_info=True,
                 )
 
+        # --- Apply stored audio sink preference ---
+        if self.player is not None and self.db is not None:
+            try:
+                sink_name = self.db.get_setting("audio_sink", "auto")
+                if sink_name and sink_name != "auto":
+                    self.player.set_audio_sink(sink_name)
+            except Exception:
+                logger.warning(
+                    "Failed to apply stored audio sink setting",
+                    exc_info=True,
+                )
+
+        logger.info("[startup] END do_startup — total %.0fms", (time.monotonic() - _t_start) * 1000)
+
     # ------------------------------------------------------------------
     # Activate
     # ------------------------------------------------------------------
 
     def do_activate(self) -> None:
+        _t0 = time.monotonic()
+        logger.info("[startup] BEGIN do_activate")
         self._ensure_icon_theme()
         win = self.get_active_window()
         if not win:
+            _t1 = time.monotonic()
             win = AuxenWindow(application=self)
+            logger.info(
+                "[startup] AuxenWindow() took %.0fms",
+                (time.monotonic() - _t1) * 1000,
+            )
+            _t2 = time.monotonic()
             win.wire_services(self)
+            logger.info(
+                "[startup] wire_services took %.0fms",
+                (time.monotonic() - _t2) * 1000,
+            )
         win.present()
+        logger.info(
+            "[startup] do_activate total %.0fms",
+            (time.monotonic() - _t0) * 1000,
+        )
 
         if not self._startup_tasks_scheduled:
             self._startup_tasks_scheduled = True
             # Trigger initial library scan in the background
             GLib.idle_add(self._initial_scan)
-            # Trigger Tidal favorites sync in the background
-            GLib.idle_add(self._initial_favorites_sync)
+            # Favorites sync is triggered from _on_tidal_session_restored
+            # after the background session restore completes
+
+    # ------------------------------------------------------------------
+    # Tidal session restore (background)
+    # ------------------------------------------------------------------
+
+    def _restore_tidal_session_bg(self) -> None:
+        """Restore Tidal session in a background thread."""
+        t0 = time.monotonic()
+        try:
+            success = self.tidal_provider.restore_session()
+            logger.info(
+                "[startup] Tidal restore_session took %.0fms — success=%s",
+                (time.monotonic() - t0) * 1000, success,
+            )
+            if success:
+                # Update sidebar account info on the main thread
+                GLib.idle_add(self._on_tidal_session_restored)
+        except Exception:
+            logger.warning(
+                "Failed to restore Tidal session (%.0fms)",
+                (time.monotonic() - t0) * 1000,
+                exc_info=True,
+            )
+
+    def _on_tidal_session_restored(self) -> bool:
+        """Update UI after Tidal session is restored (main thread)."""
+        win = self.get_active_window()
+        if win is not None:
+            win._update_sidebar_account()
+        # Now that Tidal is authenticated, sync favorites
+        self._initial_favorites_sync()
+        return GLib.SOURCE_REMOVE
 
     # ------------------------------------------------------------------
     # Helpers
@@ -494,17 +562,65 @@ class AuxenApp(Adw.Application):
 
     def _resolve_uri(self, track) -> str | None:
         """Convert a Track to a playable URI using the appropriate provider."""
+        t0 = time.monotonic()
+        logger.info(
+            "[resolve-uri] START '%s' source=%s source_id=%s",
+            track.title, getattr(track, "source", "?"),
+            getattr(track, "source_id", "?"),
+        )
         try:
             if track.is_local and self.local_provider is not None:
-                return self.local_provider.get_stream_uri(track)
-            if track.is_tidal and self.tidal_provider is not None:
-                return self.tidal_provider.get_stream_uri(track)
+                uri = self.local_provider.get_stream_uri(track)
+                logger.info(
+                    "[resolve-uri] local done in %.0fms",
+                    (time.monotonic() - t0) * 1000,
+                )
+                return uri
+            if track.is_tidal:
+                if self.tidal_provider is None or not self.tidal_provider.is_logged_in:
+                    GLib.idle_add(self._notify_tidal_login_required, track.title)
+                    return None
+                uri = self.tidal_provider.get_stream_uri(track)
+                logger.info(
+                    "[resolve-uri] tidal done in %.0fms",
+                    (time.monotonic() - t0) * 1000,
+                )
+                return uri
         except Exception:
             logger.warning(
-                "Failed to resolve URI for track: %s", track.title,
+                "[resolve-uri] FAILED in %.0fms for '%s'",
+                (time.monotonic() - t0) * 1000, track.title,
                 exc_info=True,
             )
+            if track.is_tidal:
+                GLib.idle_add(
+                    self._notify_tidal_track_failed, track.title
+                )
         return None
+
+    def _notify_tidal_login_required(self, title: str) -> bool:
+        """Show a toast telling the user to sign in to Tidal."""
+        win = self.get_active_window()
+        if win is not None and hasattr(win, "_show_toast"):
+            from gi.repository import Adw
+            toast = Adw.Toast.new(
+                f"Sign in to Tidal to play \"{title}\""
+            )
+            toast.set_timeout(3)
+            win._show_toast(toast)
+        return GLib.SOURCE_REMOVE
+
+    def _notify_tidal_track_failed(self, title: str) -> bool:
+        """Show a toast when a Tidal track fails to resolve."""
+        win = self.get_active_window()
+        if win is not None and hasattr(win, "_show_toast"):
+            from gi.repository import Adw
+            toast = Adw.Toast.new(
+                f"Could not play \"{title}\" — Tidal error"
+            )
+            toast.set_timeout(3)
+            win._show_toast(toast)
+        return GLib.SOURCE_REMOVE
 
     def _initial_scan(self) -> bool:
         """Scan local directories in a background thread, then update the UI."""

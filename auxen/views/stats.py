@@ -147,7 +147,7 @@ class StatsView(Gtk.ScrolledWindow):
         stats_row_2 = Gtk.FlowBox()
         stats_row_2.set_homogeneous(True)
         stats_row_2.set_min_children_per_line(1)
-        stats_row_2.set_max_children_per_line(4)
+        stats_row_2.set_max_children_per_line(5)
         stats_row_2.set_column_spacing(16)
         stats_row_2.set_row_spacing(8)
         stats_row_2.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -196,44 +196,21 @@ class StatsView(Gtk.ScrolledWindow):
         )
         stats_row_2.append(source_card)
 
+        # Most Active Hour — inline as a regular stat card
+        (
+            active_hour_card,
+            self._active_hour_label,
+        ) = self._make_stat_card(
+            icon_name="appointment-symbolic",
+            value="--",
+            label="Most Active Hour",
+            accent_class="stats-accent-amber",
+        )
+        stats_row_2.append(active_hour_card)
+
         root.append(stats_row_2)
 
-        # ---- 3. Most Active Hour + 7-Day Chart (side by side) ----
-        activity_row = Gtk.FlowBox()
-        activity_row.set_homogeneous(True)
-        activity_row.set_min_children_per_line(1)
-        activity_row.set_max_children_per_line(2)
-        activity_row.set_column_spacing(16)
-        activity_row.set_row_spacing(8)
-        activity_row.set_selection_mode(Gtk.SelectionMode.NONE)
-
-        # Left: Most Active Hour card (vertical layout matching stat cards)
-        active_hour_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=8,
-        )
-        active_hour_box.add_css_class("stats-card")
-        active_hour_box.set_margin_top(4)
-        active_hour_box.set_margin_bottom(4)
-
-        ah_icon = Gtk.Image.new_from_icon_name(
-            "appointment-symbolic"
-        )
-        ah_icon.set_pixel_size(24)
-        ah_icon.add_css_class("stats-accent-amber")
-        active_hour_box.append(ah_icon)
-
-        self._active_hour_label = Gtk.Label(label="--")
-        self._active_hour_label.add_css_class("stat-card-value")
-        active_hour_box.append(self._active_hour_label)
-
-        ah_title = Gtk.Label(label="Most Active Hour")
-        ah_title.add_css_class("stat-card-label")
-        active_hour_box.append(ah_title)
-
-        activity_row.append(active_hour_box)
-
-        # Right: 7-Day Listening Activity chart card
+        # ---- 3. 7-Day Listening Activity chart (full width) ----
         chart_card = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=8,
@@ -254,8 +231,7 @@ class StatsView(Gtk.ScrolledWindow):
         self._chart_area.set_draw_func(self._draw_daily_chart)
         chart_card.append(self._chart_area)
 
-        activity_row.append(chart_card)
-        root.append(activity_row)
+        root.append(chart_card)
 
         # ---- 4. Top Artists ----
         artists_header = Gtk.Label(label="Top Artists")
@@ -544,6 +520,7 @@ class StatsView(Gtk.ScrolledWindow):
             "on_follow_artist": lambda a=artist: self._context_callbacks.get("on_follow_artist", _noop)(a),
             "on_unfollow_artist": lambda a=artist: self._context_callbacks.get("on_unfollow_artist", _noop)(a),
             "on_shuffle_artist": lambda a=artist: self._context_callbacks.get("on_shuffle_artist", _noop)(a),
+            "on_properties": lambda a=artist: self._context_callbacks.get("on_artist_properties", _noop)(a),
         }
 
         self._current_menu = ArtistContextMenu(
@@ -894,10 +871,7 @@ class StatsView(Gtk.ScrolledWindow):
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=12,
         )
-        row_box.set_margin_top(8)
-        row_box.set_margin_bottom(8)
-        row_box.set_margin_start(12)
-        row_box.set_margin_end(12)
+        row_box.add_css_class("stats-list-row")
 
         # Artist name
         name_label = Gtk.Label(label=artist)
@@ -931,6 +905,7 @@ class StatsView(Gtk.ScrolledWindow):
         row_box.append(bar_box)
 
         row = Gtk.ListBoxRow()
+        row.add_css_class("track-row-hover")
         row.set_child(row_box)
         return row
 
@@ -943,10 +918,7 @@ class StatsView(Gtk.ScrolledWindow):
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=12,
         )
-        row_box.set_margin_top(8)
-        row_box.set_margin_bottom(8)
-        row_box.set_margin_start(12)
-        row_box.set_margin_end(12)
+        row_box.add_css_class("stats-list-row")
 
         # Track info column
         text_box = Gtk.Box(
@@ -994,6 +966,7 @@ class StatsView(Gtk.ScrolledWindow):
         row_box.append(bar_box)
 
         row = Gtk.ListBoxRow()
+        row.add_css_class("track-row-hover")
         row.set_child(row_box)
         return row
 

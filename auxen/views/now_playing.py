@@ -10,10 +10,14 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango
+from gi.repository import Adw, Gdk, GdkPixbuf, GLib, Gtk
 
 from auxen.queue import RepeatMode
 from auxen.views.visualizer import SpectrumVisualizer
+
+# Marquee animation constants
+_MARQUEE_SPEED_PX_PER_SEC = 30  # scroll speed in pixels per second
+_MARQUEE_PAUSE_MS = 2000  # pause at start and end in milliseconds
 
 
 def _format_time(seconds: float) -> str:
@@ -22,6 +26,169 @@ def _format_time(seconds: float) -> str:
     minutes = total // 60
     secs = total % 60
     return f"{minutes}:{secs:02d}"
+
+
+class _MarqueeLabel(Gtk.ScrolledWindow):
+    """A label that scrolls horizontally when text overflows.
+
+    Uses a ScrolledWindow with EXTERNAL/NEVER policy so no scrollbar is
+    visible.  When the label is wider than the container, an
+    Adw.TimedAnimation scrolls the hadjustment back and forth with pauses.
+    """
+
+    def __init__(self, label: str = "", **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.set_policy(Gtk.PolicyType.EXTERNAL, Gtk.PolicyType.NEVER)
+        self.set_vexpand(False)
+        self.set_hexpand(True)
+        self.set_valign(Gtk.Align.CENTER)
+        # Remove any default min-content-width so we shrink freely
+        self.set_min_content_width(0)
+        self.set_propagate_natural_width(False)
+
+        self._label = Gtk.Label(label=label)
+        self._label.set_xalign(0)
+        self._label.set_single_line_mode(True)
+        self._label.set_max_width_chars(-1)
+        self._label.set_width_chars(4)
+        self._label.set_hexpand(False)
+        self.set_child(self._label)
+
+        self._animation: Adw.TimedAnimation | None = None
+        self._phase_timeout_id: int = 0
+        self._scroll_phase: int = 0  # 0=pause-start,1=fwd,2=pause-end,3=rev
+
+    # ── Delegate common Gtk.Label methods ──
+
+    @property
+    def label_widget(self) -> Gtk.Label:
+        """Access the inner Gtk.Label directly (for CSS classes, etc.)."""
+        return self._label
+
+    def set_label(self, text: str) -> None:
+        self._label.set_label(text)
+        self._restart_marquee()
+
+    def get_label(self) -> str:
+        return self._label.get_label()
+
+    def set_xalign(self, xalign: float) -> None:
+        self._label.set_xalign(xalign)
+
+    def add_css_class(self, css_class: str) -> None:  # type: ignore[override]
+        self._label.add_css_class(css_class)
+
+    def remove_css_class(self, css_class: str) -> None:  # type: ignore[override]
+        self._label.remove_css_class(css_class)
+
+    def set_cursor(self, cursor: Gdk.Cursor | None) -> None:
+        # Set cursor on both the scrolled window and the label
+        super().set_cursor(cursor)
+        self._label.set_cursor(cursor)
+
+    def add_controller(self, controller: Gtk.EventController) -> None:
+        # Attach gesture controllers to the scrolled window so clicks work
+        super().add_controller(controller)
+
+    # ── Marquee animation logic ──
+
+    def _get_overflow(self) -> float:
+        """Return how many pixels the label overflows the container, or 0."""
+        hadj = self.get_hadjustment()
+        if hadj is None:
+            return 0.0
+        upper = hadj.get_upper()
+        page = hadj.get_page_size()
+        if upper <= page or page <= 0:
+            return 0.0
+        return upper - page
+
+    def _stop_animation(self) -> None:
+        """Cancel any running animation and pending timeouts."""
+        if self._animation is not None:
+            self._animation.pause()
+            self._animation = None
+        if self._phase_timeout_id:
+            GLib.source_remove(self._phase_timeout_id)
+            self._phase_timeout_id = 0
+        # Reset scroll position
+        hadj = self.get_hadjustment()
+        if hadj is not None:
+            hadj.set_value(0)
+
+    def _restart_marquee(self) -> None:
+        """Stop current animation and schedule a new check after layout."""
+        self._stop_animation()
+        # Wait for layout to settle before checking overflow
+        GLib.timeout_add(500, self._check_and_start)
+
+    def _check_and_start(self) -> bool:
+        """Check if text overflows and start animation if so."""
+        overflow = self._get_overflow()
+        if overflow > 0:
+            self._scroll_phase = 0
+            self._start_phase()
+        return False  # one-shot
+
+    def _start_phase(self) -> None:
+        """Start the current phase of the marquee cycle."""
+        overflow = self._get_overflow()
+        if overflow <= 0:
+            return
+
+        hadj = self.get_hadjustment()
+        if hadj is None:
+            return
+
+        if self._scroll_phase == 0:
+            # Phase 0: pause at start for 2s, then scroll forward
+            self._phase_timeout_id = GLib.timeout_add(
+                _MARQUEE_PAUSE_MS, self._on_pause_done
+            )
+        elif self._scroll_phase == 1:
+            # Phase 1: scroll from 0 to overflow
+            duration_ms = int((overflow / _MARQUEE_SPEED_PX_PER_SEC) * 1000)
+            duration_ms = max(duration_ms, 200)
+            target = Adw.CallbackAnimationTarget.new(
+                lambda val: hadj.set_value(val)
+            )
+            self._animation = Adw.TimedAnimation.new(
+                self, 0, overflow, duration_ms, target
+            )
+            self._animation.set_easing(Adw.Easing.LINEAR)
+            self._animation.connect("done", self._on_scroll_done)
+            self._animation.play()
+        elif self._scroll_phase == 2:
+            # Phase 2: pause at end for 2s, then scroll back
+            self._phase_timeout_id = GLib.timeout_add(
+                _MARQUEE_PAUSE_MS, self._on_pause_done
+            )
+        elif self._scroll_phase == 3:
+            # Phase 3: scroll from overflow back to 0
+            duration_ms = int((overflow / _MARQUEE_SPEED_PX_PER_SEC) * 1000)
+            duration_ms = max(duration_ms, 200)
+            target = Adw.CallbackAnimationTarget.new(
+                lambda val: hadj.set_value(val)
+            )
+            self._animation = Adw.TimedAnimation.new(
+                self, overflow, 0, duration_ms, target
+            )
+            self._animation.set_easing(Adw.Easing.LINEAR)
+            self._animation.connect("done", self._on_scroll_done)
+            self._animation.play()
+
+    def _on_pause_done(self) -> bool:
+        """Called when a pause phase completes."""
+        self._phase_timeout_id = 0
+        self._scroll_phase = (self._scroll_phase + 1) % 4
+        self._start_phase()
+        return False  # one-shot
+
+    def _on_scroll_done(self, _animation: Adw.TimedAnimation) -> None:
+        """Called when a scroll animation completes."""
+        self._animation = None
+        self._scroll_phase = (self._scroll_phase + 1) % 4
+        self._start_phase()
 
 
 class NowPlayingBar(Gtk.Box):
@@ -270,11 +437,9 @@ class NowPlayingBar(Gtk.Box):
         text_box.set_valign(Gtk.Align.CENTER)
         text_box.set_hexpand(True)
 
-        self._title_label = Gtk.Label(label="No Track Playing")
+        self._title_label = _MarqueeLabel(label="No Track Playing")
         self._title_label.set_xalign(0)
-        self._title_label.set_ellipsize(Pango.EllipsizeMode.END)
         self._title_label.set_hexpand(True)
-        self._title_label.set_width_chars(4)
         self._title_label.add_css_class("now-playing-track-title")
         self._title_label.add_css_class("clickable-link")
         self._title_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
@@ -286,11 +451,9 @@ class NowPlayingBar(Gtk.Box):
 
         text_box.append(self._title_label)
 
-        self._artist_label = Gtk.Label(label="")
+        self._artist_label = _MarqueeLabel(label="")
         self._artist_label.set_xalign(0)
-        self._artist_label.set_ellipsize(Pango.EllipsizeMode.END)
         self._artist_label.set_hexpand(True)
-        self._artist_label.set_width_chars(4)
         self._artist_label.add_css_class("now-playing-track-artist")
         self._artist_label.add_css_class("clickable-link")
         self._artist_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
@@ -577,6 +740,7 @@ class NowPlayingBar(Gtk.Box):
         quality_label: str = "",
         source: str = "",
         album: str = "",
+        track=None,
     ) -> None:
         """Update the displayed track info."""
         self._title_label.set_label(title or "No Track Playing")
@@ -587,21 +751,26 @@ class NowPlayingBar(Gtk.Box):
         if quality_label:
             self._quality_badge.set_label(quality_label)
             self._quality_badge.set_visible(self._responsive_level == 0)
-            # Set descriptive tooltip for the quality badge
-            quality_tooltips = {
-                "FLAC": "FLAC Lossless Audio",
-                "Hi-Res": "Hi-Res Lossless Audio (up to 24-bit/192kHz)",
-                "MQA": "MQA Master Quality Audio",
-                "AAC": "AAC Compressed Audio",
-                "MP3": "MP3 Compressed Audio",
-                "OGG": "OGG Vorbis Compressed Audio",
-                "ALAC": "ALAC Lossless Audio",
-                "WAV": "WAV Uncompressed Audio",
-            }
-            tooltip = quality_tooltips.get(
+            # Build detailed tooltip with bitrate/sample rate/bit depth
+            from auxen.views.widgets import QUALITY_TOOLTIPS
+            parts = [QUALITY_TOOLTIPS.get(
                 quality_label, f"{quality_label} Audio"
-            )
-            self._quality_badge.set_tooltip_text(tooltip)
+            )]
+            if track is not None:
+                bitrate = getattr(track, "bitrate", None)
+                sample_rate = getattr(track, "sample_rate", None)
+                bit_depth = getattr(track, "bit_depth", None)
+                details = []
+                if bitrate and bitrate > 0:
+                    details.append(f"{bitrate} kbps")
+                if sample_rate and sample_rate > 0:
+                    sr = sample_rate / 1000 if sample_rate >= 1000 else sample_rate
+                    details.append(f"{sr:g} kHz")
+                if bit_depth and bit_depth > 0:
+                    details.append(f"{bit_depth}-bit")
+                if details:
+                    parts.append(" · ".join(details))
+            self._quality_badge.set_tooltip_text("\n".join(parts))
         else:
             self._quality_badge.set_visible(False)
 

@@ -59,6 +59,11 @@ class AlbumArtService:
         # Texture cache: reuse Gdk.Texture objects across widget rebuilds
         self._texture_cache: OrderedDict[tuple[int, int, int], Any] = OrderedDict()
         self._max_texture_entries = 500
+        self._db = None
+
+    def set_database(self, db) -> None:
+        """Set the database instance for custom art lookups."""
+        self._db = db
 
     # ------------------------------------------------------------------
     # Public API
@@ -282,7 +287,24 @@ class AlbumArtService:
 
     def _load_art(self, track: Track, width: int, height: int) -> Any:
         """Determine track source and load art accordingly."""
+        # Check for custom art override first
+        custom_pixbuf = self._load_custom_art(track, width, height)
+        if custom_pixbuf is not None:
+            return custom_pixbuf
+
         if track.source == Source.LOCAL:
+            # Prefer cached art from scan (album_art_url set to a local path)
+            art_url = track.album_art_url
+            if art_url:
+                # Strip file:// prefix if present
+                local_path = art_url
+                if local_path.startswith("file://"):
+                    local_path = local_path[7:]
+                if os.path.isfile(local_path):
+                    return self._load_pixbuf_from_file(
+                        local_path, width, height
+                    )
+            # Fallback: extract embedded art directly from the audio file
             return self._load_local_art(track.source_id, width, height)
 
         # Tidal (or other remote source)
@@ -291,6 +313,62 @@ class AlbumArtService:
                 track.album_art_url, width, height
             )
         return None
+
+    def _load_custom_art(
+        self, track: Track, width: int, height: int
+    ) -> Any:
+        """Check DB for a user-set custom album cover and load it."""
+        if self._db is None:
+            return None
+        album_name = track.album or ""
+        artist_name = track.artist or ""
+        if not album_name and not artist_name:
+            return None
+        try:
+            # Check for custom album art
+            if album_name:
+                key = f"custom_art:album:{album_name}:{artist_name}"
+                custom_path = self._db.get_setting(key)
+                if custom_path and os.path.isfile(custom_path):
+                    return self._load_pixbuf_from_file(
+                        custom_path, width, height
+                    )
+            # Check for custom artist art (fallback)
+            if artist_name:
+                key = f"custom_art:artist:{artist_name}"
+                custom_path = self._db.get_setting(key)
+                if custom_path and os.path.isfile(custom_path):
+                    return self._load_pixbuf_from_file(
+                        custom_path, width, height
+                    )
+        except Exception:
+            logger.debug(
+                "Failed to load custom art for %s - %s",
+                artist_name,
+                album_name,
+                exc_info=True,
+            )
+        return None
+
+    @staticmethod
+    def _load_pixbuf_from_file(
+        file_path: str, width: int, height: int
+    ) -> Any:
+        """Load and scale a pixbuf from a local file path."""
+        try:
+            import gi
+
+            gi.require_version("GdkPixbuf", "2.0")
+            from gi.repository import GdkPixbuf
+
+            return GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                file_path, width, height, True
+            )
+        except Exception:
+            logger.debug(
+                "Failed to load pixbuf from file %s", file_path, exc_info=True
+            )
+            return None
 
     def _load_local_art(
         self, file_path: str, width: int, height: int

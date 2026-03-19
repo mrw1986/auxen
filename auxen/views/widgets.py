@@ -163,19 +163,38 @@ def make_source_badge(source: str) -> Gtk.Widget:
     return badge
 
 
-def make_quality_badge(quality: str) -> Gtk.Label | None:
+def make_quality_badge(
+    quality: str, track=None
+) -> Gtk.Label | None:
     """Create a quality badge label with tooltip if quality is valid.
 
     Returns None if quality is empty or "Unknown".
+    If *track* is provided, the tooltip includes bitrate, sample rate,
+    and bit depth when available.
     """
     if not quality or quality == "Unknown":
         return None
     badge = Gtk.Label(label=quality)
     badge.add_css_class("collection-quality-badge")
     badge.set_valign(Gtk.Align.CENTER)
-    badge.set_tooltip_text(
-        QUALITY_TOOLTIPS.get(quality, f"{quality} Audio")
-    )
+
+    # Build detailed tooltip
+    parts: list[str] = [QUALITY_TOOLTIPS.get(quality, f"{quality} Audio")]
+    if track is not None:
+        bitrate = _get_attr(track, "bitrate", None)
+        sample_rate = _get_attr(track, "sample_rate", None)
+        bit_depth = _get_attr(track, "bit_depth", None)
+        details: list[str] = []
+        if bitrate and bitrate > 0:
+            details.append(f"{bitrate} kbps")
+        if sample_rate and sample_rate > 0:
+            sr = sample_rate / 1000 if sample_rate >= 1000 else sample_rate
+            details.append(f"{sr:g} kHz")
+        if bit_depth and bit_depth > 0:
+            details.append(f"{bit_depth}-bit")
+        if details:
+            parts.append(" · ".join(details))
+    badge.set_tooltip_text("\n".join(parts))
     return badge
 
 
@@ -249,10 +268,6 @@ def make_standard_track_row(
         spacing=12,
     )
     row_box.add_css_class(css_class)
-    row_box.set_margin_top(4)
-    row_box.set_margin_bottom(4)
-    row_box.set_margin_start(8)
-    row_box.set_margin_end(8)
 
     # -- Extra widgets before (e.g., drag handle) --
     if extra_widgets_before:
@@ -417,7 +432,7 @@ def make_standard_track_row(
 
     # -- Quality badge --
     if show_quality_badge and quality:
-        q_badge = make_quality_badge(quality)
+        q_badge = make_quality_badge(quality, track=track)
         if q_badge is not None:
             row_box.append(q_badge)
 
@@ -427,6 +442,7 @@ def make_standard_track_row(
             row_box.append(w)
 
     row = Gtk.ListBoxRow()
+    row.add_css_class("track-row-hover")
     row.set_child(row_box)
 
     # Store track reference for external use
@@ -481,10 +497,6 @@ def make_compact_track_row(
         spacing=8,
     )
     row_box.add_css_class(css_class)
-    row_box.set_margin_top(1)
-    row_box.set_margin_bottom(1)
-    row_box.set_margin_start(8)
-    row_box.set_margin_end(8)
 
     # -- Track number / play button stack --
     _compact_play_btn = None
@@ -578,7 +590,7 @@ def make_compact_track_row(
 
     # -- Quality badge --
     if show_quality_badge and quality:
-        q_badge = make_quality_badge(quality)
+        q_badge = make_quality_badge(quality, track=track)
         if q_badge is not None:
             row_box.append(q_badge)
 
@@ -588,6 +600,7 @@ def make_compact_track_row(
             row_box.append(w)
 
     row = Gtk.ListBoxRow()
+    row.add_css_class("track-row-hover")
     row.set_child(row_box)
     row._track_data = track  # type: ignore[attr-defined]
 
