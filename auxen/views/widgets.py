@@ -837,3 +837,151 @@ class DragScrollHelper:
     def _reset_dragging(self) -> bool:
         self._dragging = False
         return False
+
+
+# ---------------------------------------------------------------------------
+# Horizontal carousel — scrollable card row with section title
+# ---------------------------------------------------------------------------
+
+try:
+    from gi.repository import Gdk as _GdkCarousel
+except ImportError:
+    _GdkCarousel = None  # type: ignore[assignment]
+
+
+class HorizontalCarousel(Gtk.Box):
+    """A section with a title and horizontally scrollable content."""
+
+    _SCROLL_STEP = 300  # px scrolled per arrow click
+
+    def __init__(
+        self,
+        title: str,
+        view_all_callback: Callable | None = None,
+    ) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+
+        # --- Header row ---
+        header = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+        )
+        header.set_margin_start(8)
+        header.set_margin_end(8)
+
+        title_label = Gtk.Label(label=title)
+        title_label.set_xalign(0)
+        title_label.set_hexpand(True)
+        title_label.add_css_class("section-header")
+        header.append(title_label)
+
+        if view_all_callback is not None:
+            view_all_btn = Gtk.Button(label="View all")
+            view_all_btn.add_css_class("flat")
+            view_all_btn.add_css_class("dim-label")
+            view_all_btn.set_valign(Gtk.Align.CENTER)
+            view_all_btn.connect(
+                "clicked", lambda _btn: view_all_callback()
+            )
+            header.append(view_all_btn)
+
+        self.append(header)
+
+        # --- Scroll area with overlay for arrows ---
+        overlay = Gtk.Overlay()
+
+        self._scroll = Gtk.ScrolledWindow()
+        self._scroll.set_policy(
+            Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER,
+        )
+        self._scroll.add_css_class("horizontal-carousel")
+        self._scroll.set_min_content_height(200)
+
+        self._inner = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=16,
+        )
+        self._inner.set_margin_start(8)
+        self._inner.set_margin_end(8)
+        self._inner.set_margin_top(4)
+        self._inner.set_margin_bottom(4)
+        self._scroll.set_child(self._inner)
+        overlay.set_child(self._scroll)
+
+        # Drag-to-scroll
+        self._drag_helper = DragScrollHelper(
+            self._scroll, axis="horizontal",
+        )
+
+        # Left arrow
+        self._left_btn = Gtk.Button.new_from_icon_name(
+            "go-previous-symbolic",
+        )
+        self._left_btn.add_css_class("osd")
+        self._left_btn.add_css_class("circular")
+        self._left_btn.set_halign(Gtk.Align.START)
+        self._left_btn.set_valign(Gtk.Align.CENTER)
+        self._left_btn.set_margin_start(4)
+        self._left_btn.set_visible(False)
+        self._left_btn.connect("clicked", self._on_scroll_left)
+        overlay.add_overlay(self._left_btn)
+
+        # Right arrow
+        self._right_btn = Gtk.Button.new_from_icon_name(
+            "go-next-symbolic",
+        )
+        self._right_btn.add_css_class("osd")
+        self._right_btn.add_css_class("circular")
+        self._right_btn.set_halign(Gtk.Align.END)
+        self._right_btn.set_valign(Gtk.Align.CENTER)
+        self._right_btn.set_margin_end(4)
+        self._right_btn.set_visible(False)
+        self._right_btn.connect("clicked", self._on_scroll_right)
+        overlay.add_overlay(self._right_btn)
+
+        self.append(overlay)
+
+        # Update arrow visibility on scroll
+        hadj = self._scroll.get_hadjustment()
+        hadj.connect("value-changed", self._update_arrows)
+        hadj.connect("notify::upper", self._update_arrows)
+
+    # --- Public API ---
+
+    def append_card(self, widget: Gtk.Widget) -> None:
+        """Add a card widget to the inner horizontal box."""
+        self._inner.append(widget)
+        # Schedule arrow update after layout settles
+        GLib.idle_add(self._update_arrows)
+
+    def clear(self) -> None:
+        """Remove all cards from the carousel."""
+        child = self._inner.get_first_child()
+        while child is not None:
+            next_child = child.get_next_sibling()
+            self._inner.remove(child)
+            child = next_child
+        self._update_arrows()
+
+    # --- Arrow behaviour ---
+
+    def _on_scroll_left(self, _btn) -> None:
+        hadj = self._scroll.get_hadjustment()
+        new_val = max(hadj.get_lower(), hadj.get_value() - self._SCROLL_STEP)
+        hadj.set_value(new_val)
+
+    def _on_scroll_right(self, _btn) -> None:
+        hadj = self._scroll.get_hadjustment()
+        max_val = hadj.get_upper() - hadj.get_page_size()
+        new_val = min(max_val, hadj.get_value() + self._SCROLL_STEP)
+        hadj.set_value(new_val)
+
+    def _update_arrows(self, *_args) -> None:
+        hadj = self._scroll.get_hadjustment()
+        val = hadj.get_value()
+        upper = hadj.get_upper()
+        page = hadj.get_page_size()
+        # Show left arrow if not at start
+        self._left_btn.set_visible(val > hadj.get_lower() + 1)
+        # Show right arrow if not at end
+        self._right_btn.set_visible(val < upper - page - 1)

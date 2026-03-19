@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime
 from typing import Callable, Optional
 
@@ -12,12 +13,13 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import Gdk, GdkPixbuf, GObject, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, GLib, GObject, Gtk, Pango
 
 from auxen.views.context_menu import AlbumContextMenu, TrackContextMenu
 from auxen.views.view_mode import ViewMode, make_view_mode_toggle
 from auxen.views.widgets import (
     DragScrollHelper,
+    HorizontalCarousel,
     make_compact_track_row,
     make_standard_track_row,
     make_tidal_source_badge,
@@ -214,6 +216,333 @@ def _make_recently_played_row(
     return row
 
 
+# ---------------------------------------------------------------------------
+# Card renderers for Tidal Home carousels
+# ---------------------------------------------------------------------------
+
+
+def _make_card_art_area(
+    icon_name: str = "audio-x-generic-symbolic",
+    size: int = 160,
+    css_class: str = "album-card-art-image",
+) -> tuple[Gtk.Overlay, Gtk.Image, Gtk.Image, Gtk.Box]:
+    """Build the shared art overlay used by all card types.
+
+    Returns ``(overlay, art_icon, art_image, art_box)`` so callers can
+    store references for async loading.
+    """
+    overlay = Gtk.Overlay()
+    overlay.add_css_class("album-card-art-container")
+
+    art_box = Gtk.Box(
+        orientation=Gtk.Orientation.VERTICAL,
+        halign=Gtk.Align.CENTER,
+        valign=Gtk.Align.CENTER,
+    )
+    art_box.add_css_class("album-art-placeholder")
+    art_box.set_size_request(size, size)
+    art_box.set_vexpand(False)
+
+    art_icon = Gtk.Image.new_from_icon_name(icon_name)
+    art_icon.set_pixel_size(48)
+    art_icon.set_opacity(0.4)
+    art_icon.set_halign(Gtk.Align.CENTER)
+    art_icon.set_valign(Gtk.Align.CENTER)
+    art_icon.set_vexpand(True)
+    art_box.append(art_icon)
+
+    art_image = Gtk.Image()
+    art_image.set_pixel_size(size)
+    art_image.set_size_request(size, size)
+    art_image.set_halign(Gtk.Align.FILL)
+    art_image.set_valign(Gtk.Align.FILL)
+    art_image.add_css_class(css_class)
+    art_image.set_visible(False)
+    art_box.append(art_image)
+
+    overlay.set_child(art_box)
+    return overlay, art_icon, art_image, art_box
+
+
+def _attach_pointer_cursor(widget: Gtk.Widget) -> None:
+    """Set the pointer (hand) cursor on a widget."""
+    widget.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+
+
+def _make_tidal_album_card(album) -> Gtk.Box:
+    """Build a carousel card for a tidalapi Album object.
+
+    The card is a 160px-wide vertical box with 160x160 art, a title,
+    and a subtitle (artist name).  Art is loaded asynchronously by the
+    caller via the ``_art_image`` / ``_art_icon`` attributes stored on
+    the returned box.
+    """
+    card = Gtk.Box(
+        orientation=Gtk.Orientation.VERTICAL,
+        spacing=6,
+    )
+    card.add_css_class("album-card")
+    card.set_size_request(160, -1)
+
+    overlay, art_icon, art_image, art_box = _make_card_art_area(size=160)
+
+    # Tidal badge
+    badge = make_tidal_source_badge(
+        label_text="Tidal", css_class="source-badge-tidal", icon_size=10,
+    )
+    badge.set_halign(Gtk.Align.END)
+    badge.set_valign(Gtk.Align.START)
+    badge.set_margin_top(8)
+    badge.set_margin_end(12)
+    overlay.add_overlay(badge)
+    overlay.set_clip_overlay(badge, True)
+
+    card.append(overlay)
+
+    # Title
+    title_text = getattr(album, "name", "") or ""
+    title_label = Gtk.Label(label=title_text)
+    title_label.set_xalign(0)
+    title_label.set_ellipsize(Pango.EllipsizeMode.END)
+    title_label.set_max_width_chars(18)
+    title_label.add_css_class("body")
+    title_label.set_margin_start(4)
+    title_label.set_margin_end(4)
+    card.append(title_label)
+
+    # Artist subtitle
+    artist_obj = getattr(album, "artist", None)
+    artist_name = getattr(artist_obj, "name", "") if artist_obj else ""
+    artist_label = Gtk.Label(label=artist_name)
+    artist_label.set_xalign(0)
+    artist_label.set_ellipsize(Pango.EllipsizeMode.END)
+    artist_label.set_max_width_chars(18)
+    artist_label.add_css_class("caption")
+    artist_label.add_css_class("dim-label")
+    artist_label.set_margin_start(4)
+    artist_label.set_margin_end(4)
+    card.append(artist_label)
+
+    # Store data for async art loading and click handling
+    cover_url: str | None = None
+    try:
+        cover_url = album.image(320)
+    except Exception:
+        pass
+    card._art_icon = art_icon  # type: ignore[attr-defined]
+    card._art_image = art_image  # type: ignore[attr-defined]
+    card._art_box = art_box  # type: ignore[attr-defined]
+    card._cover_url = cover_url  # type: ignore[attr-defined]
+    card._album_title = title_text  # type: ignore[attr-defined]
+    card._album_artist = artist_name  # type: ignore[attr-defined]
+    card._tidal_id = str(getattr(album, "id", ""))  # type: ignore[attr-defined]
+    card._source = "tidal"  # type: ignore[attr-defined]
+
+    _attach_pointer_cursor(card)
+    return card
+
+
+def _make_artist_circle(artist) -> Gtk.Box:
+    """Build a circular artist card for a tidalapi Artist object.
+
+    Returns a 120px-wide vertical box with a circular 120x120 image
+    and the artist name below.
+    """
+    card = Gtk.Box(
+        orientation=Gtk.Orientation.VERTICAL,
+        spacing=6,
+        halign=Gtk.Align.CENTER,
+    )
+    card.set_size_request(120, -1)
+
+    # Circular art area
+    art_box = Gtk.Box(
+        orientation=Gtk.Orientation.VERTICAL,
+        halign=Gtk.Align.CENTER,
+        valign=Gtk.Align.CENTER,
+    )
+    art_box.add_css_class("album-art-placeholder")
+    art_box.set_size_request(120, 120)
+    art_box.set_vexpand(False)
+
+    art_icon = Gtk.Image.new_from_icon_name("avatar-default-symbolic")
+    art_icon.set_pixel_size(48)
+    art_icon.set_opacity(0.4)
+    art_icon.set_halign(Gtk.Align.CENTER)
+    art_icon.set_valign(Gtk.Align.CENTER)
+    art_icon.set_vexpand(True)
+    art_box.append(art_icon)
+
+    art_image = Gtk.Image()
+    art_image.set_pixel_size(120)
+    art_image.set_size_request(120, 120)
+    art_image.set_halign(Gtk.Align.FILL)
+    art_image.set_valign(Gtk.Align.FILL)
+    art_image.add_css_class("artist-circle")
+    art_image.set_visible(False)
+    art_box.append(art_image)
+
+    card.append(art_box)
+
+    # Artist name
+    name = getattr(artist, "name", "") or ""
+    name_label = Gtk.Label(label=name)
+    name_label.set_ellipsize(Pango.EllipsizeMode.END)
+    name_label.set_max_width_chars(14)
+    name_label.add_css_class("body")
+    name_label.set_halign(Gtk.Align.CENTER)
+    card.append(name_label)
+
+    # Cover URL
+    cover_url: str | None = None
+    try:
+        cover_url = artist.image(320)
+    except Exception:
+        pass
+
+    card._art_icon = art_icon  # type: ignore[attr-defined]
+    card._art_image = art_image  # type: ignore[attr-defined]
+    card._art_box = art_box  # type: ignore[attr-defined]
+    card._cover_url = cover_url  # type: ignore[attr-defined]
+    card._artist_name = name  # type: ignore[attr-defined]
+    card._tidal_id = str(getattr(artist, "id", ""))  # type: ignore[attr-defined]
+
+    _attach_pointer_cursor(card)
+    return card
+
+
+def _make_playlist_card(playlist) -> Gtk.Box:
+    """Build a carousel card for a tidalapi Playlist object.
+
+    Same 160px layout as album cards but with playlist-specific data.
+    """
+    card = Gtk.Box(
+        orientation=Gtk.Orientation.VERTICAL,
+        spacing=6,
+    )
+    card.add_css_class("album-card")
+    card.set_size_request(160, -1)
+
+    overlay, art_icon, art_image, art_box = _make_card_art_area(
+        icon_name="view-list-symbolic", size=160,
+    )
+    card.append(overlay)
+
+    # Title
+    title_text = getattr(playlist, "name", "") or ""
+    title_label = Gtk.Label(label=title_text)
+    title_label.set_xalign(0)
+    title_label.set_ellipsize(Pango.EllipsizeMode.END)
+    title_label.set_max_width_chars(18)
+    title_label.add_css_class("body")
+    title_label.set_margin_start(4)
+    title_label.set_margin_end(4)
+    card.append(title_label)
+
+    # Track count subtitle
+    num_tracks = getattr(playlist, "num_tracks", 0) or 0
+    word = "track" if num_tracks == 1 else "tracks"
+    subtitle_label = Gtk.Label(label=f"{num_tracks} {word}")
+    subtitle_label.set_xalign(0)
+    subtitle_label.set_ellipsize(Pango.EllipsizeMode.END)
+    subtitle_label.set_max_width_chars(18)
+    subtitle_label.add_css_class("caption")
+    subtitle_label.add_css_class("dim-label")
+    subtitle_label.set_margin_start(4)
+    subtitle_label.set_margin_end(4)
+    card.append(subtitle_label)
+
+    # Cover URL
+    cover_url: str | None = None
+    try:
+        cover_url = playlist.image(320)
+    except Exception:
+        pass
+
+    card._art_icon = art_icon  # type: ignore[attr-defined]
+    card._art_image = art_image  # type: ignore[attr-defined]
+    card._art_box = art_box  # type: ignore[attr-defined]
+    card._cover_url = cover_url  # type: ignore[attr-defined]
+    card._playlist_name = title_text  # type: ignore[attr-defined]
+    card._tidal_id = str(getattr(playlist, "id", ""))  # type: ignore[attr-defined]
+
+    _attach_pointer_cursor(card)
+    return card
+
+
+def _make_mix_card(mix) -> Gtk.Box:
+    """Build a carousel card for a tidalapi Mix or MixV2 object.
+
+    Same 160px layout as other cards but with mix-specific attributes.
+    """
+    card = Gtk.Box(
+        orientation=Gtk.Orientation.VERTICAL,
+        spacing=6,
+    )
+    card.add_css_class("album-card")
+    card.set_size_request(160, -1)
+
+    overlay, art_icon, art_image, art_box = _make_card_art_area(
+        icon_name="media-playlist-shuffle-symbolic", size=160,
+    )
+    card.append(overlay)
+
+    # Title
+    title_text = (
+        getattr(mix, "title", None)
+        or getattr(mix, "name", None)
+        or "Mix"
+    )
+    title_label = Gtk.Label(label=title_text)
+    title_label.set_xalign(0)
+    title_label.set_ellipsize(Pango.EllipsizeMode.END)
+    title_label.set_max_width_chars(18)
+    title_label.add_css_class("body")
+    title_label.set_margin_start(4)
+    title_label.set_margin_end(4)
+    card.append(title_label)
+
+    # Subtitle
+    subtitle_text = (
+        getattr(mix, "sub_title", None)
+        or getattr(mix, "description", None)
+        or ""
+    )
+    subtitle_label = Gtk.Label(label=subtitle_text)
+    subtitle_label.set_xalign(0)
+    subtitle_label.set_ellipsize(Pango.EllipsizeMode.END)
+    subtitle_label.set_max_width_chars(18)
+    subtitle_label.add_css_class("caption")
+    subtitle_label.add_css_class("dim-label")
+    subtitle_label.set_margin_start(4)
+    subtitle_label.set_margin_end(4)
+    card.append(subtitle_label)
+
+    # Cover URL — try image(320) first, fall back to picture attribute
+    cover_url: str | None = None
+    try:
+        cover_url = mix.image(320)
+    except Exception:
+        pass
+    if not cover_url:
+        picture = getattr(mix, "picture", None)
+        if picture:
+            cover_url = (
+                "https://resources.tidal.com/images/"
+                f"{picture.replace('-', '/')}/320x320.jpg"
+            )
+
+    card._art_icon = art_icon  # type: ignore[attr-defined]
+    card._art_image = art_image  # type: ignore[attr-defined]
+    card._art_box = art_box  # type: ignore[attr-defined]
+    card._cover_url = cover_url  # type: ignore[attr-defined]
+    card._mix_title = title_text  # type: ignore[attr-defined]
+    card._tidal_id = str(getattr(mix, "id", ""))  # type: ignore[attr-defined]
+
+    _attach_pointer_cursor(card)
+    return card
+
+
 class HomePage(Gtk.ScrolledWindow):
     """Scrollable home page with greeting, filters, stats, and content grids."""
 
@@ -253,6 +582,15 @@ class HomePage(Gtk.ScrolledWindow):
         self._current_menu: object = None
 
         self._content_width = 0
+
+        # Tidal Home sections state
+        self._tidal_sections: list[dict] = []
+        self._tidal_section_widgets: list[Gtk.Widget] = []
+        self._artist_image_service = None
+        self._tidal_provider = None
+
+        # Mix play callback (for Tidal Home mix cards)
+        self._on_play_mix: Optional[Callable] = None
 
         # Root container
         self._root = root = Gtk.Box(
@@ -330,10 +668,10 @@ class HomePage(Gtk.ScrolledWindow):
         root.append(stats_box)
 
         # ---- 4. Recently Added section ----
-        recently_added_header = Gtk.Label(label="Recently Added")
-        recently_added_header.set_xalign(0)
-        recently_added_header.add_css_class("section-header")
-        root.append(recently_added_header)
+        self._recently_added_header = Gtk.Label(label="Recently Added")
+        self._recently_added_header.set_xalign(0)
+        self._recently_added_header.add_css_class("section-header")
+        root.append(self._recently_added_header)
 
         self._album_grid = Gtk.FlowBox()
         self._album_grid.set_homogeneous(True)
@@ -355,10 +693,10 @@ class HomePage(Gtk.ScrolledWindow):
         root.append(self._album_grid)
 
         # ---- 5. Recently Played section ----
-        recently_played_header = Gtk.Label(label="Recently Played")
-        recently_played_header.set_xalign(0)
-        recently_played_header.add_css_class("section-header")
-        root.append(recently_played_header)
+        self._recently_played_header = Gtk.Label(label="Recently Played")
+        self._recently_played_header.set_xalign(0)
+        self._recently_played_header.add_css_class("section-header")
+        root.append(self._recently_played_header)
 
         self._recent_list = Gtk.ListBox()
         self._recent_list.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -484,6 +822,312 @@ class HomePage(Gtk.ScrolledWindow):
     def set_album_art_service(self, art_service) -> None:
         """Set the AlbumArtService instance for loading album art."""
         self._album_art_service = art_service
+
+    def set_artist_image_service(self, artist_image_service) -> None:
+        """Set the ArtistImageService for loading artist images."""
+        self._artist_image_service = artist_image_service
+
+    def set_tidal_provider(self, tidal_provider) -> None:
+        """Set the TidalProvider for track conversion."""
+        self._tidal_provider = tidal_provider
+
+    def set_tidal_sections(self, sections: list[dict]) -> None:
+        """Apply Tidal Home sections to the page.
+
+        *sections* is the list of dicts from
+        ``tidal_provider.get_home_page()``, each with ``title``,
+        ``type``, and ``items``.
+        """
+        self._tidal_sections = sections
+        self._render_tidal_sections()
+        self._reapply_active_filter()
+
+    # ------------------------------------------------------------------
+    # Tidal section rendering
+    # ------------------------------------------------------------------
+
+    def _render_tidal_sections(self) -> None:
+        """Build and append Tidal section widgets to the root box."""
+        # Remove previous Tidal section widgets
+        for widget in self._tidal_section_widgets:
+            self._root.remove(widget)
+        self._tidal_section_widgets.clear()
+
+        for section in self._tidal_sections:
+            title = section.get("title", "")
+            sec_type = section.get("type", "other")
+            items = section.get("items", [])
+            if not items:
+                continue
+
+            if sec_type == "tracks":
+                widget = self._render_tidal_track_section(title, items)
+            else:
+                widget = self._render_tidal_carousel_section(
+                    title, sec_type, items,
+                )
+
+            if widget is not None:
+                widget.add_css_class("tidal-section")
+                self._root.append(widget)
+                self._tidal_section_widgets.append(widget)
+
+    def _render_tidal_carousel_section(
+        self, title: str, sec_type: str, items: list,
+    ) -> HorizontalCarousel:
+        """Build a HorizontalCarousel for albums, artists, playlists, or mixes."""
+        carousel = HorizontalCarousel(title=title)
+
+        for item in items:
+            if sec_type == "albums":
+                card = _make_tidal_album_card(item)
+                self._wire_tidal_album_click(card)
+                carousel.append_card(card)
+                self._load_tidal_card_art(card)
+            elif sec_type == "artists":
+                card = _make_artist_circle(item)
+                self._wire_tidal_artist_click(card)
+                carousel.append_card(card)
+                self._load_tidal_artist_art(card)
+            elif sec_type == "playlists":
+                card = _make_playlist_card(item)
+                self._wire_tidal_playlist_click(card)
+                carousel.append_card(card)
+                self._load_tidal_card_art(card)
+            elif sec_type == "mixes":
+                card = _make_mix_card(item)
+                self._wire_tidal_mix_click(card)
+                carousel.append_card(card)
+                self._load_tidal_card_art(card)
+
+        return carousel
+
+    def _render_tidal_track_section(
+        self, title: str, items: list,
+    ) -> Gtk.Box:
+        """Build a section with a title and a ListBox of track rows."""
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=8,
+        )
+        header = Gtk.Label(label=title)
+        header.set_xalign(0)
+        header.add_css_class("section-header")
+        header.set_margin_start(8)
+        box.append(header)
+
+        list_box = Gtk.ListBox()
+        list_box.set_selection_mode(Gtk.SelectionMode.NONE)
+        list_box.add_css_class("boxed-list")
+
+        tp = self._tidal_provider
+        for item in items[:6]:
+            track = None
+            if tp is not None:
+                try:
+                    track = tp._tidal_track_to_model(item)
+                except Exception:
+                    pass
+
+            track_dict = {
+                "title": getattr(item, "name", "") or "",
+                "artist": (
+                    getattr(getattr(item, "artist", None), "name", "")
+                    if getattr(item, "artist", None)
+                    else ""
+                ),
+                "source": "tidal",
+                "duration": _format_duration(
+                    getattr(item, "duration", None),
+                ),
+            }
+
+            play_cb = None
+            if track is not None and self._on_play_track is not None:
+                play_cb = lambda _td, t=track: self._on_play_track(t)
+
+            artist_name = track_dict["artist"]
+            artist_cb = None
+            if self._on_artist_clicked is not None and artist_name:
+                artist_cb = (
+                    lambda _a, a=artist_name: self._on_artist_clicked(a)
+                )
+
+            row = make_standard_track_row(
+                track_dict,
+                show_art=True,
+                show_source_badge=True,
+                show_quality_badge=False,
+                show_duration=True,
+                art_size=48,
+                css_class="recently-played-row",
+                on_play_clicked=play_cb,
+                on_artist_clicked=artist_cb,
+            )
+            row._track_data = track  # type: ignore[attr-defined]
+
+            if track is not None:
+                self._attach_context_gesture(row, track)
+                self._load_row_art(row, track)
+
+            list_box.append(row)
+
+        box.append(list_box)
+        return box
+
+    # ------------------------------------------------------------------
+    # Tidal card art loading
+    # ------------------------------------------------------------------
+
+    def _load_tidal_card_art(self, card: Gtk.Box) -> None:
+        """Load art asynchronously for a Tidal carousel card.
+
+        Uses ``AlbumArtService.load_pixbuf_from_url`` in a background
+        thread and applies the result on the main thread.
+        """
+        art_service = getattr(self, "_album_art_service", None)
+        cover_url = getattr(card, "_cover_url", None)
+        art_icon = getattr(card, "_art_icon", None)
+        art_image = getattr(card, "_art_image", None)
+        if not cover_url or art_icon is None or art_image is None:
+            return
+        if art_service is None:
+            return
+
+        request_token = object()
+        card._art_request_token = request_token  # type: ignore[attr-defined]
+
+        scale = card.get_scale_factor() or 1
+        art_px = 160 * scale
+
+        def _worker():
+            try:
+                from auxen.album_art import AlbumArtService as AAS
+
+                pixbuf = AAS.load_pixbuf_from_url(
+                    cover_url, art_px, art_px,
+                )
+            except Exception:
+                pixbuf = None
+
+            def _apply(pb=pixbuf):
+                if getattr(card, "_art_request_token", None) is not request_token:
+                    return False
+                if pb is not None:
+                    texture = Gdk.Texture.new_for_pixbuf(pb)
+                    art_image.set_from_paintable(texture)
+                    art_image.set_visible(True)
+                    art_icon.set_visible(False)
+                return False
+
+            GLib.idle_add(_apply)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _load_tidal_artist_art(self, card: Gtk.Box) -> None:
+        """Load art for a Tidal artist circle via ArtistImageService."""
+        artist_name = getattr(card, "_artist_name", None)
+        art_icon = getattr(card, "_art_icon", None)
+        art_image = getattr(card, "_art_image", None)
+        if not artist_name or art_icon is None or art_image is None:
+            return
+
+        artist_svc = self._artist_image_service
+        if artist_svc is None:
+            # Fall back to URL-based loading
+            cover_url = getattr(card, "_cover_url", None)
+            if cover_url:
+                self._load_tidal_card_art(card)
+            return
+
+        request_token = object()
+        card._art_request_token = request_token  # type: ignore[attr-defined]
+
+        def _on_pixbuf(pixbuf):
+            if getattr(card, "_art_request_token", None) is not request_token:
+                return
+            if pixbuf is not None:
+                texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                art_image.set_from_paintable(texture)
+                art_image.set_visible(True)
+                art_icon.set_visible(False)
+
+        artist_svc.get_artist_image_async(
+            artist_name, _on_pixbuf, size=120,
+        )
+
+    # ------------------------------------------------------------------
+    # Tidal card click handlers
+    # ------------------------------------------------------------------
+
+    def _wire_tidal_album_click(self, card: Gtk.Box) -> None:
+        """Wire click handler for a Tidal album card."""
+        gesture = Gtk.GestureClick.new()
+        gesture.set_button(1)
+
+        def _on_click(g, n_press, _x, _y):
+            if n_press != 1:
+                return
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
+            album_title = getattr(card, "_album_title", None)
+            album_artist = getattr(card, "_album_artist", None)
+            if album_title and album_artist and self._on_album_clicked:
+                self._on_album_clicked(album_title, album_artist)
+
+        gesture.connect("released", _on_click)
+        card.add_controller(gesture)
+
+    def _wire_tidal_artist_click(self, card: Gtk.Box) -> None:
+        """Wire click handler for a Tidal artist circle."""
+        gesture = Gtk.GestureClick.new()
+        gesture.set_button(1)
+
+        def _on_click(g, n_press, _x, _y):
+            if n_press != 1:
+                return
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
+            artist_name = getattr(card, "_artist_name", None)
+            if artist_name and self._on_artist_clicked:
+                self._on_artist_clicked(artist_name)
+
+        gesture.connect("released", _on_click)
+        card.add_controller(gesture)
+
+    def _wire_tidal_playlist_click(self, card: Gtk.Box) -> None:
+        """Wire click handler for a Tidal playlist card.
+
+        Plays the playlist tracks (same as mix behaviour).
+        """
+        gesture = Gtk.GestureClick.new()
+        gesture.set_button(1)
+
+        def _on_click(g, n_press, _x, _y):
+            if n_press != 1:
+                return
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
+            tidal_id = getattr(card, "_tidal_id", None)
+            name = getattr(card, "_playlist_name", "Playlist")
+            if tidal_id and self._on_play_mix:
+                self._on_play_mix(tidal_id, name, True)
+
+        gesture.connect("released", _on_click)
+        card.add_controller(gesture)
+
+    def _wire_tidal_mix_click(self, card: Gtk.Box) -> None:
+        """Wire click handler for a Tidal mix card."""
+        gesture = Gtk.GestureClick.new()
+        gesture.set_button(1)
+
+        def _on_click(g, n_press, _x, _y):
+            if n_press != 1:
+                return
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
+            tidal_id = getattr(card, "_tidal_id", None)
+            name = getattr(card, "_mix_title", "Mix")
+            if tidal_id and self._on_play_mix:
+                self._on_play_mix(tidal_id, name, False)
+
+        gesture.connect("released", _on_click)
+        card.add_controller(gesture)
 
     def load_album_art_for_card(
         self, child: Gtk.FlowBoxChild, track
@@ -677,6 +1321,7 @@ class HomePage(Gtk.ScrolledWindow):
         on_artist_clicked: Callable[[str], None] | None = None,
         on_play_album: Callable[[str, str], None] | None = None,
         on_play_track: Callable | None = None,
+        on_play_mix: Callable | None = None,
     ) -> None:
         """Set callback functions for user actions.
 
@@ -691,11 +1336,14 @@ class HomePage(Gtk.ScrolledWindow):
             album card is clicked.
         on_play_track:
             Called with (track) when a track play button is clicked.
+        on_play_mix:
+            Called with (tidal_id, name, is_playlist) for mix/playlist clicks.
         """
         self._on_album_clicked = on_album_clicked
         self._on_artist_clicked = on_artist_clicked
         self._on_play_album = on_play_album
         self._on_play_track = on_play_track
+        self._on_play_mix = on_play_mix
 
     # ------------------------------------------------------------------
     # Scroll position persistence
@@ -1048,30 +1696,48 @@ class HomePage(Gtk.ScrolledWindow):
                 pass
 
     def _apply_filter(self, filter_label: str) -> None:
-        """Filter album grid and recently played list by source."""
+        """Filter album grid, recently played list, and Tidal sections."""
         if not hasattr(self, "_album_grid"):
             return
         source_key = filter_label.lower()  # "all", "tidal", or "local"
 
-        # Filter album grid via FlowBox filter function
-        if source_key == "all":
-            self._album_grid.set_filter_func(None)
-        else:
-            self._album_grid.set_filter_func(
-                lambda child, s=source_key: getattr(child, "_source", "").lower() == s
-            )
+        # --- Local sections visibility ---
+        show_local = source_key in ("all", "local")
+        for widget in (
+            self._recently_added_header,
+            self._album_grid,
+            self._recently_played_header,
+            self._recent_list,
+        ):
+            widget.set_visible(show_local)
 
-        # Filter recently played rows by visibility
-        row = self._recent_list.get_first_child()
-        while row is not None:
-            next_row = row.get_next_sibling()
-            track = getattr(row, "_track_data", None)
-            if source_key == "all" or track is None:
-                row.set_visible(True)
+        # Filter album grid via FlowBox filter function
+        if show_local:
+            if source_key == "all":
+                self._album_grid.set_filter_func(None)
             else:
-                track_source = getattr(track, "source", None)
-                if track_source is not None:
-                    row.set_visible(track_source.value.lower() == source_key)
-                else:
+                self._album_grid.set_filter_func(
+                    lambda child, s=source_key: getattr(child, "_source", "").lower() == s
+                )
+
+            # Filter recently played rows by visibility
+            row = self._recent_list.get_first_child()
+            while row is not None:
+                next_row = row.get_next_sibling()
+                track = getattr(row, "_track_data", None)
+                if source_key == "all" or track is None:
                     row.set_visible(True)
-            row = next_row
+                else:
+                    track_source = getattr(track, "source", None)
+                    if track_source is not None:
+                        row.set_visible(
+                            track_source.value.lower() == source_key
+                        )
+                    else:
+                        row.set_visible(True)
+                row = next_row
+
+        # --- Tidal sections visibility ---
+        show_tidal = source_key in ("all", "tidal")
+        for widget in self._tidal_section_widgets:
+            widget.set_visible(show_tidal)

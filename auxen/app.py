@@ -38,6 +38,10 @@ class AuxenApp(Adw.Application):
         self.crossfade_service = None
         self.lastfm_service = None
 
+        # Tidal Home cache
+        self._tidal_home_cache: list[dict] | None = None
+        self._tidal_home_fetched_at: float = 0.0
+
         # Play history tracking
         self._current_track_start: float | None = None
         self._previous_track_id: int | None = None
@@ -524,6 +528,39 @@ class AuxenApp(Adw.Application):
             win._update_sidebar_account()
         # Now that Tidal is authenticated, sync favorites
         self._initial_favorites_sync()
+        # Fetch Tidal Home sections in background
+        self._fetch_tidal_home()
+        return GLib.SOURCE_REMOVE
+
+    # ------------------------------------------------------------------
+    # Tidal Home page background fetch
+    # ------------------------------------------------------------------
+
+    def _fetch_tidal_home(self) -> None:
+        """Fetch Tidal Home page sections in a background thread."""
+        if self.tidal_provider is None:
+            return
+
+        def _worker():
+            try:
+                sections = self.tidal_provider.get_home_page()
+                if sections:
+                    self._tidal_home_cache = sections
+                    self._tidal_home_fetched_at = time.monotonic()
+                    GLib.idle_add(self._apply_tidal_home, sections)
+            except Exception:
+                logger.warning(
+                    "Failed to fetch Tidal Home page",
+                    exc_info=True,
+                )
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _apply_tidal_home(self, sections: list) -> bool:
+        """Apply fetched Tidal Home sections to the UI (main thread)."""
+        win = self.get_active_window()
+        if win is not None:
+            win.set_tidal_home_sections(sections)
         return GLib.SOURCE_REMOVE
 
     # ------------------------------------------------------------------

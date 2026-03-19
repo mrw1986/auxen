@@ -1395,3 +1395,77 @@ class TidalProvider(ContentProvider):
             album_art_url=album_art_url,
             added_at=added_at_str,
         )
+
+    # ------------------------------------------------------------------
+    # Tidal Home / For You pages
+    # ------------------------------------------------------------------
+
+    def _categorise_page(self, page) -> list[dict]:
+        """Parse a tidalapi Page object into a list of section dicts.
+
+        Each dict has keys ``title`` (str), ``type`` (str), and ``items``
+        (list of tidalapi objects).  Categories with no items are skipped.
+        """
+        sections: list[dict] = []
+        categories = getattr(page, "categories", None)
+        if categories is None:
+            return sections
+        for category in categories:
+            items = getattr(category, "items", None)
+            if not items:
+                continue
+            title = getattr(category, "title", None) or ""
+            # Determine section type from the first item
+            first = items[0]
+            if isinstance(first, tidalapi.Album):
+                sec_type = "albums"
+            elif isinstance(first, tidalapi.Track):
+                sec_type = "tracks"
+            elif isinstance(first, tidalapi.Playlist):
+                sec_type = "playlists"
+            elif isinstance(first, tidalapi.Artist):
+                sec_type = "artists"
+            elif type(first).__name__ in ("Mix", "MixV2"):
+                sec_type = "mixes"
+            else:
+                sec_type = "other"
+            sections.append({
+                "title": title,
+                "type": sec_type,
+                "items": list(items),
+            })
+        return sections
+
+    def get_home_page(self) -> list[dict]:
+        """Fetch the Tidal Home page and return categorised sections.
+
+        Returns a list of dicts, each with ``title`` (str), ``type``
+        (one of "albums", "tracks", "playlists", "artists", "mixes",
+        "other"), and ``items`` (list of raw tidalapi objects).
+
+        Returns an empty list on failure or if not logged in.
+        """
+        if not self.is_logged_in:
+            return []
+        try:
+            with self._session_lock:
+                page = self._session.home()
+            return self._categorise_page(page)
+        except Exception:
+            logger.debug("get_home_page failed", exc_info=True)
+            return []
+
+    def get_for_you_page(self) -> list[dict]:
+        """Fetch the Tidal 'For You' page and return categorised sections.
+
+        Same return format as :meth:`get_home_page`.
+        """
+        if not self.is_logged_in:
+            return []
+        try:
+            with self._session_lock:
+                page = self._session.for_you()
+            return self._categorise_page(page)
+        except Exception:
+            logger.debug("get_for_you_page failed", exc_info=True)
+            return []

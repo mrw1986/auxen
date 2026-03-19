@@ -248,6 +248,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             on_artist_clicked=self._navigate_to_artist,
             on_play_album=self._on_home_play_album,
             on_play_track=self._on_context_play,
+            on_play_mix=self._on_mixes_play_mix,
         )
 
         # ---- Lyrics Panel (right side, hidden by default) ----
@@ -618,8 +619,11 @@ class AuxenWindow(Adw.ApplicationWindow):
                 on_track_clicked=self._on_stats_track_clicked,
             )
 
-        # --- Home Page -> Album Art Service ---
+        # --- Home Page -> Album Art Service + Artist Images + Tidal ---
         self._home_page.set_album_art_service(self._album_art_service)
+        self._home_page.set_artist_image_service(self._artist_image_service)
+        if app.tidal_provider is not None:
+            self._home_page.set_tidal_provider(app.tidal_provider)
 
         # --- Album Art / Artist Image Services -> Database (custom art lookups) ---
         if app.db is not None:
@@ -675,6 +679,29 @@ class AuxenWindow(Adw.ApplicationWindow):
         # Signal splash screen that the app content is ready
         if self._splash is not None:
             self._on_splash_app_ready()
+
+    def set_tidal_home_sections(self, sections: list[dict]) -> None:
+        """Pass Tidal Home sections to the home page."""
+        try:
+            self._home_page.set_tidal_sections(sections)
+        except Exception:
+            logger.warning(
+                "Failed to set Tidal Home sections", exc_info=True,
+            )
+
+    def _refresh_home_page(self, db) -> None:
+        """Refresh the home page and re-fetch Tidal sections if stale."""
+        import time as _time
+
+        if db is not None:
+            self._home_page.refresh(db)
+
+        # Re-fetch Tidal Home if cache is older than 10 minutes
+        app = self._app_ref
+        if app is not None and app.tidal_provider is not None:
+            fetched_at = getattr(app, "_tidal_home_fetched_at", 0.0)
+            if _time.monotonic() - fetched_at > 600:
+                app._fetch_tidal_home()
 
     # ------------------------------------------------------------------
     # Navigation history
@@ -1990,9 +2017,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         """Refresh the data for *page_name* if it has a refresh method."""
         db = self._app_ref.db if self._app_ref else None
         refresh_map = {
-            "home": lambda: (
-                self._home_page.refresh(db) if db is not None else None
-            ),
+            "home": lambda: self._refresh_home_page(db),
             "library": lambda: (
                 self._library_view.refresh() if db is not None else None
             ),

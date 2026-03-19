@@ -2442,3 +2442,31 @@ row.now-playing-row:hover,
 flowboxchild.now-playing-row:hover {
     background-color: rgba(212, 160, 57, 0.14);
 }
+
+/* ── Tidal Home Sections ─────────────────────────────── */
+
+.horizontal-carousel {
+    min-height: 200px;
+}
+
+.carousel-scroll-btn {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 50%;
+    background-color: alpha(@window_bg_color, 0.85);
+    color: @theme_fg_color;
+    margin: 4px;
+}
+
+.carousel-scroll-btn:hover {
+    background-color: alpha(@window_bg_color, 0.95);
+}
+
+.artist-circle {
+    border-radius: 50%;
+}
+
+.tidal-section {
+    margin-top: 16px;
+    margin-bottom: 8px;
+}
