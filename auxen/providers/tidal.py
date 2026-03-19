@@ -1424,6 +1424,251 @@ class TidalProvider(ContentProvider):
             return False
 
     # ------------------------------------------------------------------
+    # Album collection management
+    # ------------------------------------------------------------------
+
+    def add_favorite_album(self, album_id: str) -> bool:
+        """Save an album to the user's Tidal collection."""
+        if not self.is_logged_in:
+            return False
+        try:
+            with self._session_lock:
+                self._session.user.favorites.add_album(int(album_id))
+            return True
+        except Exception:
+            logger.debug(
+                "add_favorite_album failed for %s", album_id, exc_info=True
+            )
+            return False
+
+    def remove_favorite_album(self, album_id: str) -> bool:
+        """Remove an album from the user's Tidal collection."""
+        if not self.is_logged_in:
+            return False
+        try:
+            with self._session_lock:
+                self._session.user.favorites.remove_album(int(album_id))
+            return True
+        except Exception:
+            logger.debug(
+                "remove_favorite_album failed for %s",
+                album_id,
+                exc_info=True,
+            )
+            return False
+
+    def is_favorite_album(self, album_id: str) -> bool:
+        """Check whether an album is in the user's Tidal favorites."""
+        if not self.is_logged_in:
+            return False
+        try:
+            albums = self.get_favorite_albums()
+            return any(a.get("tidal_id") == str(album_id) for a in albums)
+        except Exception:
+            logger.debug(
+                "is_favorite_album failed for %s", album_id, exc_info=True
+            )
+            return False
+
+    # ------------------------------------------------------------------
+    # Mix collection management
+    # ------------------------------------------------------------------
+
+    def get_saved_mixes(self) -> list[dict]:
+        """Get user's saved/favorited mixes from Tidal.
+
+        Returns a list of dicts with keys: name, description, cover_url,
+        tidal_id, track_count.
+        """
+        if not self.is_logged_in:
+            return []
+        try:
+            with self._session_lock:
+                raw = self._session.user.favorites.mixes()
+            mixes: list[dict] = []
+            for item in raw:
+                name = (
+                    getattr(item, "title", None)
+                    or getattr(item, "name", None)
+                    or "Mix"
+                )
+                desc = (
+                    getattr(item, "sub_title", None)
+                    or getattr(item, "description", None)
+                    or ""
+                )
+                cover_url = None
+                try:
+                    cover_url = item.image(dimensions=640)
+                except Exception:
+                    pass
+                if not cover_url:
+                    picture = getattr(item, "picture", None)
+                    if picture:
+                        cover_url = (
+                            "https://resources.tidal.com/images/"
+                            f"{picture.replace('-', '/')}"
+                            "/640x640.jpg"
+                        )
+                item_id = getattr(item, "id", "") or ""
+                track_count = getattr(
+                    item, "num_tracks", None
+                ) or getattr(item, "number_of_tracks", 0)
+                mixes.append({
+                    "name": name,
+                    "description": desc,
+                    "cover_url": cover_url,
+                    "tidal_id": str(item_id),
+                    "track_count": track_count,
+                })
+            return mixes
+        except Exception:
+            logger.debug("get_saved_mixes failed", exc_info=True)
+            return []
+
+    def save_mix(self, mix_id: str) -> bool:
+        """Save a mix to the user's Tidal collection."""
+        if not self.is_logged_in:
+            return False
+        try:
+            with self._session_lock:
+                self._session.user.favorites.add_mix(mix_id)
+            return True
+        except Exception:
+            logger.debug(
+                "save_mix failed for %s", mix_id, exc_info=True
+            )
+            return False
+
+    def remove_mix(self, mix_id: str) -> bool:
+        """Remove a mix from the user's Tidal collection."""
+        if not self.is_logged_in:
+            return False
+        try:
+            with self._session_lock:
+                self._session.user.favorites.remove_mix(mix_id)
+            return True
+        except Exception:
+            logger.debug(
+                "remove_mix failed for %s", mix_id, exc_info=True
+            )
+            return False
+
+    # ------------------------------------------------------------------
+    # Saved playlists (favorited by user, not created by user)
+    # ------------------------------------------------------------------
+
+    def get_saved_playlists(self) -> list[dict]:
+        """Get playlists the user has saved/favorited on Tidal.
+
+        Returns a list of dicts with keys: name, description, cover_url,
+        tidal_id, track_count, creator.
+        """
+        if not self.is_logged_in:
+            return []
+        try:
+            with self._session_lock:
+                raw = self._session.user.favorites.playlists()
+            playlists: list[dict] = []
+            for pl in raw:
+                cover_url = None
+                try:
+                    img_fn = getattr(pl, "image", None)
+                    if callable(img_fn):
+                        cover_url = img_fn(640)
+                    elif isinstance(img_fn, str) and img_fn:
+                        cover_url = (
+                            f"https://resources.tidal.com/images/"
+                            f"{img_fn.replace('-', '/')}/640x640.jpg"
+                        )
+                except Exception:
+                    pass
+                desc = getattr(pl, "description", None) or ""
+                track_count = getattr(
+                    pl, "num_tracks", None
+                ) or getattr(pl, "number_of_tracks", 0)
+                creator_obj = getattr(pl, "creator", None)
+                creator = ""
+                if creator_obj:
+                    creator = getattr(creator_obj, "name", "") or ""
+                playlists.append({
+                    "name": pl.name,
+                    "description": desc,
+                    "cover_url": cover_url,
+                    "tidal_id": str(pl.id),
+                    "track_count": track_count,
+                    "creator": creator,
+                })
+            return playlists
+        except Exception:
+            logger.debug("get_saved_playlists failed", exc_info=True)
+            return []
+
+    # ------------------------------------------------------------------
+    # Tidal playlist CRUD
+    # ------------------------------------------------------------------
+
+    def create_tidal_playlist(
+        self, name: str, description: str = ""
+    ) -> dict | None:
+        """Create a new playlist on Tidal.
+
+        Returns a dict with keys: name, tidal_id, description, or None
+        on failure.
+        """
+        if not self.is_logged_in:
+            return None
+        try:
+            with self._session_lock:
+                pl = self._session.user.create_playlist(name, description)
+            return {
+                "name": pl.name,
+                "tidal_id": str(pl.id),
+                "description": getattr(pl, "description", "") or "",
+            }
+        except Exception:
+            logger.debug(
+                "create_tidal_playlist failed for %s", name, exc_info=True
+            )
+            return None
+
+    def add_tracks_to_tidal_playlist(
+        self, playlist_id: str, track_ids: list[str]
+    ) -> bool:
+        """Add tracks to a Tidal playlist."""
+        if not self.is_logged_in:
+            return False
+        try:
+            with self._session_lock:
+                pl = self._session.playlist(playlist_id)
+                pl.add(track_ids)
+            return True
+        except Exception:
+            logger.debug(
+                "add_tracks_to_tidal_playlist failed for %s",
+                playlist_id,
+                exc_info=True,
+            )
+            return False
+
+    def delete_tidal_playlist(self, playlist_id: str) -> bool:
+        """Delete a Tidal playlist."""
+        if not self.is_logged_in:
+            return False
+        try:
+            with self._session_lock:
+                pl = self._session.playlist(playlist_id)
+                pl.delete()
+            return True
+        except Exception:
+            logger.debug(
+                "delete_tidal_playlist failed for %s",
+                playlist_id,
+                exc_info=True,
+            )
+            return False
+
+    # ------------------------------------------------------------------
     # Credits
     # ------------------------------------------------------------------
 

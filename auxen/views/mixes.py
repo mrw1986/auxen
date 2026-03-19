@@ -33,7 +33,10 @@ class MixesView(Gtk.ScrolledWindow):
         self._tidal_provider: Any = None
         self._on_play_mix: Optional[Callable] = None
         self._on_login: Optional[Callable] = None
+        self._on_save_mix: Optional[Callable] = None
+        self._on_remove_mix: Optional[Callable] = None
         self._refresh_generation: int = 0
+        self._saved_mix_ids: set[str] = set()
         self._current_menu: Optional[Gtk.PopoverMenu] = None
         self._menu_action_group: Optional[Gio.SimpleActionGroup] = None
         self._menu_parent: Optional[Gtk.Widget] = None
@@ -98,6 +101,24 @@ class MixesView(Gtk.ScrolledWindow):
             "child-activated", self._on_mix_card_activated
         )
         self._content_box.append(self._mixes_grid)
+
+        # -- Saved Mixes section --
+        self._saved_mixes_header = Gtk.Label(label="My Saved Mixes")
+        self._saved_mixes_header.set_xalign(0)
+        self._saved_mixes_header.add_css_class("section-header")
+        self._content_box.append(self._saved_mixes_header)
+
+        self._saved_mixes_grid = Gtk.FlowBox()
+        self._saved_mixes_grid.set_homogeneous(True)
+        self._saved_mixes_grid.set_min_children_per_line(1)
+        self._saved_mixes_grid.set_max_children_per_line(5)
+        self._saved_mixes_grid.set_column_spacing(16)
+        self._saved_mixes_grid.set_row_spacing(16)
+        self._saved_mixes_grid.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self._saved_mixes_grid.connect(
+            "child-activated", self._on_mix_card_activated
+        )
+        self._content_box.append(self._saved_mixes_grid)
 
         # -- User Playlists section --
         self._playlists_header = Gtk.Label(label="Your Tidal Playlists")
@@ -225,6 +246,8 @@ class MixesView(Gtk.ScrolledWindow):
         self,
         on_play_mix: Optional[Callable] = None,
         on_login: Optional[Callable] = None,
+        on_save_mix: Optional[Callable] = None,
+        on_remove_mix: Optional[Callable] = None,
     ) -> None:
         """Set callback functions for user actions.
 
@@ -236,9 +259,15 @@ class MixesView(Gtk.ScrolledWindow):
             playlists, ``False`` for personalized mixes.
         on_login:
             Called when the user clicks the login button.
+        on_save_mix:
+            Called with (mix_id, name) to save a mix to collection.
+        on_remove_mix:
+            Called with (mix_id, name) to remove a mix from collection.
         """
         self._on_play_mix = on_play_mix
         self._on_login = on_login
+        self._on_save_mix = on_save_mix
+        self._on_remove_mix = on_remove_mix
 
     def refresh(self) -> None:
         """Reload content from Tidal.
@@ -519,7 +548,7 @@ class MixesView(Gtk.ScrolledWindow):
         self._error_state_box.set_visible(True)
 
     def _fetch_content_thread(self, gen: int) -> None:
-        """Fetch mixes and playlists from Tidal in a background thread."""
+        """Fetch mixes, saved mixes, and playlists from Tidal in a background thread."""
         if self._tidal_provider is None:
             GLib.idle_add(self._show_login_state)
             return
@@ -527,14 +556,24 @@ class MixesView(Gtk.ScrolledWindow):
         try:
             mixes = self._tidal_provider.get_mixes(limit=12)
             playlists = self._tidal_provider.get_user_playlists(limit=20)
+            try:
+                saved_mixes = self._tidal_provider.get_saved_mixes()
+            except Exception:
+                logger.debug("get_saved_mixes failed", exc_info=True)
+                saved_mixes = []
 
             if gen != self._refresh_generation:
                 return
 
+            # Build set of saved mix IDs for context menu toggle
+            saved_ids = {m.get("tidal_id", "") for m in saved_mixes}
+
             def _apply_results() -> bool:
                 if gen != self._refresh_generation:
                     return False
+                self._saved_mix_ids = saved_ids
                 self._populate_mixes(mixes)
+                self._populate_saved_mixes(saved_mixes)
                 self._populate_playlists(playlists)
                 self._show_content_state()
 
@@ -542,11 +581,15 @@ class MixesView(Gtk.ScrolledWindow):
                 self._mixes_header.set_visible(has_mixes)
                 self._mixes_grid.set_visible(has_mixes)
 
+                has_saved = len(saved_mixes) > 0
+                self._saved_mixes_header.set_visible(has_saved)
+                self._saved_mixes_grid.set_visible(has_saved)
+
                 has_playlists = len(playlists) > 0
                 self._playlists_header.set_visible(has_playlists)
                 self._playlists_grid.set_visible(has_playlists)
 
-                if not has_mixes and not has_playlists:
+                if not has_mixes and not has_saved and not has_playlists:
                     self._show_empty_state()
                 return False
 
@@ -574,6 +617,25 @@ class MixesView(Gtk.ScrolledWindow):
             child._mix_is_playlist = False  # type: ignore[attr-defined]
             self._attach_mix_context_gesture(child)
             self._mixes_grid.append(child)
+            if image_url:
+                self._load_card_art(child, image_url)
+
+    def _populate_saved_mixes(self, saved_mixes: list[dict]) -> None:
+        """Fill the saved mixes grid with mix cards."""
+        self._clear_flow_box(self._saved_mixes_grid)
+        for mix in saved_mixes:
+            image_url = mix.get("cover_url") or mix.get("image_url") or ""
+            child = self._make_mix_card(
+                name=mix.get("name", "Mix"),
+                description=mix.get("description", ""),
+                tidal_id=mix.get("tidal_id", ""),
+                track_count=mix.get("track_count", 0),
+                image_url=image_url,
+            )
+            child._mix_is_playlist = False  # type: ignore[attr-defined]
+            child._mix_is_saved = True  # type: ignore[attr-defined]
+            self._attach_mix_context_gesture(child)
+            self._saved_mixes_grid.append(child)
             if image_url:
                 self._load_card_art(child, image_url)
 
@@ -655,7 +717,7 @@ class MixesView(Gtk.ScrolledWindow):
         y: float,
         child: Gtk.FlowBoxChild,
     ) -> None:
-        """Show a context menu with 'Play' when right-clicking a card."""
+        """Show a context menu when right-clicking a card."""
         tidal_id = getattr(child, "_mix_tidal_id", None)
         name = getattr(child, "_mix_name", None)
         if tidal_id is None or name is None:
@@ -664,17 +726,31 @@ class MixesView(Gtk.ScrolledWindow):
         # Clean up any existing menu
         self._cleanup_current_menu()
 
+        is_playlist = getattr(child, "_mix_is_playlist", True)
+        is_mix = not is_playlist
+
         # Build menu model
         menu = Gio.Menu()
-        section = Gio.Menu()
-        section.append("Play", "mixctx.play")
-        menu.append_section(None, section)
+        play_section = Gio.Menu()
+        play_section.append("Play", "mixctx.play")
+        menu.append_section(None, play_section)
+
+        # For mixes (not playlists), add save/remove option
+        if is_mix:
+            collection_section = Gio.Menu()
+            if tidal_id in self._saved_mix_ids:
+                collection_section.append(
+                    "Remove from Collection", "mixctx.remove-mix"
+                )
+            else:
+                collection_section.append(
+                    "Save to Collection", "mixctx.save-mix"
+                )
+            menu.append_section(None, collection_section)
 
         # Build action group
         action_group = Gio.SimpleActionGroup()
         play_action = Gio.SimpleAction.new("play", None)
-
-        is_playlist = getattr(child, "_mix_is_playlist", True)
 
         def _on_play(_action, _param):
             if self._on_play_mix is not None:
@@ -682,6 +758,25 @@ class MixesView(Gtk.ScrolledWindow):
 
         play_action.connect("activate", _on_play)
         action_group.add_action(play_action)
+
+        if is_mix:
+            save_action = Gio.SimpleAction.new("save-mix", None)
+
+            def _on_save(_action, _param):
+                if self._on_save_mix is not None:
+                    self._on_save_mix(tidal_id, name)
+
+            save_action.connect("activate", _on_save)
+            action_group.add_action(save_action)
+
+            remove_action = Gio.SimpleAction.new("remove-mix", None)
+
+            def _on_remove(_action, _param):
+                if self._on_remove_mix is not None:
+                    self._on_remove_mix(tidal_id, name)
+
+            remove_action.connect("activate", _on_remove)
+            action_group.add_action(remove_action)
 
         # Create and show popover
         popover = Gtk.PopoverMenu.new_from_model(menu)

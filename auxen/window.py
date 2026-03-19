@@ -407,6 +407,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             "on_add_to_playlist": self._on_context_add_album_to_playlist,
             "on_new_playlist": self._on_context_new_playlist_with_album,
             "on_add_to_favorites": self._on_context_add_album_to_favorites,
+            "on_remove_from_collection": self._on_context_remove_album_from_collection,
             "on_go_to_artist": self._on_context_album_go_to_artist,
             "on_properties": self._on_context_album_properties,
         }
@@ -579,6 +580,7 @@ class AuxenWindow(Adw.ApplicationWindow):
                 on_artist_clicked=self._on_artist_clicked,
                 on_play_album=self._on_context_play_album,
                 on_play_track=self._on_collection_play_track,
+                on_playlist_clicked=self._on_collection_playlist_clicked,
             )
         if app.tidal_provider is not None:
             self._collection_view.set_tidal_provider(app.tidal_provider)
@@ -610,6 +612,8 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._mixes_view.set_callbacks(
                 on_play_mix=self._on_mixes_play_mix,
                 on_login=self._on_mixes_login,
+                on_save_mix=self._on_mixes_save_mix,
+                on_remove_mix=self._on_mixes_remove_mix,
             )
 
         # --- Moods View -> Tidal Provider ---
@@ -1560,6 +1564,60 @@ class AuxenWindow(Adw.ApplicationWindow):
         """Handle login request from the mixes page."""
         self._start_tidal_login()
 
+    def _on_mixes_save_mix(self, mix_id: str, name: str) -> None:
+        """Save a mix to the user's Tidal collection."""
+        app = self._app_ref
+        if app is None or app.tidal_provider is None:
+            return
+
+        provider = app.tidal_provider
+
+        def _worker():
+            try:
+                provider.save_mix(mix_id)
+            except Exception:
+                logger.warning(
+                    "Failed to save mix %s", name, exc_info=True
+                )
+                return
+
+            def _on_done():
+                self._show_toast(f"Saved \u201c{name}\u201d to collection")
+                self._mixes_view.refresh()
+                return False
+
+            GLib.idle_add(_on_done)
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_mixes_remove_mix(self, mix_id: str, name: str) -> None:
+        """Remove a mix from the user's Tidal collection."""
+        app = self._app_ref
+        if app is None or app.tidal_provider is None:
+            return
+
+        provider = app.tidal_provider
+
+        def _worker():
+            try:
+                provider.remove_mix(mix_id)
+            except Exception:
+                logger.warning(
+                    "Failed to remove mix %s", name, exc_info=True
+                )
+                return
+
+            def _on_done():
+                self._show_toast(f"Removed \u201c{name}\u201d from collection")
+                self._mixes_view.refresh()
+                return False
+
+            GLib.idle_add(_on_done)
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
     # ------------------------------------------------------------------
     # Moods page callbacks
     # ------------------------------------------------------------------
@@ -1812,6 +1870,13 @@ class AuxenWindow(Adw.ApplicationWindow):
         """Play a single track from the collection view."""
         if self._app_ref and self._app_ref.player is not None:
             self._app_ref.player.play_queue([track], start_index=0)
+
+    def _on_collection_playlist_clicked(
+        self, tidal_id: str, name: str
+    ) -> None:
+        """Handle a Tidal playlist click from the collection view."""
+        # Reuse the mixes play handler with is_playlist=True
+        self._on_mixes_play_mix(tidal_id, name, is_playlist=True)
 
     def _on_sidebar_play_playlist(self, playlist_id: int) -> None:
         """Play all tracks in a playlist (triggered from sidebar context menu)."""
@@ -2675,6 +2740,74 @@ class AuxenWindow(Adw.ApplicationWindow):
                 logger.warning(
                     "Failed to add album to favorites", exc_info=True
                 )
+
+    def _on_context_remove_album_from_collection(
+        self, album_name: str, artist: str, tidal_id: str | None = None
+    ) -> None:
+        """Remove an album from the Tidal collection."""
+        if not tidal_id:
+            return
+        app = self._app_ref
+        if app is None or app.tidal_provider is None:
+            return
+
+        provider = app.tidal_provider
+
+        def _worker():
+            try:
+                provider.remove_favorite_album(tidal_id)
+            except Exception:
+                logger.warning(
+                    "Failed to remove album from collection",
+                    exc_info=True,
+                )
+                return
+
+            def _on_done():
+                self._show_toast(f"Removed \u201c{album_name}\u201d from collection")
+                visible = self._stack.get_visible_child_name()
+                if visible == "collection":
+                    self._collection_view.refresh()
+                return False
+
+            GLib.idle_add(_on_done)
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_context_save_album_to_collection(
+        self, album_name: str, artist: str, tidal_id: str | None = None
+    ) -> None:
+        """Save an album to the Tidal collection."""
+        if not tidal_id:
+            return
+        app = self._app_ref
+        if app is None or app.tidal_provider is None:
+            return
+
+        provider = app.tidal_provider
+
+        def _worker():
+            try:
+                provider.add_favorite_album(tidal_id)
+            except Exception:
+                logger.warning(
+                    "Failed to save album to collection",
+                    exc_info=True,
+                )
+                return
+
+            def _on_done():
+                self._show_toast(f"Saved \u201c{album_name}\u201d to collection")
+                visible = self._stack.get_visible_child_name()
+                if visible == "collection":
+                    self._collection_view.refresh()
+                return False
+
+            GLib.idle_add(_on_done)
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _on_context_album_go_to_artist(
         self, _album_name: str, artist: str

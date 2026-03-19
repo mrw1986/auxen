@@ -56,6 +56,11 @@ _SORT_OPTIONS_TRACKS = [
     "Title",
 ]
 
+_SORT_OPTIONS_PLAYLISTS = [
+    "Name",
+    "Track Count",
+]
+
 # Sort key functions keyed by dropdown label (tracks only).
 _SORT_KEYS: dict[str, str] = {
     "Recently Added": "date_added",
@@ -808,6 +813,7 @@ class CollectionView(Gtk.Box):
         self._all_favorites: list[dict[str, str | int]] = []
         self._cached_tidal_albums: list[dict] = []
         self._cached_tidal_artists: list[dict] = []
+        self._cached_tidal_playlists: list[dict] = []
         self._tidal_collection_generation: int = 0
         self._refresh_pending_id: int = 0  # debounce token for _refresh_current_view
         self._batch_generation: int = 0  # cancel token for batched widget creation
@@ -832,6 +838,7 @@ class CollectionView(Gtk.Box):
         self._on_artist_clicked: Callable[[str], None] | None = None
         self._on_play_album: Callable[[str, str], None] | None = None
         self._on_play_track: Callable | None = None
+        self._on_playlist_clicked: Callable | None = None
         # Track objects keyed by track_id or "sid:<source_id>" for play/context use
         self._track_objects: dict[int | str, object] = {}
         # Callback: on_favorite_changed(track_id: int, is_favorite: bool)
@@ -889,6 +896,7 @@ class CollectionView(Gtk.Box):
             ("Albums", "albums"),
             ("Artists", "artists"),
             ("Tracks", "tracks"),
+            ("Playlists", "playlists"),
         ]:
             btn = Gtk.ToggleButton(label=label_text)
             btn.add_css_class("filter-btn")
@@ -1085,6 +1093,22 @@ class CollectionView(Gtk.Box):
         artists_grid_container.append(self._artist_grid)
         self._content_stack.add_named(artists_grid_container, "artists-grid")
 
+        # -- Playlists view (ListBox) --
+        playlists_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        playlists_container.set_margin_top(16)
+        playlists_container.set_margin_start(16)
+        playlists_container.set_margin_end(16)
+        playlists_container.set_margin_bottom(32)
+
+        self._playlist_list = Gtk.ListBox()
+        self._playlist_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._playlist_list.add_css_class("boxed-list")
+        self._playlist_list.connect(
+            "row-activated", self._on_playlist_row_activated
+        )
+        playlists_container.append(self._playlist_list)
+        self._content_stack.add_named(playlists_container, "playlists")
+
         # -- Empty state --
         empty_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -1203,12 +1227,14 @@ class CollectionView(Gtk.Box):
         on_artist_clicked: Callable[[str], None] | None = None,
         on_play_album: Callable[[str, str], None] | None = None,
         on_play_track: Callable | None = None,
+        on_playlist_clicked: Callable | None = None,
     ) -> None:
         """Set callback functions for navigation actions."""
         self._on_album_clicked = on_album_clicked
         self._on_artist_clicked = on_artist_clicked
         self._on_play_album = on_play_album
         self._on_play_track = on_play_track
+        self._on_playlist_clicked = on_playlist_clicked
 
     # ------------------------------------------------------------------
     # Scroll position persistence
@@ -1475,15 +1501,16 @@ class CollectionView(Gtk.Box):
         if album_title is None or album_artist is None:
             return
 
+        tidal_id = getattr(child, "_tidal_id", None)
         gesture = Gtk.GestureClick(button=3)
 
         def _on_right_click(
             g, n_press, x, y,
-            a=album_title, ar=album_artist
+            a=album_title, ar=album_artist, tid=tidal_id
         ):
             if n_press != 1:
                 return
-            self._show_album_context_menu(child, x, y, a, ar)
+            self._show_album_context_menu(child, x, y, a, ar, tidal_id=tid)
             g.set_state(Gtk.EventSequenceState.CLAIMED)
 
         gesture.connect("pressed", _on_right_click)
@@ -1496,6 +1523,7 @@ class CollectionView(Gtk.Box):
         y: float,
         album_name: str,
         artist: str,
+        tidal_id: str | None = None,
     ) -> None:
         """Create and display a context menu for an album card."""
         if self._album_context_callbacks is None:
@@ -1514,6 +1542,7 @@ class CollectionView(Gtk.Box):
             "on_add_to_playlist": lambda pid, a=album_name, ar=artist: cbs.get("on_add_to_playlist", _noop)(a, ar, pid),
             "on_new_playlist": lambda a=album_name, ar=artist: cbs.get("on_new_playlist", _noop)(a, ar),
             "on_add_to_favorites": lambda a=album_name, ar=artist: cbs.get("on_add_to_favorites", _noop)(a, ar),
+            "on_remove_from_collection": lambda a=album_name, ar=artist, tid=tidal_id: cbs.get("on_remove_from_collection", _noop)(a, ar, tid),
             "on_go_to_artist": lambda a=album_name, ar=artist: cbs.get("on_go_to_artist", _noop)(a, ar),
             "on_shuffle_album": lambda a=album_name, ar=artist: cbs.get("on_shuffle_album", _noop)(a, ar),
             "on_properties": lambda a=album_name, ar=artist: cbs.get("on_properties", _noop)(a, ar),
@@ -1522,12 +1551,22 @@ class CollectionView(Gtk.Box):
         album_data = {
             "album": album_name,
             "artist": artist,
+            "tidal_id": tidal_id,
         }
+
+        # Determine if album is saved in collection
+        is_saved = False
+        if tidal_id:
+            is_saved = any(
+                a.get("tidal_id") == tidal_id
+                for a in self._cached_tidal_albums
+            )
 
         self._current_menu = AlbumContextMenu(
             album_data=album_data,
             callbacks=callbacks,
             playlists=playlists,
+            is_saved_in_collection=is_saved,
         )
         self._current_menu.show(widget, x, y)
 
@@ -2048,6 +2087,8 @@ class CollectionView(Gtk.Box):
             self._refresh_albums()
         elif self._active_view == "artists":
             self._refresh_artists()
+        elif self._active_view == "playlists":
+            self._refresh_playlists()
         else:
             self._refresh_tracks()
         return False
@@ -2126,6 +2167,7 @@ class CollectionView(Gtk.Box):
                         index=i,
                         on_artist_clicked=self._on_artist_clicked,
                     )
+                    row._tidal_id = album_data.get("tidal_id")
                     self._attach_album_context_gesture(row)
                     self._attach_album_play_button(row)
                     self._album_list.append(row)
@@ -2137,6 +2179,7 @@ class CollectionView(Gtk.Box):
                         track_count=album_data.get("track_count", 0),
                         on_artist_clicked=self._on_artist_clicked,
                     )
+                    row._tidal_id = album_data.get("tidal_id")
                     self._attach_album_context_gesture(row)
                     self._attach_album_play_button(row)
                     self._album_list.append(row)
@@ -2265,6 +2308,179 @@ class CollectionView(Gtk.Box):
             return offset < len(sorted_artists)
 
         GLib.idle_add(_add_batch)
+
+    def _refresh_playlists(self) -> None:
+        """Rebuild the playlists display (batched)."""
+        self._clear_list_box(self._playlist_list)
+
+        playlists = list(self._cached_tidal_playlists)
+
+        # Sort
+        if self._active_sort == "Name":
+            playlists.sort(
+                key=lambda p: (p.get("name", "") or "").lower(),
+                reverse=not self._sort_ascending,
+            )
+        elif self._active_sort == "Track Count":
+            playlists.sort(
+                key=lambda p: p.get("track_count", 0) or 0,
+                reverse=not self._sort_ascending,
+            )
+
+        self._update_count_label(len(playlists), "playlist")
+
+        if not playlists:
+            if (
+                self._tidal_provider is None
+                or not self._tidal_provider.is_logged_in
+            ):
+                self._content_stack.set_visible_child_name("tidal-connect")
+            else:
+                self._empty_title.set_label("No playlists in collection")
+                self._empty_subtitle.set_label(
+                    "Create or save playlists on Tidal"
+                )
+                self._content_stack.set_visible_child_name("empty")
+            return
+
+        self._content_stack.set_visible_child_name("playlists")
+
+        self._batch_generation += 1
+        gen = self._batch_generation
+        offset = 0
+
+        def _add_batch() -> bool:
+            nonlocal offset
+            if gen != self._batch_generation:
+                return False
+            end = min(offset + _BATCH_SIZE, len(playlists))
+            for i in range(offset, end):
+                pl = playlists[i]
+                row = self._make_playlist_row(pl)
+                self._playlist_list.append(row)
+                cover_url = pl.get("cover_url")
+                if cover_url and self._album_art_service is not None:
+                    self._load_playlist_art(row, cover_url)
+            offset = end
+            return offset < len(playlists)
+
+        GLib.idle_add(_add_batch)
+
+    def _make_playlist_row(self, playlist: dict) -> Gtk.ListBoxRow:
+        """Build a single playlist row for the collection list."""
+        row = Gtk.ListBoxRow()
+        row.add_css_class("collection-playlist-row")
+
+        hbox = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=12,
+        )
+        hbox.set_margin_top(8)
+        hbox.set_margin_bottom(8)
+        hbox.set_margin_start(12)
+        hbox.set_margin_end(12)
+
+        # Cover art placeholder
+        art_icon = Gtk.Image.new_from_icon_name("view-list-symbolic")
+        art_icon.set_pixel_size(48)
+        art_icon.set_size_request(48, 48)
+        art_icon.set_opacity(0.4)
+        hbox.append(art_icon)
+
+        # Cover art image (hidden until loaded)
+        art_image = Gtk.Image()
+        art_image.set_pixel_size(48)
+        art_image.set_size_request(48, 48)
+        art_image.set_visible(False)
+        hbox.append(art_image)
+
+        # Text info
+        text_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=2,
+        )
+        text_box.set_hexpand(True)
+        text_box.set_valign(Gtk.Align.CENTER)
+
+        name = playlist.get("name", "Playlist")
+        title_label = Gtk.Label(label=name)
+        title_label.set_xalign(0)
+        title_label.set_ellipsize(Pango.EllipsizeMode.END)
+        title_label.add_css_class("body")
+        text_box.append(title_label)
+
+        # Subtitle: track count + creator
+        parts: list[str] = []
+        track_count = playlist.get("track_count", 0) or 0
+        if track_count:
+            parts.append(f"{track_count} track{'s' if track_count != 1 else ''}")
+        creator = playlist.get("creator", "")
+        if creator:
+            parts.append(f"by {creator}")
+        elif playlist.get("is_user_created"):
+            parts.append("by you")
+        subtitle = " \u2022 ".join(parts) if parts else ""
+        if subtitle:
+            sub_label = Gtk.Label(label=subtitle)
+            sub_label.set_xalign(0)
+            sub_label.set_ellipsize(Pango.EllipsizeMode.END)
+            sub_label.add_css_class("caption")
+            sub_label.add_css_class("dim-label")
+            text_box.append(sub_label)
+
+        hbox.append(text_box)
+
+        # Tidal badge
+        badge = make_tidal_source_badge(
+            label_text="Tidal",
+            css_class="source-badge-tidal",
+            icon_size=10,
+        )
+        badge.set_valign(Gtk.Align.CENTER)
+        hbox.append(badge)
+
+        row.set_child(hbox)
+
+        # Store data for click handling
+        tidal_id = playlist.get("tidal_id", "")
+        row._playlist_tidal_id = tidal_id  # type: ignore[attr-defined]
+        row._playlist_name = name  # type: ignore[attr-defined]
+        row._art_icon = art_icon  # type: ignore[attr-defined]
+        row._art_image = art_image  # type: ignore[attr-defined]
+        return row
+
+    def _load_playlist_art(self, row: Gtk.ListBoxRow, url: str) -> None:
+        """Load cover art for a playlist row from a URL."""
+        if self._album_art_service is None:
+            return
+        art_icon = getattr(row, "_art_icon", None)
+        art_image = getattr(row, "_art_image", None)
+        if art_icon is None or art_image is None:
+            return
+
+        gen = self._batch_generation
+
+        def _on_loaded(pixbuf):
+            if gen != self._batch_generation:
+                return
+            if pixbuf is not None:
+                texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                art_image.set_from_paintable(texture)
+                art_image.set_visible(True)
+                art_icon.set_visible(False)
+
+        self._album_art_service.load_pixbuf_from_url(
+            url, 48, callback=_on_loaded
+        )
+
+    def _on_playlist_row_activated(
+        self, _list_box: Gtk.ListBox, row: Gtk.ListBoxRow
+    ) -> None:
+        """Handle click on a playlist row in the collection."""
+        tidal_id = getattr(row, "_playlist_tidal_id", None)
+        name = getattr(row, "_playlist_name", None)
+        if tidal_id and self._on_playlist_clicked:
+            self._on_playlist_clicked(tidal_id, name)
 
     def _load_artist_image_for_row(self, row: Gtk.ListBoxRow) -> None:
         """Request an async artist image for a row."""
@@ -2623,7 +2839,7 @@ class CollectionView(Gtk.Box):
         threading.Thread(target=_worker, daemon=True).start()
 
     def _fetch_tidal_collection_async(self) -> None:
-        """Fetch Tidal saved albums and followed artists in a background thread."""
+        """Fetch Tidal saved albums, followed artists, and playlists in a background thread."""
         if (
             self._tidal_provider is None
             or not self._tidal_provider.is_logged_in
@@ -2645,15 +2861,42 @@ class CollectionView(Gtk.Box):
             except Exception:
                 logger.debug("Async Tidal artist fetch failed", exc_info=True)
                 artists = []
+            try:
+                user_playlists = provider.get_user_playlists(limit=50)
+            except Exception:
+                logger.debug("Async Tidal user playlists fetch failed", exc_info=True)
+                user_playlists = []
+            try:
+                saved_playlists = provider.get_saved_playlists()
+            except Exception:
+                logger.debug("Async Tidal saved playlists fetch failed", exc_info=True)
+                saved_playlists = []
+
+            # Merge user-created and saved playlists, dedup by tidal_id
+            seen_ids: set[str] = set()
+            merged_playlists: list[dict] = []
+            for pl in user_playlists:
+                tid = pl.get("tidal_id", "")
+                if tid and tid not in seen_ids:
+                    seen_ids.add(tid)
+                    pl["is_user_created"] = True
+                    merged_playlists.append(pl)
+            for pl in saved_playlists:
+                tid = pl.get("tidal_id", "")
+                if tid and tid not in seen_ids:
+                    seen_ids.add(tid)
+                    pl["is_user_created"] = False
+                    merged_playlists.append(pl)
 
             def _apply():
                 if gen != self._tidal_collection_generation:
                     return False
                 self._cached_tidal_albums = albums
                 self._cached_tidal_artists = artists
+                self._cached_tidal_playlists = merged_playlists
                 self._rebuild_merged_collections()
-                # Re-render if on albums or artists tab
-                if self._active_view in ("albums", "artists"):
+                # Re-render if on albums, artists, or playlists tab
+                if self._active_view in ("albums", "artists", "playlists"):
                     self._refresh_current_view()
                 return False
 
@@ -2708,10 +2951,11 @@ class CollectionView(Gtk.Box):
         view_name = getattr(toggled_btn, "_view_name", "tracks")
         self._active_view = view_name
         self._update_sort_options()
-        # Show view mode toggle on all tabs
-        self._view_mode_toggle.set_visible(True)
+        # Hide view mode toggle on playlists (list-only)
+        self._view_mode_toggle.set_visible(view_name != "playlists")
         # Restore per-tab view mode
-        self._restore_tab_view_mode()
+        if view_name != "playlists":
+            self._restore_tab_view_mode()
         # Persist to DB
         self._persist_state()
         # Scroll to top when switching views
@@ -2727,6 +2971,8 @@ class CollectionView(Gtk.Box):
             options = _SORT_OPTIONS_ALBUMS
         elif self._active_view == "artists":
             options = _SORT_OPTIONS_ARTISTS
+        elif self._active_view == "playlists":
+            options = _SORT_OPTIONS_PLAYLISTS
         else:
             options = _SORT_OPTIONS_TRACKS
 
@@ -2772,6 +3018,8 @@ class CollectionView(Gtk.Box):
             options = _SORT_OPTIONS_ALBUMS
         elif self._active_view == "artists":
             options = _SORT_OPTIONS_ARTISTS
+        elif self._active_view == "playlists":
+            options = _SORT_OPTIONS_PLAYLISTS
         else:
             options = _SORT_OPTIONS_TRACKS
 
@@ -2829,14 +3077,14 @@ class CollectionView(Gtk.Box):
         try:
             # Restore view tab
             saved_tab = self._db.get_setting("collection_view_tab")
-            if saved_tab and saved_tab in ("albums", "artists", "tracks"):
+            if saved_tab and saved_tab in ("albums", "artists", "tracks", "playlists"):
                 self._active_view = saved_tab
                 for btn in self._view_buttons:
                     view_name = getattr(btn, "_view_name", "")
                     btn.handler_block_by_func(self._on_view_toggled)
                     btn.set_active(view_name == saved_tab)
                     btn.handler_unblock_by_func(self._on_view_toggled)
-                self._view_mode_toggle.set_visible(True)
+                self._view_mode_toggle.set_visible(saved_tab != "playlists")
                 self._update_sort_options()
 
             # Restore sort option for the active view
@@ -2851,6 +3099,8 @@ class CollectionView(Gtk.Box):
                     options = _SORT_OPTIONS_ALBUMS
                 elif self._active_view == "artists":
                     options = _SORT_OPTIONS_ARTISTS
+                elif self._active_view == "playlists":
+                    options = _SORT_OPTIONS_PLAYLISTS
                 else:
                     options = _SORT_OPTIONS_TRACKS
                 if saved_sort in options:

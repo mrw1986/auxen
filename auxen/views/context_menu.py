@@ -375,11 +375,13 @@ class AlbumContextMenu(_BaseContextMenu):
         album_data: dict,
         callbacks: dict,
         playlists: Optional[list[dict]] = None,
+        is_saved_in_collection: bool = False,
     ) -> None:
         super().__init__()
         self._album_data = album_data
         self._callbacks = callbacks
         self._playlists = playlists or []
+        self._is_saved_in_collection = is_saved_in_collection
 
     def show(self, widget: Gtk.Widget, x: float, y: float) -> None:
         """Show the album context menu at the click position."""
@@ -416,9 +418,14 @@ class AlbumContextMenu(_BaseContextMenu):
             "Add to Playlist", playlist_submenu
         )
 
-        organize_section.append(
-            "Add to Collection", "ctx.add-to-favorites"
-        )
+        if self._is_saved_in_collection:
+            organize_section.append(
+                "Remove from Collection", "ctx.remove-from-collection"
+            )
+        else:
+            organize_section.append(
+                "Save to Collection", "ctx.add-to-favorites"
+            )
         menu.append_section(None, organize_section)
 
         # Section 3: Navigation
@@ -449,6 +456,11 @@ class AlbumContextMenu(_BaseContextMenu):
         )
         self._add_action(
             group, "add-to-favorites", self._on_add_to_favorites
+        )
+        self._add_action(
+            group,
+            "remove-from-collection",
+            self._on_remove_from_collection,
         )
         self._add_action(group, "go-to-artist", self._on_go_to_artist)
         self._add_action(group, "new-playlist", self._on_new_playlist)
@@ -495,6 +507,11 @@ class AlbumContextMenu(_BaseContextMenu):
 
     def _on_add_to_favorites(self, _action, _param) -> None:
         cb = self._callbacks.get("on_add_to_favorites")
+        if cb is not None:
+            cb()
+
+    def _on_remove_from_collection(self, _action, _param) -> None:
+        cb = self._callbacks.get("on_remove_from_collection")
         if cb is not None:
             cb()
 
