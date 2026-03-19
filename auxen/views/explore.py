@@ -14,8 +14,10 @@ gi.require_version("Adw", "1")
 from gi.repository import Gdk, GLib, Gtk, Pango
 
 from auxen.views.context_menu import AlbumContextMenu, TrackContextMenu
+from auxen.album_art import AlbumArtService
 from auxen.views.widgets import (
     DragScrollHelper,
+    HorizontalCarousel,
     make_standard_track_row,
     make_tidal_connect_prompt,
     make_tidal_source_badge,
@@ -140,6 +142,22 @@ class ExploreView(Gtk.ScrolledWindow):
         self._tracks_list.set_selection_mode(Gtk.SelectionMode.NONE)
         self._tracks_list.add_css_class("boxed-list")
         self._content_box.append(self._tracks_list)
+
+        # -- Genre carousel sections (shown when a genre is selected) --
+        self._genre_carousel_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=24,
+        )
+        self._genre_carousel_box.set_visible(False)
+        self._content_box.append(self._genre_carousel_box)
+
+        # -- Hi-Res Audio section --
+        self._hires_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=24,
+        )
+        self._hires_box.set_visible(False)
+        self._content_box.append(self._hires_box)
 
         self._root.append(self._content_box)
 
@@ -486,6 +504,13 @@ class ExploreView(Gtk.ScrolledWindow):
                 releases = self._tidal_provider.get_featured_albums(limit=12)
             tracks = self._tidal_provider.get_top_tracks(limit=20)
 
+            # Fetch Hi-Res content (non-critical, errors won't block)
+            hires_sections: list[dict] = []
+            try:
+                hires_sections = self._tidal_provider.get_hires_page()
+            except Exception:
+                logger.debug("Hi-Res page fetch failed", exc_info=True)
+
             if gen != self._refresh_generation:
                 return
 
@@ -500,6 +525,8 @@ class ExploreView(Gtk.ScrolledWindow):
                 self._populate_genres(genres)
                 self._populate_releases(releases)
                 self._populate_tracks(tracks)
+                self._populate_hires(hires_sections)
+                self._genre_carousel_box.set_visible(False)
                 self._show_content_state()
                 has_genres = len(genres) > 0
                 self._genre_header.set_visible(has_genres)
@@ -723,8 +750,8 @@ class ExploreView(Gtk.ScrolledWindow):
 
         Clicking the active genre or "All" clears the filter and
         restores the original unfiltered content.  Clicking a new
-        genre searches Tidal for genre-specific content in a
-        background thread.
+        genre fetches rich genre-specific content from Tidal's genre
+        page API, falling back to search if unavailable.
         """
         # Toggle off: clicking the already-active genre or "All"
         if genre_name == "All" or genre_name == self._active_genre:
@@ -736,6 +763,7 @@ class ExploreView(Gtk.ScrolledWindow):
             # Restore unfiltered content
             self._populate_releases(self._unfiltered_releases)
             self._populate_tracks(self._unfiltered_tracks)
+            self._genre_carousel_box.set_visible(False)
             logger.debug("Genre filter cleared")
             return
 
@@ -746,6 +774,7 @@ class ExploreView(Gtk.ScrolledWindow):
         # Show loading state in the content area
         self._clear_flow_box(self._releases_grid)
         self._clear_list_box(self._tracks_list)
+        self._genre_carousel_box.set_visible(False)
         self._spinner_box.set_visible(True)
 
         # Fetch genre-specific content in a background thread
@@ -760,17 +789,29 @@ class ExploreView(Gtk.ScrolledWindow):
                     self._update_genre_pill_styles()
                     self._populate_releases(self._unfiltered_releases)
                     self._populate_tracks(self._unfiltered_tracks)
+                    self._genre_carousel_box.set_visible(False)
                     return False
                 GLib.idle_add(_restore_no_provider)
                 return
 
             try:
-                # Search Tidal for the genre name to get matching content
+                # Try rich genre page API first
+                genre_sections: list[dict] = []
+                try:
+                    genre_sections = self._tidal_provider.get_genre_page(
+                        genre_name
+                    )
+                except Exception:
+                    logger.debug(
+                        "get_genre_page failed for %s, falling back to search",
+                        genre_name,
+                        exc_info=True,
+                    )
+
+                # Fallback: search for genre content
                 genre_tracks = self._tidal_provider.search(
                     genre_name, limit=20
                 )
-
-                # Search for albums matching the genre via public API
                 genre_albums = self._tidal_provider.search_albums(
                     genre_name, limit=12
                 )
@@ -784,6 +825,12 @@ class ExploreView(Gtk.ScrolledWindow):
                     self._spinner_box.set_visible(False)
                     self._populate_releases(genre_albums)
                     self._populate_tracks(genre_tracks)
+                    # Show rich genre carousels if available
+                    if genre_sections:
+                        self._populate_genre_carousels(genre_sections)
+                        self._genre_carousel_box.set_visible(True)
+                    else:
+                        self._genre_carousel_box.set_visible(False)
                     return False
 
                 GLib.idle_add(_apply_genre_results)
@@ -804,6 +851,7 @@ class ExploreView(Gtk.ScrolledWindow):
                         self._update_genre_pill_styles()
                         self._populate_releases(self._unfiltered_releases)
                         self._populate_tracks(self._unfiltered_tracks)
+                        self._genre_carousel_box.set_visible(False)
                         return False
                     GLib.idle_add(_restore_on_genre_error)
 
@@ -828,6 +876,243 @@ class ExploreView(Gtk.ScrolledWindow):
                 elif pill_label == self._active_genre:
                     btn.add_css_class("explore-genre-pill-active")
             idx += 1
+
+    # ------------------------------------------------------------------
+    # Hi-Res and Genre carousel helpers
+    # ------------------------------------------------------------------
+
+    def _populate_hires(self, sections: list[dict]) -> None:
+        """Populate the Hi-Res Audio section with carousel content."""
+        # Clear existing hi-res content
+        child = self._hires_box.get_first_child()
+        while child is not None:
+            next_child = child.get_next_sibling()
+            self._hires_box.remove(child)
+            child = next_child
+
+        if not sections:
+            self._hires_box.set_visible(False)
+            return
+
+        import tidalapi
+
+        # Section header
+        hires_header = Gtk.Label(label="Hi-Res Audio")
+        hires_header.set_xalign(0)
+        hires_header.add_css_class("greeting-label")
+        hires_header.set_margin_top(16)
+        self._hires_box.append(hires_header)
+
+        for section in sections:
+            title = section.get("title", "")
+            sec_type = section.get("type", "other")
+            items = section.get("items", [])
+            if not items:
+                continue
+
+            carousel = HorizontalCarousel(title=title)
+            for item in items:
+                card = self._make_carousel_card(item, sec_type)
+                if card is not None:
+                    carousel.append_card(card)
+                    self._load_carousel_card_art(card)
+            self._hires_box.append(carousel)
+
+        self._hires_box.set_visible(True)
+
+    def _populate_genre_carousels(self, sections: list[dict]) -> None:
+        """Populate genre-specific carousel sections."""
+        # Clear existing genre carousel content
+        child = self._genre_carousel_box.get_first_child()
+        while child is not None:
+            next_child = child.get_next_sibling()
+            self._genre_carousel_box.remove(child)
+            child = next_child
+
+        if not sections:
+            return
+
+        import tidalapi
+
+        for section in sections:
+            title = section.get("title", "")
+            sec_type = section.get("type", "other")
+            items = section.get("items", [])
+            if not items:
+                continue
+
+            carousel = HorizontalCarousel(title=title)
+            for item in items:
+                card = self._make_carousel_card(item, sec_type)
+                if card is not None:
+                    carousel.append_card(card)
+                    self._load_carousel_card_art(card)
+            self._genre_carousel_box.append(carousel)
+
+    def _make_carousel_card(
+        self, item: Any, sec_type: str,
+    ) -> Gtk.Box | None:
+        """Build a card for use in Hi-Res or genre carousels."""
+        import tidalapi
+
+        card = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=6,
+        )
+        card.add_css_class("album-card")
+        card.set_size_request(160, -1)
+
+        art_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER,
+        )
+        art_box.add_css_class("album-art-placeholder")
+        art_box.set_size_request(160, 160)
+
+        icon_name = "audio-x-generic-symbolic"
+        if sec_type == "playlists":
+            icon_name = "view-list-symbolic"
+        elif sec_type == "artists":
+            icon_name = "avatar-default-symbolic"
+        elif sec_type == "mixes":
+            icon_name = "media-playlist-shuffle-symbolic"
+
+        art_icon = Gtk.Image.new_from_icon_name(icon_name)
+        art_icon.set_pixel_size(48)
+        art_icon.set_opacity(0.4)
+        art_icon.set_halign(Gtk.Align.CENTER)
+        art_icon.set_valign(Gtk.Align.CENTER)
+        art_icon.set_vexpand(True)
+        art_box.append(art_icon)
+
+        art_image = Gtk.Image()
+        art_image.set_pixel_size(160)
+        art_image.set_halign(Gtk.Align.CENTER)
+        art_image.set_valign(Gtk.Align.CENTER)
+        art_image.add_css_class("album-card-art-image")
+        art_image.set_visible(False)
+        art_box.append(art_image)
+
+        card.append(art_box)
+
+        # Title
+        name = getattr(item, "name", "") or getattr(item, "title", "") or ""
+        title_label = Gtk.Label(label=name)
+        title_label.set_xalign(0)
+        title_label.set_ellipsize(Pango.EllipsizeMode.END)
+        title_label.set_max_width_chars(18)
+        title_label.add_css_class("body")
+        title_label.set_margin_start(6)
+        title_label.set_margin_end(6)
+        card.append(title_label)
+
+        # Artist subtitle for albums/tracks
+        if sec_type in ("albums", "tracks"):
+            artist_obj = getattr(item, "artist", None)
+            artist_name = (
+                getattr(artist_obj, "name", "") if artist_obj else ""
+            )
+            if artist_name:
+                artist_label = Gtk.Label(label=artist_name)
+                artist_label.set_xalign(0)
+                artist_label.set_ellipsize(Pango.EllipsizeMode.END)
+                artist_label.set_max_width_chars(18)
+                artist_label.add_css_class("caption")
+                artist_label.add_css_class("dim-label")
+                artist_label.set_margin_start(6)
+                artist_label.set_margin_end(6)
+                card.append(artist_label)
+
+        # Store art refs
+        card._art_icon = art_icon  # type: ignore[attr-defined]
+        card._art_image = art_image  # type: ignore[attr-defined]
+        card._item = item  # type: ignore[attr-defined]
+
+        # Resolve cover URL
+        cover_url = None
+        try:
+            if isinstance(item, tidalapi.Album):
+                cover_url = item.image(dimensions=640)
+            elif isinstance(item, tidalapi.Playlist):
+                cover_url = item.image(dimensions=640)
+            elif isinstance(item, tidalapi.Artist):
+                cover_url = item.image(dimensions=480)
+            else:
+                cover_url = item.image(dimensions=640)
+        except Exception:
+            pass
+        if not cover_url:
+            pic = (
+                getattr(item, "cover", None)
+                or getattr(item, "picture", None)
+            )
+            if pic:
+                cover_url = (
+                    f"https://resources.tidal.com/images/"
+                    f"{pic.replace('-', '/')}/640x640.jpg"
+                )
+        card._cover_url = cover_url  # type: ignore[attr-defined]
+
+        # Wire click handler
+        if isinstance(item, tidalapi.Album):
+            click = Gtk.GestureClick.new()
+            click.set_button(1)
+            click.connect(
+                "released", self._on_carousel_album_clicked, item
+            )
+            card.add_controller(click)
+
+        return card
+
+    def _on_carousel_album_clicked(
+        self,
+        gesture: Gtk.GestureClick,
+        _n_press: int,
+        _x: float,
+        _y: float,
+        item: Any,
+    ) -> None:
+        """Handle clicking an album card in a carousel section."""
+        if self._on_album_clicked is not None:
+            name = getattr(item, "name", "") or ""
+            artist_obj = getattr(item, "artist", None)
+            artist_name = (
+                getattr(artist_obj, "name", "") if artist_obj else ""
+            )
+            self._on_album_clicked(name, artist_name)
+
+    def _load_carousel_card_art(self, card: Gtk.Box) -> None:
+        """Asynchronously load cover art for a carousel card."""
+        cover_url = getattr(card, "_cover_url", None)
+        art_icon = getattr(card, "_art_icon", None)
+        art_image = getattr(card, "_art_image", None)
+        if not cover_url or art_icon is None or art_image is None:
+            return
+
+        request_token = object()
+        card._art_request_token = request_token  # type: ignore[attr-defined]
+
+        def _load():
+            try:
+                pixbuf = AlbumArtService.load_pixbuf_from_url(
+                    cover_url, 320, 320
+                )
+                GLib.idle_add(_on_loaded, pixbuf)
+            except Exception:
+                pass
+
+        def _on_loaded(pixbuf):
+            if getattr(card, "_art_request_token", None) is not request_token:
+                return False
+            if pixbuf is not None:
+                texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                art_image.set_from_paintable(texture)
+                art_image.set_visible(True)
+                art_icon.set_visible(False)
+            return False
+
+        threading.Thread(target=_load, daemon=True).start()
 
     # ------------------------------------------------------------------
     # Art loading helpers

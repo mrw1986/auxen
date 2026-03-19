@@ -1469,3 +1469,134 @@ class TidalProvider(ContentProvider):
         except Exception:
             logger.debug("get_for_you_page failed", exc_info=True)
             return []
+
+    # ------------------------------------------------------------------
+    # Browse & Discovery helpers
+    # ------------------------------------------------------------------
+
+    def get_moods(self) -> list[dict]:
+        """Get mood categories from Tidal.
+
+        Returns a list of dicts, each with ``title`` (str),
+        ``api_path`` (str), and ``image_url`` (str or None).
+
+        The ``api_path`` can be passed to :meth:`get_mood_page` to
+        fetch playlists/content for that specific mood.
+
+        Returns an empty list on failure or if not logged in.
+        """
+        if not self.is_logged_in:
+            return []
+        try:
+            with self._session_lock:
+                page = self._session.moods()
+            moods: list[dict] = []
+            categories = getattr(page, "categories", None)
+            if categories is None:
+                return moods
+            for category in categories:
+                items = getattr(category, "items", None)
+                if not items:
+                    continue
+                for item in items:
+                    title = getattr(item, "title", None) or ""
+                    api_path = getattr(item, "api_path", None) or ""
+                    image_id = getattr(item, "image_id", None) or ""
+                    image_url = None
+                    if image_id:
+                        image_url = (
+                            "https://resources.tidal.com/images/"
+                            f"{image_id.replace('-', '/')}"
+                            "/640x640.jpg"
+                        )
+                    moods.append({
+                        "title": title,
+                        "api_path": api_path,
+                        "image_url": image_url,
+                    })
+            return moods
+        except Exception:
+            logger.debug("get_moods failed", exc_info=True)
+            return []
+
+    def get_mood_page(self, api_path: str) -> list[dict]:
+        """Fetch content for a specific mood via its API path.
+
+        Returns the same format as :meth:`get_home_page` -- a list
+        of section dicts with ``title``, ``type``, and ``items``.
+
+        Returns an empty list on failure or if not logged in.
+        """
+        if not self.is_logged_in or not api_path:
+            return []
+        try:
+            with self._session_lock:
+                page = self._session.page.get(api_path)
+            return self._categorise_page(page)
+        except Exception:
+            logger.debug(
+                "get_mood_page failed for %s", api_path, exc_info=True
+            )
+            return []
+
+    def get_hires_page(self) -> list[dict]:
+        """Fetch the Tidal Hi-Res page and return categorised sections.
+
+        Same return format as :meth:`get_home_page`.
+        Returns an empty list on failure or if not logged in.
+        """
+        if not self.is_logged_in:
+            return []
+        try:
+            with self._session_lock:
+                page = self._session.hires_page()
+            return self._categorise_page(page)
+        except Exception:
+            logger.debug("get_hires_page failed", exc_info=True)
+            return []
+
+    def get_genre_page(self, genre_name: str) -> list[dict]:
+        """Fetch genre-specific content from Tidal.
+
+        Uses ``session.genres()`` to find the matching genre link,
+        then retrieves its page for richer content than a simple
+        search.
+
+        Same return format as :meth:`get_home_page`.
+        Returns an empty list on failure or if not logged in.
+        """
+        if not self.is_logged_in or not genre_name:
+            return []
+        try:
+            with self._session_lock:
+                genres_page = self._session.genres()
+            # Find the PageLink matching this genre name
+            categories = getattr(genres_page, "categories", None)
+            if categories is None:
+                return []
+            for category in categories:
+                items = getattr(category, "items", None)
+                if not items:
+                    continue
+                for item in items:
+                    item_title = getattr(item, "title", None) or ""
+                    header = getattr(item, "header", None) or ""
+                    short_header = getattr(item, "short_header", None) or ""
+                    # Match by title, header, or short_header
+                    if genre_name in (item_title, header, short_header):
+                        api_path = getattr(item, "api_path", None)
+                        if api_path:
+                            with self._session_lock:
+                                page = self._session.page.get(api_path)
+                            return self._categorise_page(page)
+                        # PageLink.get() fetches the page
+                        if hasattr(item, "get"):
+                            with self._session_lock:
+                                page = item.get()
+                            return self._categorise_page(page)
+            return []
+        except Exception:
+            logger.debug(
+                "get_genre_page failed for %s", genre_name, exc_info=True
+            )
+            return []

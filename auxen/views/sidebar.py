@@ -30,6 +30,7 @@ _BROWSE_ITEMS: list[tuple[str, str, str, str | None, str | None, str | None]] = 
 _TIDAL_ITEMS: list[tuple[str, str, str, str | None, str | None, str | None]] = [
     ("explore", "compass-symbolic", "Explore", "Tidal", "nav-badge-tidal", "Explore Tidal music"),
     ("mixes", "media-playlist-shuffle-symbolic", "Mixes", None, None, "Tidal curated mixes"),
+    ("moods", "face-smile-symbolic", "Moods", None, None, "Browse by mood & activity"),
 ]
 
 # Fallback playlists shown when no database is connected

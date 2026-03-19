@@ -24,6 +24,7 @@ from auxen.views.home import HomePage
 from auxen.views.library import LibraryView
 from auxen.views.lyrics_panel import LyricsPanel
 from auxen.views.mixes import MixesView
+from auxen.views.moods import MoodsView
 from auxen.views.now_playing import NowPlayingBar
 from auxen.views.queue_panel import QueuePanel
 from auxen.views.playlist_view import PlaylistView
@@ -66,6 +67,7 @@ _PAGES: list[tuple[str, str]] = [
     ("library", "Library"),
     ("explore", "Explore"),
     ("mixes", "Mixes"),
+    ("moods", "Moods"),
     ("collection", "Collection"),
     ("stats", "Stats"),
 ]
@@ -167,6 +169,11 @@ class AuxenWindow(Adw.ApplicationWindow):
             if name == "mixes":
                 self._mixes_view = MixesView()
                 self._stack.add_named(self._mixes_view, name)
+                continue
+
+            if name == "moods":
+                self._moods_view = MoodsView()
+                self._stack.add_named(self._moods_view, name)
                 continue
 
             if name == "collection":
@@ -600,6 +607,16 @@ class AuxenWindow(Adw.ApplicationWindow):
             self._mixes_view.set_callbacks(
                 on_play_mix=self._on_mixes_play_mix,
                 on_login=self._on_mixes_login,
+            )
+
+        # --- Moods View -> Tidal Provider ---
+        if app.tidal_provider is not None:
+            self._moods_view.set_tidal_provider(app.tidal_provider)
+            self._moods_view.set_album_art_service(self._album_art_service)
+            self._moods_view.set_callbacks(
+                on_play_playlist=self._on_moods_play_playlist,
+                on_album_clicked=self._on_album_clicked,
+                on_login=self._on_moods_login,
             )
 
         # --- Smart Playlist View -> Database (view mode persistence) ---
@@ -1486,6 +1503,52 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._start_tidal_login()
 
     # ------------------------------------------------------------------
+    # Moods page callbacks
+    # ------------------------------------------------------------------
+
+    def _on_moods_play_playlist(
+        self, tidal_id: str, name: str,
+    ) -> None:
+        """Handle a playlist/mix click from the moods view."""
+        if (
+            self._app_ref
+            and self._app_ref.tidal_provider is not None
+            and self._app_ref.player is not None
+        ):
+            import threading
+
+            def _load_and_play() -> None:
+                try:
+                    tp = self._app_ref.tidal_provider
+                    # Try playlist first, then mix
+                    tracks = None
+                    try:
+                        tracks = tp.get_playlist_tracks(tidal_id)
+                    except Exception:
+                        pass
+                    if not tracks:
+                        try:
+                            tracks = tp.get_mix_tracks(tidal_id)
+                        except Exception:
+                            pass
+                    if tracks:
+                        GLib.idle_add(
+                            self._app_ref.player.play_queue,
+                            tracks, 0,
+                        )
+                except Exception:
+                    logger.warning(
+                        "Failed to load playlist tracks for %s", name,
+                        exc_info=True,
+                    )
+
+            threading.Thread(target=_load_and_play, daemon=True).start()
+
+    def _on_moods_login(self) -> None:
+        """Handle login request from the moods page."""
+        self._start_tidal_login()
+
+    # ------------------------------------------------------------------
     # Direct Tidal login flow
     # ------------------------------------------------------------------
 
@@ -1633,6 +1696,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         for view_name, view in [
             ("explore", self._explore_view),
             ("mixes", self._mixes_view),
+            ("moods", self._moods_view),
             ("collection", self._collection_view),
             ("library", self._library_view),
         ]:
@@ -2026,6 +2090,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             ),
             "explore": lambda: self._explore_view.refresh(),
             "mixes": lambda: self._mixes_view.refresh(),
+            "moods": lambda: self._moods_view.refresh(),
             "stats": lambda: (
                 self._stats_view.refresh() if db is not None else None
             ),
