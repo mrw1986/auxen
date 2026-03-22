@@ -631,11 +631,13 @@ class HomePage(Gtk.ScrolledWindow):
         # ---- 3. Stats row ----
         stats_box = Gtk.FlowBox()
         stats_box.set_homogeneous(True)
-        stats_box.set_min_children_per_line(1)
+        stats_box.set_min_children_per_line(3)
         stats_box.set_max_children_per_line(3)
         stats_box.set_column_spacing(16)
         stats_box.set_row_spacing(8)
         stats_box.set_selection_mode(Gtk.SelectionMode.NONE)
+        stats_box.set_halign(Gtk.Align.FILL)
+        stats_box.set_hexpand(False)
 
         self._total_value_label: Gtk.Label | None = None
         self._tidal_value_label: Gtk.Label | None = None
@@ -860,6 +862,10 @@ class HomePage(Gtk.ScrolledWindow):
             if not items:
                 continue
 
+            # Skip unrenderable section types (e.g. Shortcuts)
+            if sec_type == "other":
+                continue
+
             if sec_type == "tracks":
                 widget = self._render_tidal_track_section(title, items)
             else:
@@ -882,6 +888,7 @@ class HomePage(Gtk.ScrolledWindow):
             if sec_type == "albums":
                 card = _make_tidal_album_card(item)
                 self._wire_tidal_album_click(card)
+                self._attach_album_context_gesture(card)
                 carousel.append_card(card)
                 self._load_tidal_card_art(card)
             elif sec_type == "artists":
@@ -1362,23 +1369,34 @@ class HomePage(Gtk.ScrolledWindow):
         if not hasattr(self, "_recent_list"):
             return
         playing_sid = getattr(track, "source_id", None) if track else None
-        playing_key = (
-            (getattr(track, "title", ""), getattr(track, "artist", ""))
-            if track
-            else None
-        )
+        playing_title = getattr(track, "title", "") if track else ""
+        playing_artist = getattr(track, "artist", "") if track else ""
+
+        def _get_field(obj, field, default=""):
+            if isinstance(obj, dict):
+                return obj.get(field, default)
+            return getattr(obj, field, default)
+
         row = self._recent_list.get_first_child()
         while row is not None:
             td = getattr(row, "_track_data", None)
             match = False
             if td is not None and track is not None:
-                td_sid = getattr(td, "source_id", None)
-                if playing_sid and td_sid and playing_sid == td_sid:
+                # Primary: match by source_id
+                td_sid = _get_field(td, "source_id", None)
+                if playing_sid and td_sid and str(playing_sid) == str(td_sid):
                     match = True
-                elif playing_key and (
-                    getattr(td, "title", ""), getattr(td, "artist", "")
-                ) == playing_key:
-                    match = True
+                else:
+                    # Fallback: match by (title, artist) — both must be non-empty
+                    td_title = _get_field(td, "title", "")
+                    td_artist = _get_field(td, "artist", "")
+                    if (
+                        playing_title and playing_artist
+                        and td_title and td_artist
+                        and td_title == playing_title
+                        and td_artist == playing_artist
+                    ):
+                        match = True
             if match:
                 row.add_css_class("now-playing-row")
             else:

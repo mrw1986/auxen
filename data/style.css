@@ -2463,7 +2463,7 @@ flowboxchild.now-playing-row:hover {
 }
 
 .artist-circle {
-    border-radius: 50%;
+    border-radius: 16px;
 }
 
 .tidal-section {

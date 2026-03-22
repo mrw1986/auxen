@@ -1253,21 +1253,31 @@ class LibraryView(Gtk.Box):
     def highlight_playing_track(self, track) -> None:
         """Highlight the currently playing track in the track list/grid."""
         playing_sid = getattr(track, "source_id", None) if track else None
-        playing_key = (
-            (getattr(track, "title", ""), getattr(track, "artist", ""))
-            if track
-            else None
-        )
+        playing_title = getattr(track, "title", "") if track else ""
+        playing_artist = getattr(track, "artist", "") if track else ""
+
+        def _get_field(obj, field, default=""):
+            """Get a field from an object or dict."""
+            if isinstance(obj, dict):
+                return obj.get(field, default)
+            return getattr(obj, field, default)
 
         def _match_track(td):
             if td is None or track is None:
                 return False
-            td_sid = getattr(td, "source_id", None)
-            if playing_sid and td_sid and playing_sid == td_sid:
+            # Primary: match by source_id (most reliable)
+            td_sid = _get_field(td, "source_id", None)
+            if playing_sid and td_sid and str(playing_sid) == str(td_sid):
                 return True
-            if playing_key and (
-                getattr(td, "title", ""), getattr(td, "artist", "")
-            ) == playing_key:
+            # Fallback: match by (title, artist) tuple — both must be non-empty
+            td_title = _get_field(td, "title", "")
+            td_artist = _get_field(td, "artist", "")
+            if (
+                playing_title and playing_artist
+                and td_title and td_artist
+                and td_title == playing_title
+                and td_artist == playing_artist
+            ):
                 return True
             return False
 
@@ -1275,7 +1285,9 @@ class LibraryView(Gtk.Box):
         if hasattr(self, "_track_list"):
             row = self._track_list.get_first_child()
             while row is not None:
-                td = getattr(row, "_track_data", None)
+                td = getattr(row, "_track_obj", None) or getattr(
+                    row, "_track_data", None
+                )
                 if _match_track(td):
                     row.add_css_class("now-playing-row")
                 else:

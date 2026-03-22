@@ -14,7 +14,7 @@ gi.require_version("GdkPixbuf", "2.0")
 
 from gi.repository import Gdk, GdkPixbuf, GLib, GObject, Gtk, Pango
 
-from auxen.views.context_menu import TrackContextMenu
+from auxen.views.context_menu import AlbumContextMenu, TrackContextMenu
 from auxen.views.widgets import DragScrollHelper, format_duration, make_standard_track_row, make_tidal_source_badge
 
 logger = logging.getLogger(__name__)
@@ -304,7 +304,9 @@ class SearchView(Gtk.Box):
 
         # Context menu callbacks
         self._context_callbacks: dict | None = None
+        self._album_context_callbacks: dict | None = None
         self._get_playlists: object = None
+        self._get_album_playlists: object = None
         self._current_menu: object = None
 
         # Navigation callbacks for clickable artist/album labels
@@ -471,6 +473,15 @@ class SearchView(Gtk.Box):
         self._context_callbacks = callbacks
         self._get_playlists = get_playlists
 
+    def set_album_context_callbacks(
+        self,
+        callbacks: dict,
+        get_playlists,
+    ) -> None:
+        """Set callback functions for the album right-click context menu."""
+        self._album_context_callbacks = callbacks
+        self._get_album_playlists = get_playlists
+
     def set_navigation_callbacks(
         self,
         on_artist_clicked=None,
@@ -566,6 +577,9 @@ class SearchView(Gtk.Box):
                 if tidal_obj is not None:
                     row._tidal_album = tidal_obj  # type: ignore[attr-defined]
                     self._load_album_art_from_tidal(row, tidal_obj)
+                self._attach_album_context_gesture(
+                    row, result["title"], result.get("artist", ""),
+                )
                 self._results_list.append(row)
 
             elif result_type == _TYPE_ARTIST:
@@ -578,6 +592,9 @@ class SearchView(Gtk.Box):
                 if tidal_obj is not None:
                     row._tidal_artist = tidal_obj  # type: ignore[attr-defined]
                     self._load_artist_image_from_tidal(row, tidal_obj)
+                self._attach_artist_context_gesture(
+                    row, result["title"],
+                )
                 self._results_list.append(row)
 
             else:
@@ -715,6 +732,137 @@ class SearchView(Gtk.Box):
             playlists=playlists,
         )
         self._current_menu.show(widget, x, y)
+
+    def _attach_album_context_gesture(
+        self, row: Gtk.ListBoxRow, album_name: str, artist: str,
+    ) -> None:
+        """Attach a right-click gesture to an album result row."""
+        if self._album_context_callbacks is None:
+            return
+
+        gesture = Gtk.GestureClick(button=3)
+
+        def _on_right_click(g, n_press, x, y):
+            if n_press != 1:
+                return
+            self._show_album_context_menu(row, x, y, album_name, artist)
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
+
+        gesture.connect("pressed", _on_right_click)
+        row.add_controller(gesture)
+
+    def _show_album_context_menu(
+        self,
+        widget: Gtk.Widget,
+        x: float,
+        y: float,
+        album_name: str,
+        artist: str,
+    ) -> None:
+        """Create and display a context menu for an album."""
+        if self._album_context_callbacks is None:
+            return
+
+        playlists = []
+        if self._get_album_playlists is not None:
+            playlists = self._get_album_playlists()
+
+        cbs = self._album_context_callbacks
+        _noop = lambda *_args: None
+        callbacks = {
+            "on_play_album": lambda a=album_name, ar=artist: cbs.get("on_play_album", _noop)(a, ar),
+            "on_play_album_next": lambda a=album_name, ar=artist: cbs.get("on_play_album_next", _noop)(a, ar),
+            "on_add_album_to_queue": lambda a=album_name, ar=artist: cbs.get("on_add_album_to_queue", _noop)(a, ar),
+            "on_add_to_playlist": lambda pid, a=album_name, ar=artist: cbs.get("on_add_to_playlist", _noop)(a, ar, pid),
+            "on_new_playlist": lambda a=album_name, ar=artist: cbs.get("on_new_playlist", _noop)(a, ar),
+            "on_add_to_favorites": lambda a=album_name, ar=artist: cbs.get("on_add_to_favorites", _noop)(a, ar),
+            "on_go_to_artist": lambda a=album_name, ar=artist: cbs.get("on_go_to_artist", _noop)(a, ar),
+            "on_shuffle_album": lambda a=album_name, ar=artist: cbs.get("on_shuffle_album", _noop)(a, ar),
+            "on_properties": lambda a=album_name, ar=artist: cbs.get("on_properties", _noop)(a, ar),
+        }
+
+        album_data = {
+            "album": album_name,
+            "artist": artist,
+        }
+
+        self._current_menu = AlbumContextMenu(
+            album_data=album_data,
+            callbacks=callbacks,
+            playlists=playlists,
+        )
+        self._current_menu.show(widget, x, y)
+
+    def _attach_artist_context_gesture(
+        self, row: Gtk.ListBoxRow, artist_name: str,
+    ) -> None:
+        """Attach a right-click gesture to an artist result row."""
+        if self._context_callbacks is None:
+            return
+
+        gesture = Gtk.GestureClick(button=3)
+
+        def _on_right_click(g, n_press, x, y):
+            if n_press != 1:
+                return
+            self._show_artist_context_menu(row, x, y, artist_name)
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
+
+        gesture.connect("pressed", _on_right_click)
+        row.add_controller(gesture)
+
+    def _show_artist_context_menu(
+        self,
+        widget: Gtk.Widget,
+        x: float,
+        y: float,
+        artist_name: str,
+    ) -> None:
+        """Create and display a context menu for an artist."""
+        if self._context_callbacks is None:
+            return
+
+        _noop = lambda *_args: None
+        go_to_artist = self._context_callbacks.get("on_go_to_artist", _noop)
+
+        menu = Gtk.PopoverMenu()
+        menu.set_parent(widget)
+        menu.add_css_class("context-menu")
+        menu.set_has_arrow(False)
+
+        menu_model = GLib.Menu()
+        # "Go to Artist" action
+        go_action = "search-artist-go"
+
+        content_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=0,
+        )
+        content_box.set_margin_top(4)
+        content_box.set_margin_bottom(4)
+
+        go_btn = Gtk.Button(label="Go to Artist")
+        go_btn.add_css_class("flat")
+        go_btn.add_css_class("context-menu-item")
+
+        def _on_go(_btn, name=artist_name):
+            menu.popdown()
+            if self._on_nav_artist_clicked:
+                self._on_nav_artist_clicked(name)
+
+        go_btn.connect("clicked", _on_go)
+        content_box.append(go_btn)
+
+        menu.set_child(content_box)
+        menu.set_pointing_to(Gdk.Rectangle())
+        rect = Gdk.Rectangle()
+        rect.x = int(x)
+        rect.y = int(y)
+        rect.width = 1
+        rect.height = 1
+        menu.set_pointing_to(rect)
+        menu.popup()
+        self._current_menu = menu
 
     # ---- Empty state builder ----
 

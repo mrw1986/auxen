@@ -217,6 +217,7 @@ class AuxenSettings(Adw.PreferencesWindow):
         )
         self._ui_scale.set_value(100)
         self._ui_scale.set_draw_value(True)
+        self._ui_scale.set_round_digits(0)
         self._ui_scale.set_value_pos(Gtk.PositionType.RIGHT)
         self._ui_scale.set_hexpand(True)
         self._ui_scale.set_size_request(200, -1)
@@ -827,7 +828,14 @@ class AuxenSettings(Adw.PreferencesWindow):
         """Persist and apply the UI scale factor."""
         if getattr(self, "_loading_settings", False):
             return
-        value = int(scale.get_value())
+        raw = scale.get_value()
+        # Snap to nearest multiple of 5
+        value = int(round(raw / 5.0) * 5)
+        value = max(80, min(150, value))
+        # Update slider to snapped value if different
+        if int(raw) != value:
+            scale.set_value(value)
+            return  # The set_value will re-trigger this handler
         if self._db is not None:
             try:
                 self._db.set_setting("ui_scale", str(value))

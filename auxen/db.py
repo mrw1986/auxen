@@ -1252,7 +1252,10 @@ class Database:
             cur = self._conn.execute(
                 """
                 SELECT t.* FROM tracks t
-                WHERE t.id NOT IN (SELECT DISTINCT track_id FROM play_history)
+                WHERE t.play_count = 0
+                  AND t.id NOT IN (
+                      SELECT DISTINCT track_id FROM play_history
+                  )
                 ORDER BY t.added_at DESC
                 LIMIT ?
                 """,

@@ -958,7 +958,7 @@ class TidalProvider(ContentProvider):
                         "title": getattr(v, "name", "") or "",
                         "duration": getattr(v, "duration", 0) or 0,
                         "thumbnail_url": thumb_url,
-                        "video_url": f"https://tidal.com/browse/video/{v.id}",
+                        "video_url": f"https://listen.tidal.com/video/{v.id}",
                         "video_id": str(v.id) if v.id else None,
                     })
             except Exception:
@@ -1283,7 +1283,7 @@ class TidalProvider(ContentProvider):
                             f"{v.cover.replace('-', '/')}/320x180.jpg"
                         )
                 duration = getattr(v, "duration", 0) or 0
-                video_url = f"https://tidal.com/browse/video/{v.id}"
+                video_url = f"https://listen.tidal.com/video/{v.id}"
                 result.append({
                     "title": getattr(v, "name", "") or "",
                     "duration": duration,
@@ -1532,7 +1532,16 @@ class TidalProvider(ContentProvider):
             return False
         try:
             with self._session_lock:
-                self._session.user.favorites.add_mix(mix_id)
+                fav = self._session.user.favorites
+                if hasattr(fav, "add_mix"):
+                    fav.add_mix(mix_id)
+                else:
+                    # Fallback: try the request API directly
+                    self._session.request.request(
+                        "PUT",
+                        f"users/{self._session.user.id}/favorites/mixes",
+                        data={"mixIds": mix_id},
+                    )
             return True
         except Exception:
             logger.debug(
@@ -1546,7 +1555,15 @@ class TidalProvider(ContentProvider):
             return False
         try:
             with self._session_lock:
-                self._session.user.favorites.remove_mix(mix_id)
+                fav = self._session.user.favorites
+                if hasattr(fav, "remove_mix"):
+                    fav.remove_mix(mix_id)
+                else:
+                    # Fallback: try the request API directly
+                    self._session.request.request(
+                        "DELETE",
+                        f"users/{self._session.user.id}/favorites/mixes/{mix_id}",
+                    )
             return True
         except Exception:
             logger.debug(
@@ -1848,7 +1865,13 @@ class TidalProvider(ContentProvider):
             items = getattr(category, "items", None)
             if not items:
                 continue
-            title = getattr(category, "title", None) or ""
+            raw_title = getattr(category, "title", None)
+            if callable(raw_title):
+                try:
+                    raw_title = raw_title()
+                except Exception:
+                    raw_title = ""
+            title = str(raw_title) if raw_title else ""
             # Determine section type from the first item
             first = items[0]
             if isinstance(first, tidalapi.Album):
@@ -1935,14 +1958,45 @@ class TidalProvider(ContentProvider):
                 for item in items:
                     title = getattr(item, "title", None) or ""
                     api_path = getattr(item, "api_path", None) or ""
-                    image_id = getattr(item, "image_id", None) or ""
                     image_url = None
+
+                    # Strategy 1: image_id attribute
+                    image_id = getattr(item, "image_id", None) or ""
                     if image_id:
                         image_url = (
                             "https://resources.tidal.com/images/"
                             f"{image_id.replace('-', '/')}"
                             "/640x640.jpg"
                         )
+
+                    # Strategy 2: callable image() method
+                    if not image_url:
+                        try:
+                            img = item.image(640)
+                            if img:
+                                image_url = img
+                        except Exception:
+                            pass
+
+                    # Strategy 3: square_image attribute
+                    if not image_url:
+                        sq = getattr(item, "square_image", None)
+                        if sq:
+                            image_url = (
+                                "https://resources.tidal.com/images/"
+                                f"{sq.replace('-', '/')}"
+                                "/640x640.jpg"
+                            )
+
+                    # Strategy 4: picture attribute
+                    if not image_url:
+                        pic = getattr(item, "picture", None)
+                        if pic:
+                            image_url = (
+                                "https://resources.tidal.com/images/"
+                                f"{pic.replace('-', '/')}"
+                                "/640x640.jpg"
+                            )
                     moods.append({
                         "title": title,
                         "api_path": api_path,

@@ -426,6 +426,9 @@ class AuxenWindow(Adw.ApplicationWindow):
         self._artist_detail.set_album_context_callbacks(
             album_context_callbacks, self._get_playlists
         )
+        self._search_view.set_album_context_callbacks(
+            album_context_callbacks, self._get_playlists
+        )
 
         # Wire artist context menu callbacks for library/collection artist rows
         artist_context_callbacks = {
@@ -2711,9 +2714,18 @@ class AuxenWindow(Adw.ApplicationWindow):
             )
 
     def _on_context_add_album_to_favorites(
-        self, album_name: str, artist: str
+        self, album_name: str, artist: str, tidal_id: str | None = None
     ) -> None:
-        """Add all tracks from an album to favorites."""
+        """Add all tracks from an album to favorites.
+
+        If *tidal_id* is provided, also saves the album to the Tidal
+        collection via ``_on_context_save_album_to_collection``.
+        """
+        # Save to Tidal collection if a tidal_id was supplied
+        if tidal_id:
+            self._on_context_save_album_to_collection(
+                album_name, artist, tidal_id
+            )
         tracks = self._get_album_tracks(album_name, artist)
         if tracks and self._app_ref and self._app_ref.db is not None:
             try:

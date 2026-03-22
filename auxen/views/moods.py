@@ -934,7 +934,7 @@ class MoodsView(Gtk.ScrolledWindow):
 
     def _on_back_clicked(self, _btn: Gtk.Button) -> None:
         """Handle back button -- return to moods grid."""
-        self.refresh()
+        self._show_grid_state()
 
     def _on_detail_playlist_clicked(
         self,

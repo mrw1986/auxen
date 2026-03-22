@@ -1254,21 +1254,31 @@ class CollectionView(Gtk.Box):
     def highlight_playing_track(self, track) -> None:
         """Highlight the currently playing track in the favorites list/grid."""
         playing_sid = getattr(track, "source_id", None) if track else None
-        playing_key = (
-            (getattr(track, "title", ""), getattr(track, "artist", ""))
-            if track
-            else None
-        )
+        playing_title = getattr(track, "title", "") if track else ""
+        playing_artist = getattr(track, "artist", "") if track else ""
+
+        def _get_field(obj, field, default=""):
+            """Get a field from an object or dict."""
+            if isinstance(obj, dict):
+                return obj.get(field, default)
+            return getattr(obj, field, default)
 
         def _match_track(td):
             if td is None or track is None:
                 return False
-            td_sid = getattr(td, "source_id", None)
-            if playing_sid and td_sid and playing_sid == td_sid:
+            # Primary: match by source_id (most reliable)
+            td_sid = _get_field(td, "source_id", None)
+            if playing_sid and td_sid and str(playing_sid) == str(td_sid):
                 return True
-            if playing_key and (
-                getattr(td, "title", ""), getattr(td, "artist", "")
-            ) == playing_key:
+            # Fallback: match by (title, artist) tuple — both must be non-empty
+            td_title = _get_field(td, "title", "")
+            td_artist = _get_field(td, "artist", "")
+            if (
+                playing_title and playing_artist
+                and td_title and td_artist
+                and td_title == playing_title
+                and td_artist == playing_artist
+            ):
                 return True
             return False
 
@@ -1276,8 +1286,8 @@ class CollectionView(Gtk.Box):
         if hasattr(self, "_favorites_list"):
             row = self._favorites_list.get_first_child()
             while row is not None:
-                td = getattr(row, "_track_data", None) or getattr(
-                    row, "_track_obj", None
+                td = getattr(row, "_track_obj", None) or getattr(
+                    row, "_track_data", None
                 )
                 if _match_track(td):
                     row.add_css_class("now-playing-row")
@@ -1541,7 +1551,7 @@ class CollectionView(Gtk.Box):
             "on_add_album_to_queue": lambda a=album_name, ar=artist: cbs.get("on_add_album_to_queue", _noop)(a, ar),
             "on_add_to_playlist": lambda pid, a=album_name, ar=artist: cbs.get("on_add_to_playlist", _noop)(a, ar, pid),
             "on_new_playlist": lambda a=album_name, ar=artist: cbs.get("on_new_playlist", _noop)(a, ar),
-            "on_add_to_favorites": lambda a=album_name, ar=artist: cbs.get("on_add_to_favorites", _noop)(a, ar),
+            "on_add_to_favorites": lambda a=album_name, ar=artist, tid=tidal_id: cbs.get("on_add_to_favorites", _noop)(a, ar, tid),
             "on_remove_from_collection": lambda a=album_name, ar=artist, tid=tidal_id: cbs.get("on_remove_from_collection", _noop)(a, ar, tid),
             "on_go_to_artist": lambda a=album_name, ar=artist: cbs.get("on_go_to_artist", _noop)(a, ar),
             "on_shuffle_album": lambda a=album_name, ar=artist: cbs.get("on_shuffle_album", _noop)(a, ar),
@@ -1557,10 +1567,19 @@ class CollectionView(Gtk.Box):
         # Determine if album is saved in collection
         is_saved = False
         if tidal_id:
+            # Check cached tidal albums first
             is_saved = any(
-                a.get("tidal_id") == tidal_id
+                str(a.get("tidal_id", "")) == str(tidal_id)
                 for a in self._cached_tidal_albums
             )
+            # Fallback: if we're on the Albums tab showing merged albums,
+            # a tidal-sourced album with a tidal_id is by definition saved
+            if not is_saved:
+                is_saved = any(
+                    str(a.get("tidal_id", "")) == str(tidal_id)
+                    for a in self._merged_albums
+                    if a.get("source") == "tidal"
+                )
 
         self._current_menu = AlbumContextMenu(
             album_data=album_data,

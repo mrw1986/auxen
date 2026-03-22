@@ -500,23 +500,32 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         if not hasattr(self, "_track_list"):
             return
         playing_sid = getattr(track, "source_id", None) if track else None
-        playing_key = (
-            (getattr(track, "title", ""), getattr(track, "artist", ""))
-            if track
-            else None
-        )
+        playing_title = getattr(track, "title", "") if track else ""
+        playing_artist = getattr(track, "artist", "") if track else ""
+
+        def _get_field(obj, field, default=""):
+            if isinstance(obj, dict):
+                return obj.get(field, default)
+            return getattr(obj, field, default)
+
         row = self._track_list.get_first_child()
         while row is not None:
             td = getattr(row, "_track_data", None)
             match = False
             if td is not None and track is not None:
-                td_sid = getattr(td, "source_id", None)
-                if playing_sid and td_sid and playing_sid == td_sid:
+                td_sid = _get_field(td, "source_id", None)
+                if playing_sid and td_sid and str(playing_sid) == str(td_sid):
                     match = True
-                elif playing_key and (
-                    getattr(td, "title", ""), getattr(td, "artist", "")
-                ) == playing_key:
-                    match = True
+                else:
+                    td_title = _get_field(td, "title", "")
+                    td_artist = _get_field(td, "artist", "")
+                    if (
+                        playing_title and playing_artist
+                        and td_title and td_artist
+                        and td_title == playing_title
+                        and td_artist == playing_artist
+                    ):
+                        match = True
             if match:
                 row.add_css_class("now-playing-row")
             else:
@@ -799,12 +808,26 @@ class ArtistDetailView(Gtk.ScrolledWindow):
         text_box.set_hexpand(True)
         text_box.set_valign(Gtk.Align.CENTER)
 
+        # Title row: title + optional explicit badge
+        title_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=6,
+        )
         title_label = Gtk.Label(label=track.title)
         title_label.set_xalign(0)
         title_label.set_ellipsize(Pango.EllipsizeMode.END)
         title_label.set_max_width_chars(40)
+        title_label.set_hexpand(True)
         title_label.add_css_class("body")
-        text_box.append(title_label)
+        title_row.append(title_label)
+
+        if getattr(track, "explicit", False):
+            explicit_label = Gtk.Label(label="E")
+            explicit_label.add_css_class("explicit-badge")
+            explicit_label.set_valign(Gtk.Align.CENTER)
+            title_row.append(explicit_label)
+
+        text_box.append(title_row)
 
         if track.album:
             album_label = Gtk.Label(label=track.album)
