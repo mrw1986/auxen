@@ -1,0 +1,82 @@
+package io.github.auxen.dsp
+
+import android.content.Context
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import androidx.media3.common.util.UnstableApi
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
+
+private val Context.eqDataStore by preferencesDataStore(name = "equalizer")
+
+/**
+ * Single source of truth for EQ settings, shared by the UI and the playback
+ * service (both run in the app process). Persists state as JSON in
+ * DataStore, mirroring the desktop app's to_dict/from_dict persistence.
+ */
+@UnstableApi
+object EqController {
+    private val KEY_STATE = stringPreferencesKey("eq_state")
+    private val json = Json { ignoreUnknownKeys = true }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val _state = MutableStateFlow(EqState())
+    val state: StateFlow<EqState> = _state
+
+    private var processor: ParametricEqProcessor? = null
+    private var appContext: Context? = null
+
+    /** Called once from the playback service when it creates its audio sink. */
+    fun attachProcessor(p: ParametricEqProcessor) {
+        processor = p
+        p.updateState(_state.value)
+    }
+
+    /** Load persisted state; safe to call more than once. */
+    fun initialize(context: Context) {
+        if (appContext != null) return
+        appContext = context.applicationContext
+        scope.launch {
+            val stored = context.applicationContext.eqDataStore.data.first()[KEY_STATE] ?: return@launch
+            runCatching { json.decodeFromString<EqState>(stored) }
+                .onSuccess { setState(it, persist = false) }
+        }
+    }
+
+    fun setState(newState: EqState, persist: Boolean = true) {
+        _state.value = newState
+        processor?.updateState(newState)
+        if (persist) {
+            val ctx = appContext ?: return
+            scope.launch {
+                ctx.eqDataStore.edit { it[KEY_STATE] = json.encodeToString(EqState.serializer(), newState) }
+            }
+        }
+    }
+
+    fun setEnabled(enabled: Boolean) = setState(_state.value.copy(enabled = enabled))
+
+    /** Set one graphic-EQ band (0..9); rebuilds the filter chain from bands. */
+    fun setBand(index: Int, gainDb: Double) {
+        val bands = (_state.value.bands ?: List(EqState.NUM_BANDS) { 0.0 }).toMutableList()
+        bands[index] = gainDb.coerceIn(EqState.MIN_GAIN_DB, EqState.MAX_GAIN_DB)
+        setState(EqState.fromBands(bands, enabled = _state.value.enabled, presetName = null))
+    }
+
+    fun applyPreset(name: String) {
+        val gains = EqState.PRESETS[name] ?: return
+        setState(EqState.fromBands(gains, enabled = true, presetName = name))
+    }
+
+    /** Import an AutoEq ParametricEq profile (the Wavelet-style feature). */
+    fun importAutoEq(text: String, profileName: String?): Result<EqState> =
+        runCatching { AutoEqParser.parse(text, profileName) }.onSuccess { setState(it) }
+}
