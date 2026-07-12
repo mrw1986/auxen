@@ -62,53 +62,19 @@ fun TrackActionSheet(
     var newName by remember { mutableStateOf("") }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(modifier = Modifier.padding(bottom = 24.dp)) {
-            Text(
-                track.title,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
-            )
-            Text(
-                track.artist,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 24.dp),
-            )
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-            if (!showPlaylists) {
-                SheetAction("Play", { Icon(Icons.Filled.PlayArrow, null) }) { onPlay(); onDismiss() }
-                SheetAction("Play next", { Icon(Icons.Filled.SkipNext, null) }) { onPlayNext(); onDismiss() }
-                SheetAction("Add to queue", { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) }) { onEnqueue(); onDismiss() }
-                SheetAction(
-                    if (isFavorite) "Remove from favorites" else "Add to favorites",
-                    {
-                        Icon(
-                            if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                            null,
-                            tint = if (isFavorite) AuxenColors.FavoriteRed else MaterialTheme.colorScheme.onSurface,
-                        )
-                    },
-                ) { onToggleFavorite(); onDismiss() }
-                SheetAction("Add to playlist", { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) }) { showPlaylists = true }
-            } else {
-                SheetAction("New playlist…", { Icon(Icons.Filled.Add, null) }) { showNameDialog = true }
-                playlists.forEach { playlist ->
-                    SheetAction(
-                        playlist.name,
-                        {
-                            Box(
-                                Modifier.size(12.dp).background(
-                                    runCatching { Color(android.graphics.Color.parseColor(playlist.color ?: "#d4a039")) }
-                                        .getOrDefault(AuxenColors.AmberPrimary),
-                                    CircleShape,
-                                ),
-                            )
-                        },
-                    ) { onAddToPlaylist(playlist.id); onDismiss() }
-                }
-            }
-        }
+        TrackActionSheetContent(
+            track = track,
+            isFavorite = isFavorite,
+            playlists = playlists,
+            showPlaylists = showPlaylists,
+            onPlay = { onPlay(); onDismiss() },
+            onPlayNext = { onPlayNext(); onDismiss() },
+            onEnqueue = { onEnqueue(); onDismiss() },
+            onToggleFavorite = { onToggleFavorite(); onDismiss() },
+            onAddToPlaylist = { id -> onAddToPlaylist(id); onDismiss() },
+            onShowPlaylists = { showPlaylists = true },
+            onNewPlaylist = { showNameDialog = true },
+        )
     }
 
     if (showNameDialog) {
@@ -131,6 +97,81 @@ fun TrackActionSheet(
             },
             dismissButton = { TextButton(onClick = { showNameDialog = false }) { Text("Cancel") } },
         )
+    }
+}
+
+/**
+ * Stateless body of [TrackActionSheet] — the sheet's scrollable action list
+ * (track header + either the root actions or the playlist-picker page).
+ *
+ * Extracted from [TrackActionSheet] so screenshot goldens can render it
+ * directly: the Material 3 [ModalBottomSheet] wrapper hosts its content in a
+ * *separate* window whose animated entrance never settles under Robolectric,
+ * so `onRoot().captureRoboImage(...)` can't capture it deterministically. This
+ * plain [Column] renders in the main composition and captures reproducibly.
+ * [TrackActionSheet] threads its dismiss/toggle callbacks into the [onPlay]…
+ * lambdas here, so behavior is identical to the inlined version.
+ */
+@Composable
+internal fun TrackActionSheetContent(
+    track: Track,
+    isFavorite: Boolean,
+    playlists: List<PlaylistEntity>,
+    showPlaylists: Boolean,
+    onPlay: () -> Unit,
+    onPlayNext: () -> Unit,
+    onEnqueue: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onAddToPlaylist: (Long) -> Unit,
+    onShowPlaylists: () -> Unit,
+    onNewPlaylist: () -> Unit,
+) {
+    Column(modifier = Modifier.padding(bottom = 24.dp)) {
+        Text(
+            track.title,
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+        )
+        Text(
+            track.artist,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 24.dp),
+        )
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+        if (!showPlaylists) {
+            SheetAction("Play", { Icon(Icons.Filled.PlayArrow, null) }) { onPlay() }
+            SheetAction("Play next", { Icon(Icons.Filled.SkipNext, null) }) { onPlayNext() }
+            SheetAction("Add to queue", { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) }) { onEnqueue() }
+            SheetAction(
+                if (isFavorite) "Remove from favorites" else "Add to favorites",
+                {
+                    Icon(
+                        if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                        null,
+                        tint = if (isFavorite) AuxenColors.FavoriteRed else MaterialTheme.colorScheme.onSurface,
+                    )
+                },
+            ) { onToggleFavorite() }
+            SheetAction("Add to playlist", { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) }) { onShowPlaylists() }
+        } else {
+            SheetAction("New playlist…", { Icon(Icons.Filled.Add, null) }) { onNewPlaylist() }
+            playlists.forEach { playlist ->
+                SheetAction(
+                    playlist.name,
+                    {
+                        Box(
+                            Modifier.size(12.dp).background(
+                                runCatching { Color(android.graphics.Color.parseColor(playlist.color ?: "#d4a039")) }
+                                    .getOrDefault(AuxenColors.AmberPrimary),
+                                CircleShape,
+                            ),
+                        )
+                    },
+                ) { onAddToPlaylist(playlist.id) }
+            }
+        }
     }
 }
 
