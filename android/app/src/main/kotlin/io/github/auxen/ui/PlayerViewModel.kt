@@ -253,8 +253,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             val tidal = runCatching { Graph.tidal.search(query) }.getOrDefault(emptyList())
             val priority = runCatching { Graph.library.sourcePriority() }
                 .getOrDefault(SourcePriority.PREFER_QUALITY)
-            searchResults.value = DuplicateResolver.merge(local, tidal, priority)
-            searchInFlight = false
+            val merged = DuplicateResolver.merge(local, tidal, priority)
+            // Latest-query-wins: drop stale responses that resolve after the
+            // field changed or was cleared.
+            if (query == searchQuery.value) {
+                searchResults.value = merged
+                searchInFlight = false
+            }
         }
     }
 
@@ -264,6 +269,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         searchDebounceJob?.cancel()
         if (query.isBlank()) {
             searchResults.value = emptyList()
+            searchInFlight = false
             return
         }
         searchDebounceJob = viewModelScope.launch {
