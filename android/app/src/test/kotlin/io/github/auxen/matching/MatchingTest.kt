@@ -68,6 +68,12 @@ class FuzzRatioTest {
         assertEquals(100, fuzzRatio("", ""))
         assertEquals(0, fuzzRatio("abc", ""))
     }
+
+    @Test
+    fun tiesRoundHalfToEvenLikePython() {
+        // LCS=1, lensum=16 → raw 12.5; Python round() gives 12, not 13.
+        assertEquals(12, fuzzRatio("abcdefgh", "zyxwvuta"))
+    }
 }
 
 class TracksMatchTest {
