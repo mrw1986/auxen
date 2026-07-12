@@ -51,6 +51,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import io.github.auxen.Graph
@@ -418,7 +419,7 @@ private fun ProfileRow(profile: AutoEqProfile, onClick: () -> Unit) {
 @Composable
 private fun BandSlider(label: String, gainDb: Double, onChange: (Double) -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("%.0f".format(gainDb), style = MaterialTheme.typography.labelSmall)
+        Text("%.0f".format(gainDb), style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
         VerticalSlider(
             value = gainDb.toFloat(),
             onChange = { onChange(it.toDouble()) },

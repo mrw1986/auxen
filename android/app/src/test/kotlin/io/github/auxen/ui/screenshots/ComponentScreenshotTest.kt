@@ -149,11 +149,23 @@ import org.robolectric.annotation.GraphicsMode
  * `NowPlayingScreen` golden to catch its title's Fraunces-to-DM-Sans swap.
  * `typography-details-*` renders, in one column: the NowPlayingScreen title
  * style verbatim (`titleMedium.copy(fontSize = 22.sp)`, DM Sans, sans-serif
- * — was Fraunces `headlineSmall`), Fraunces SemiBold next to Fraunces Bold
- * (must now read visibly heavier, not identical — proves Bold no longer
- * silently snaps to SemiBold's wght=600), and a monospace duration string
- * (proves DM Sans's lack of a `tnum` feature is worked around by the font
- * swap, not just documented).
+ * — was Fraunces `headlineSmall`), Fraunces SemiBold next to Fraunces Bold,
+ * and a monospace duration string (proves DM Sans's lack of a `tnum`
+ * feature is worked around by the font swap, not just documented).
+ *
+ * NOT proof that `Fraunces` Bold renders heavier than SemiBold: this golden
+ * is only reliable to the extent Robolectric's Typeface cache for the
+ * `fraunces.ttf` resource is clean when these two tests happen to run. Under
+ * the full `testDebugUnitTest` suite (one shared JVM, no fork-per-class),
+ * an earlier test's variable-font weight request can leave a stale cached
+ * instance that a later, unrelated `FontWeight` request incorrectly reuses
+ * — confirmed via `VariableFontWeightProbeTest` (`ui/theme/`): the exact
+ * same composable, run in isolation, correctly shows Bold heavier; run as
+ * part of the full suite, it does not, with the "wrong" measurement
+ * matching an unrelated test's cached value bit-for-bit. The `Fraunces`
+ * Bold registration itself is correct (see that test's class KDoc for the
+ * full investigation) — this golden just cannot reliably prove it under
+ * Robolectric's shared-JVM execution model.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @RunWith(RobolectricTestRunner::class)
