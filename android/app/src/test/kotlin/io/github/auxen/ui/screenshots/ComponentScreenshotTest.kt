@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -99,11 +100,14 @@ import org.robolectric.annotation.GraphicsMode
  *
  * ## Selection-states surface — the theme-parity fix's own regression pin
  * The `selection-states-*` goldens capture a `NavigationBar`, a selected +
- * unselected `FilterChip` pair, and a `SingleChoiceSegmentedButtonRow` in one
- * column — the exact three surfaces the theme-parity color-scheme fix
- * targeted (Material 3's baseline `secondaryContainer` is a purple/lavender
- * absent from the Auxen palette). Every selected state here must read amber/
- * warm; a regression back to Material's baseline purple should be visible at
+ * unselected `FilterChip` pair, a `SingleChoiceSegmentedButtonRow`, and a
+ * plain default-colored `Button` in one column — the surfaces the theme-
+ * parity color-scheme fix targeted (Material 3's baseline `secondaryContainer`
+ * is a purple/lavender absent from the Auxen palette) plus `onPrimary`, which
+ * every default `Button` consumes implicitly (see e.g. `Screens.kt`'s Tidal
+ * login buttons, `EqualizerScreen.kt`'s import button). Every selected state
+ * and the button's content color here must read amber/warm; a regression
+ * back to Material's baseline purple or white-on-amber should be visible at
  * a glance and fail the pixel diff.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -385,6 +389,11 @@ class ComponentScreenshotTest {
                         shape = SegmentedButtonDefaults.itemShape(index = index, count = 2),
                     ) { Text(label) }
                 }
+            }
+            // Plain default-colored Button — pins onPrimary content color (see
+            // Screens.kt's Tidal login buttons, EqualizerScreen.kt's import button).
+            Button(onClick = {}, modifier = Modifier.padding(16.dp)) {
+                Text("Log in to Tidal")
             }
         }
     }

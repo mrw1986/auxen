@@ -58,6 +58,10 @@ private val AuxenLightColors = lightColorScheme(
     onError = Color.White,
     outline = Color(0x1F000000),
     outlineVariant = Color(0x14000000),
+    // Reuses primaryContainer/onPrimaryContainer rather than compositing the
+    // CSS nav-selection rgba literally: amber text (#D4A039) on pale cream
+    // reads poorly, so light mode keeps the app's established dark-brown-on-
+    // cream amber-container convention instead.
     secondaryContainer = Color(0xFFF5E6C4),
     onSecondaryContainer = Color(0xFF3D2E00),
     errorContainer = Color(0xFFF8E3DC),   // rgba(231,76,60,0.12) over #FAF8F2
