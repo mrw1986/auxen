@@ -106,6 +106,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             // Seed state so a screen opened before any event shows the real values.
             shuffleEnabled = c.shuffleModeEnabled
             repeatMode = c.repeatMode
+            isPlaying = c.isPlaying
             // Media3 doesn't replay metadata to new listeners — seed from the
             // restored queue so the mini bar appears without a player event.
             if (c.mediaItemCount > 0) {

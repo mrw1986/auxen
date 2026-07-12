@@ -92,10 +92,10 @@ private fun MainScreen(viewModel: PlayerViewModel) {
                 CenterAlignedTopAppBar(
                     title = { Text("Auxen", style = MaterialTheme.typography.headlineSmall) },
                     actions = {
-                        IconButton(onClick = { navController.navigate("equalizer") }) {
+                        IconButton(onClick = { navController.navigate("equalizer") { launchSingleTop = true } }) {
                             Icon(Icons.Filled.Equalizer, contentDescription = "Equalizer")
                         }
-                        IconButton(onClick = { navController.navigate("account") }) {
+                        IconButton(onClick = { navController.navigate("account") { launchSingleTop = true } }) {
                             Icon(Icons.Filled.Person, contentDescription = "Account")
                         }
                     },
