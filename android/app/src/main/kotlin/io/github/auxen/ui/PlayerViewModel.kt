@@ -14,6 +14,8 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
 import io.github.auxen.Graph
+import io.github.auxen.matching.DuplicateResolver
+import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
 import io.github.auxen.playback.PlaybackService
 import kotlinx.coroutines.Job
@@ -79,14 +81,16 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Search local library and Tidal, local results first — like the desktop app. */
+    /** Search local library and Tidal, collapsing duplicates — like the desktop app. */
     fun search(query: String) {
         if (query.isBlank()) return
         viewModelScope.launch {
             searchInFlight = true
             val local = runCatching { Graph.local.search(query) }.getOrDefault(emptyList())
             val tidal = runCatching { Graph.tidal.search(query) }.getOrDefault(emptyList())
-            searchResults.value = local + tidal
+            val priority = runCatching { Graph.library.sourcePriority() }
+                .getOrDefault(SourcePriority.PREFER_QUALITY)
+            searchResults.value = DuplicateResolver.merge(local, tidal, priority)
             searchInFlight = false
         }
     }
