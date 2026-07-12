@@ -1,6 +1,6 @@
 # Auxen for Android — native app plan
 
-**Status:** Milestone 1 scaffolded in `android/` (this commit).
+**Status:** Milestones 1–2 implemented in `android/`.
 **Goal:** A native Kotlin Android player with first-class media sessions and
 built-in Wavelet-style headphone correction, sharing Auxen's core concepts
 (unified local + Tidal library, quality-aware duplicate handling) with the
@@ -69,22 +69,27 @@ uses via `auxen.tidalClientId` / `auxen.tidalClientSecret` Gradle properties.
 ### Known limitations of milestone 1
 
 - Tidal stream URLs are resolved at enqueue time and are short-lived; long
-  queues need re-resolution on error (`ResolvingDataSource`, milestone 2).
+  queues need re-resolution on error (`ResolvingDataSource`, milestone 2) —
+  **fixed in milestone 2** (ResolvingDataSource / Room).
 - EQ settings flow through an in-process singleton (`EqController`); should
   become MediaSession custom commands if playback ever moves out of process.
 - Local library metadata is MediaStore-only (no bit depth / sample rate);
   needs a `MediaMetadataRetriever` enrichment pass for FLAC quality display.
-- No Room database yet — favorites/playlists/play counts (db.py) not ported.
+- No Room database yet — favorites/playlists/play counts (db.py) not ported —
+  **fixed in milestone 2** (ResolvingDataSource / Room).
 
 ## Roadmap
 
 | Milestone | Scope |
 | --- | --- |
 | **1 — this commit** | Project scaffold, playback service + media session, float EQ engine + AutoEq import, Tidal device login + search + lossless/Hi-Res streaming, local library browse, minimal Compose UI |
-| 2 | Room DB (favorites, playlists, play counts), local↔Tidal matching (port `matching.py`), quality-aware duplicate resolution, queue persistence, `ResolvingDataSource` for URL refresh |
+| **2 — done** | Room DB (favorites, playlists, play counts), local↔Tidal matching (port `matching.py`), quality-aware duplicate resolution, queue persistence, `ResolvingDataSource` for URL refresh |
 | 3 | Album/artist/playlist views, Tidal home/mixes/explore, lyrics panel, last.fm scrobbling (ports of the corresponding desktop modules) |
 | 4 | Android Auto, Chromecast/output routing, gapless + crossfade (crossfade needs a second player instance), sleep timer, widgets |
 | 5 | Per-device EQ profiles (auto-switch on Bluetooth device connect — the Wavelet UX), EQ curve visualisation, downloads/offline for local sync |
+
+Playlist UI is intentionally deferred to milestone 3; the DB layer and DAOs
+(favorites, playlists, play counts) landed in milestone 2.
 
 ## Building
 
