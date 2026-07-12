@@ -80,6 +80,8 @@ import org.robolectric.annotation.GraphicsMode
  * equalizer/account action icons, rather than standalone. This pins the
  * actual on-screen treatment (sizing/centering next to the actions), which
  * the standalone `brand-block-*` goldens above don't exercise.
+ * `top-bar-brand-suppressed-*` pins the account-route variant, where
+ * `MainActivity` renders an empty title lambda (icon-only bar) instead.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @RunWith(RobolectricTestRunner::class)
@@ -274,10 +276,20 @@ class ComponentScreenshotTest {
     @Test
     fun topBarBrand_dark() = captureComponent("top-bar-brand-dark", darkTheme = true) { TopBarBrandPreview() }
 
+    @Test
+    fun topBarBrandSuppressed_light() = captureComponent("top-bar-brand-suppressed-light", darkTheme = false) {
+        TopBarBrandPreview(showTitle = false)
+    }
+
+    @Test
+    fun topBarBrandSuppressed_dark() = captureComponent("top-bar-brand-suppressed-dark", darkTheme = true) {
+        TopBarBrandPreview(showTitle = false)
+    }
+
     @Composable
-    private fun TopBarBrandPreview() {
+    private fun TopBarBrandPreview(showTitle: Boolean = true) {
         CenterAlignedTopAppBar(
-            title = { BrandBlock(compact = true) },
+            title = { if (showTitle) BrandBlock(compact = true) },
             actions = {
                 IconButton(onClick = {}) {
                     Icon(Icons.Filled.Equalizer, contentDescription = "Equalizer")
