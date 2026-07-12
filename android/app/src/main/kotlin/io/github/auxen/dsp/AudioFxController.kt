@@ -60,7 +60,18 @@ object AudioFxController {
         private val default: T,
     ) {
         val flow = MutableStateFlow(default)
-        private val listeners = mutableListOf<(T) -> Unit>()
+
+        /**
+         * Copy-on-write so an `attachX` on one thread (UI) can never race a
+         * concurrent [set]'s iteration on another (playback service / audio
+         * config) into a ConcurrentModificationException. Reads dominate —
+         * attaches are rare, one-time calls — so COW is the right trade-off.
+         */
+        private val listeners = java.util.concurrent.CopyOnWriteArrayList<(T) -> Unit>()
+
+        /** The in-flight DataStore write for THIS effect's key, if any. */
+        @Volatile
+        var persistJob: Job? = null
 
         fun attach(apply: (T) -> Unit) {
             listeners += apply
@@ -79,6 +90,8 @@ object AudioFxController {
         }
 
         fun reset() {
+            persistJob?.cancel()
+            persistJob = null
             listeners.clear()
             flow.value = default
         }
@@ -99,9 +112,6 @@ object AudioFxController {
     @Volatile
     private var initJob: Job? = null
 
-    @Volatile
-    private var persistJob: Job? = null
-
     fun attachBassBoost(apply: (BassBoostState) -> Unit) = bassBoost.attach(apply)
     fun attachBalance(apply: (BalanceState) -> Unit) = balance.attach(apply)
     fun attachLimiter(apply: (LimiterState) -> Unit) = limiter.attach(apply)
@@ -115,7 +125,7 @@ object AudioFxController {
     private fun <T> update(slot: FxSlot<T>, state: T) {
         slot.set(state)
         val ctx = appContext ?: return
-        persistJob = scope.launch {
+        slot.persistJob = scope.launch {
             ctx.audioFxDataStore.edit { it[slot.key] = json.encodeToString(slot.serializer, state) }
         }
     }
@@ -143,9 +153,16 @@ object AudioFxController {
         initJob?.join()
     }
 
-    /** Suspends until the most recent `updateX` persist has been written. */
+    /**
+     * Suspends until every effect's most recent `updateX` persist has been
+     * written. Each slot tracks its own in-flight write, so back-to-back
+     * updates of two different effects both land before this returns.
+     */
     internal suspend fun awaitPersisted() {
-        persistJob?.join()
+        bassBoost.persistJob?.join()
+        balance.persistJob?.join()
+        limiter.persistJob?.join()
+        replayGain.persistJob?.join()
     }
 
     /**
@@ -156,9 +173,7 @@ object AudioFxController {
      */
     internal fun resetForTest() {
         initJob?.cancel()
-        persistJob?.cancel()
         initJob = null
-        persistJob = null
         appContext = null
         bassBoost.reset()
         balance.reset()
