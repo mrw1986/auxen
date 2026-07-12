@@ -99,6 +99,19 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
         results = if (loaded && query.isNotBlank()) repo.search(query, limit = 50) else emptyList()
     }
 
+    // Switching to graphic mode (touching a band or applying a preset)
+    // abandons the AutoEq correction, so the marker must go too — otherwise
+    // "Active: <name>" lingers next to the graphic preset label and, worse,
+    // restore-on-start re-applies the old profile over the user's graphic
+    // edits at next launch. autoeq_custom_text is deliberately kept: a stored
+    // custom profile stays re-importable. Guarded so slider drags (which fire
+    // per-frame) don't spam DB writes.
+    fun clearActiveProfileMarker() {
+        if (activeProfile == null) return
+        activeProfile = null
+        scope.launch { Graph.library.setSetting(KEY_AUTOEQ_PROFILE, "") }
+    }
+
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -154,6 +167,7 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
                             text = { Text(name) },
                             onClick = {
                                 EqController.applyPreset(name)
+                                clearActiveProfileMarker()
                                 presetMenuOpen = false
                             },
                         )
@@ -174,7 +188,10 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
                 BandSlider(
                     label = EqState.BAND_LABELS[index],
                     gainDb = gain,
-                    onChange = { EqController.setBand(index, it) },
+                    onChange = {
+                        EqController.setBand(index, it)
+                        clearActiveProfileMarker()
+                    },
                 )
             }
         }
@@ -191,7 +208,12 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { clearAutoEq(scope) { activeProfile = null } }) {
+                TextButton(
+                    onClick = {
+                        EqController.applyPreset("Flat")
+                        clearActiveProfileMarker()
+                    },
+                ) {
                     Text("Clear")
                 }
             }
@@ -265,6 +287,8 @@ private fun String?.toActiveProfileName(): String? = when {
 /**
  * Apply a bundled AutoEq profile: read its ParametricEq body (IO), feed it
  * through [EqController.importAutoEq], and persist the name for restore-on-start.
+ * runCatching keeps a corrupt/missing zip entry (profileText throws) from
+ * crashing the composition scope — matching the import/restore paths.
  */
 @UnstableApi
 private fun applyAutoEq(
@@ -274,20 +298,14 @@ private fun applyAutoEq(
     onApplied: (String) -> Unit,
 ) {
     scope.launch {
-        val text = repo.profileText(profile)
-        EqController.importAutoEq(text, profile.name).onSuccess {
-            Graph.library.setSetting(KEY_AUTOEQ_PROFILE, profile.name)
-            onApplied(profile.name)
+        runCatching {
+            val text = repo.profileText(profile)
+            EqController.importAutoEq(text, profile.name).onSuccess {
+                Graph.library.setSetting(KEY_AUTOEQ_PROFILE, profile.name)
+                onApplied(profile.name)
+            }
         }
     }
-}
-
-/** Clear the active profile: reset the graphic EQ to Flat and drop the setting. */
-@UnstableApi
-private fun clearAutoEq(scope: kotlinx.coroutines.CoroutineScope, onCleared: () -> Unit) {
-    EqController.applyPreset("Flat")
-    scope.launch { Graph.library.setSetting(KEY_AUTOEQ_PROFILE, "") }
-    onCleared()
 }
 
 /** One search-result row: profile name over a `source · rig` subtitle. */
