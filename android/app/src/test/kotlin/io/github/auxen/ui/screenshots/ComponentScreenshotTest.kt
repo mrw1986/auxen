@@ -1,16 +1,29 @@
 package io.github.auxen.ui.screenshots
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Equalizer
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -31,6 +44,7 @@ import io.github.auxen.ui.components.SourceBadge
 import io.github.auxen.ui.components.TrackActionSheetContent
 import io.github.auxen.ui.testutil.TEST_DEVICE
 import io.github.auxen.ui.testutil.auxenScreenshotName
+import io.github.auxen.ui.theme.AuxenColors
 import io.github.auxen.ui.theme.AuxenTheme
 import org.junit.Rule
 import org.junit.Test
@@ -82,6 +96,15 @@ import org.robolectric.annotation.GraphicsMode
  * the standalone `brand-block-*` goldens above don't exercise.
  * `top-bar-brand-suppressed-*` pins the account-route variant, where
  * `MainActivity` renders an empty title lambda (icon-only bar) instead.
+ *
+ * ## Selection-states surface — the theme-parity fix's own regression pin
+ * The `selection-states-*` goldens capture a `NavigationBar`, a selected +
+ * unselected `FilterChip` pair, and a `SingleChoiceSegmentedButtonRow` in one
+ * column — the exact three surfaces the theme-parity color-scheme fix
+ * targeted (Material 3's baseline `secondaryContainer` is a purple/lavender
+ * absent from the Auxen palette). Every selected state here must read amber/
+ * warm; a regression back to Material's baseline purple should be visible at
+ * a glance and fail the pixel diff.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @RunWith(RobolectricTestRunner::class)
@@ -299,6 +322,71 @@ class ComponentScreenshotTest {
                 }
             },
         )
+    }
+
+    // --- Selection states: nav bar + filter chips + segmented buttons (see class KDoc) ---
+
+    @Test
+    fun selectionStates_light() = captureComponent("selection-states-light", darkTheme = false) {
+        SelectionStatesPreview()
+    }
+
+    @Test
+    fun selectionStates_dark() = captureComponent("selection-states-dark", darkTheme = true) {
+        SelectionStatesPreview()
+    }
+
+    @Composable
+    private fun SelectionStatesPreview() {
+        Column {
+            NavigationBar {
+                NavigationBarItem(
+                    selected = true,
+                    onClick = {},
+                    icon = { Icon(Icons.Filled.Home, contentDescription = null) },
+                    label = { Text("Home") },
+                )
+                NavigationBarItem(
+                    selected = false,
+                    onClick = {},
+                    icon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    label = { Text("Search") },
+                )
+                NavigationBarItem(
+                    selected = false,
+                    onClick = {},
+                    icon = { Icon(Icons.Filled.Favorite, contentDescription = null) },
+                    label = { Text("Collection") },
+                )
+            }
+            Row(
+                modifier = Modifier.padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf("All" to true, "Tidal" to false).forEach { (label, selected) ->
+                    FilterChip(
+                        selected = selected,
+                        onClick = {},
+                        label = { Text(label) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AuxenColors.AmberPrimary,
+                            selectedLabelColor = AuxenColors.BgDeep,
+                        ),
+                    )
+                }
+            }
+            SingleChoiceSegmentedButtonRow(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                listOf("Tracks", "Albums").forEachIndexed { index, label ->
+                    SegmentedButton(
+                        selected = index == 0,
+                        onClick = {},
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = 2),
+                    ) { Text(label) }
+                }
+            }
+        }
     }
 
     // --- AutoEq picker (active-profile row + fake search results) ---
