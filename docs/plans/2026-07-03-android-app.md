@@ -84,11 +84,11 @@ uses via `auxen.tidalClientId` / `auxen.tidalClientSecret` Gradle properties.
 | --- | --- |
 | **1 — this commit** | Project scaffold, playback service + media session, float EQ engine + AutoEq import, Tidal device login + search + lossless/Hi-Res streaming, local library browse, minimal Compose UI |
 | **2 — done** | Room DB (favorites, playlists, play counts), local↔Tidal matching (port `matching.py`), quality-aware duplicate resolution, queue persistence, `ResolvingDataSource` for URL refresh |
-| **3 — in progress** | Album/artist/playlist views, Tidal home/mixes/explore, lyrics panel, last.fm scrobbling (ports of the corresponding desktop modules) |
+| **3 — done (3a+3b)** | Album/artist/playlist views, Tidal home/mixes/explore, lyrics panel, last.fm scrobbling (ports of the corresponding desktop modules) |
 | 4 | Android Auto, Chromecast/output routing, gapless + crossfade (crossfade needs a second player instance), sleep timer, widgets |
 | 5 | Per-device EQ profiles (auto-switch on Bluetooth device connect — the Wavelet UX), EQ curve visualisation, downloads/offline for local sync |
 
-Milestone 3a (UI foundation: amber theme, shared components, action sheet, nav shell, mini player, Now Playing) shipped; 3b (Home/Library/Search/Collection/detail screens) follows — design source: .superpowers/sdd/m3-ui-inventory.md.
+Milestone 3 shipped in two parts: 3a (theme, components, nav shell, mini player, Now Playing) and 3b (Home, Library, Search + history, Collection, album/artist/playlist detail). Tidal discovery surfaces (Explore/Mixes/Moods), queue reorder UI, stats, and lyrics remain for milestone 4 planning.
 
 Playlist UI is intentionally deferred to milestone 3; the DB layer and DAOs
 (favorites, playlists, play counts) landed in milestone 2.
