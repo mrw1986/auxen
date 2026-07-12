@@ -132,7 +132,17 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun togglePlayPause() {
-        controller?.let { if (it.isPlaying) it.pause() else it.play() }
+        val c = controller ?: return
+        when {
+            c.isPlaying -> c.pause()
+            c.playbackState == Player.STATE_IDLE -> {
+                // Restored-from-disk queue: prepare (which lazily resolves
+                // the current stream) and then play.
+                c.prepare()
+                c.play()
+            }
+            else -> c.play()
+        }
     }
 
     fun startTidalLogin() {

@@ -10,6 +10,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
@@ -20,16 +21,25 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
+import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
 import androidx.media3.session.MediaSessionService
+import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
 import io.github.auxen.Graph
 import io.github.auxen.dsp.EqController
 import io.github.auxen.dsp.ParametricEqProcessor
+import io.github.auxen.model.Track
 import io.github.auxen.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 /**
  * Foreground media playback service.
@@ -48,6 +58,8 @@ class PlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val mainScope = MainScope()
+    private var queueSaveJob: Job? = null
 
     /** Last expiry-recovery attempt (elapsedRealtime), bounding the 4xx retry path. */
     private var lastExpiryRecoveryAtMillis = 0L
@@ -80,6 +92,15 @@ class PlaybackService : MediaSessionService() {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 val mediaId = mediaItem?.mediaId ?: return
                 serviceScope.launch { runCatching { Graph.library.recordPlay(mediaId) } }
+                scheduleQueueSave(player)
+            }
+
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) scheduleQueueSave(player)
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (!isPlaying) scheduleQueueSave(player)
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -150,7 +171,62 @@ class PlaybackService : MediaSessionService() {
 
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(sessionActivity)
+            .setCallback(AuxenSessionCallback())
             .build()
+
+        // Restore the persisted queue paused: the user decides when to hit
+        // play, and no Tidal stream resolution happens until they do.
+        mainScope.launch {
+            val saved = withContext(Dispatchers.IO) { runCatching { Graph.queueStore.load() }.getOrNull() }
+                ?: return@launch
+            if (player.mediaItemCount > 0) return@launch // a controller beat us to it
+            player.setMediaItems(saved.tracks.map(Graph::mediaItemFor), saved.index, saved.positionMs)
+            // No prepare(): stream resolution stays lazy until the user plays.
+        }
+    }
+
+    /** Snapshot the queue's Tracks from each item's metadata extras. */
+    private fun currentTracks(player: Player): List<Track> =
+        (0 until player.mediaItemCount).mapNotNull { i ->
+            player.getMediaItemAt(i).mediaMetadata.extras
+                ?.getString(Graph.TRACK_EXTRA_KEY)
+                ?.let { encoded -> runCatching { Graph.json.decodeFromString<Track>(encoded) }.getOrNull() }
+        }
+
+    /** Debounced queue persist; snapshots on the main thread, writes on IO. */
+    private fun scheduleQueueSave(player: Player) {
+        val tracks = currentTracks(player)
+        val index = player.currentMediaItemIndex
+        val positionMs = player.currentPosition.coerceAtLeast(0)
+        queueSaveJob?.cancel()
+        queueSaveJob = serviceScope.launch {
+            delay(500)
+            runCatching { Graph.queueStore.save(tracks, index, positionMs) }
+        }
+    }
+
+    private inner class AuxenSessionCallback : MediaSession.Callback {
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): ListenableFuture<MediaItemsWithStartPosition> {
+            val future = SettableFuture.create<MediaItemsWithStartPosition>()
+            serviceScope.launch {
+                val saved = runCatching { Graph.queueStore.load() }.getOrNull()
+                if (saved == null) {
+                    future.setException(UnsupportedOperationException("No saved queue"))
+                } else {
+                    future.set(
+                        MediaItemsWithStartPosition(
+                            saved.tracks.map(Graph::mediaItemFor),
+                            saved.index,
+                            saved.positionMs,
+                        ),
+                    )
+                }
+            }
+            return future
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
@@ -163,6 +239,18 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        // Flush a final save while the player is still alive (main thread),
+        // then tear the main scope down before releasing the player.
+        mediaSession?.player?.let { p ->
+            val tracks = currentTracks(p)
+            val index = p.currentMediaItemIndex
+            val positionMs = p.currentPosition.coerceAtLeast(0)
+            queueSaveJob?.cancel()
+            runBlocking {
+                runCatching { Graph.queueStore.save(tracks, index, positionMs) }
+            }
+        }
+        mainScope.cancel()
         mediaSession?.run {
             player.release()
             release()

@@ -14,6 +14,7 @@ import io.github.auxen.db.AuxenDatabase
 import io.github.auxen.dsp.EqController
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
+import io.github.auxen.playback.QueueStateStore
 import io.github.auxen.playback.TrackResolver
 import io.github.auxen.provider.local.LocalProvider
 import io.github.auxen.provider.tidal.TidalAuth
@@ -50,6 +51,8 @@ object Graph {
         private set
     lateinit var library: LibraryRepository
         private set
+    lateinit var queueStore: QueueStateStore
+        private set
 
     /** MediaMetadata extras key holding the serialized [Track] JSON. */
     const val TRACK_EXTRA_KEY = "auxen.track"
@@ -69,6 +72,7 @@ object Graph {
         tidal = TidalProvider(tidalAuth, httpClient)
         db = AuxenDatabase.build(context)
         library = LibraryRepository(db)
+        queueStore = QueueStateStore(db)
         resolver = TrackResolver(fetch = { id -> tidal.getStreamInfoById(id) })
     }
 
