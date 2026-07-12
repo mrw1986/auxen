@@ -12,17 +12,23 @@ import androidx.compose.ui.unit.dp
 import io.github.auxen.model.Source
 import io.github.auxen.ui.theme.AuxenColors
 
-/** Source pill ("TIDAL" cyan / "LOCAL" green) — desktop make_source_badge. */
+/**
+ * Source pill ("TIDAL" cyan / "LOCAL" green) — desktop make_source_badge.
+ * [tinted] false (default, track rows / NowPlaying / AlbumDetail): solid
+ * pill matching desktop's `.source-badge-tidal`/`.source-badge-local`. true
+ * (AlbumCard's art overlay only): 15%-tint chip matching the mockup's
+ * `.source-tidal`/`.source-local` art-overlay treatment.
+ */
 @Composable
-fun SourceBadge(source: Source, modifier: Modifier = Modifier) {
+fun SourceBadge(source: Source, modifier: Modifier = Modifier, tinted: Boolean = false) {
     val color = if (source == Source.TIDAL) AuxenColors.TidalBlue else AuxenColors.LocalGreen
     Text(
         text = if (source == Source.TIDAL) "TIDAL" else "LOCAL",
         style = MaterialTheme.typography.labelSmall,
-        color = color,
+        color = if (tinted) color else AuxenColors.BgDeep,
         modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(color.copy(alpha = 0.15f))
+            .clip(if (tinted) RoundedCornerShape(6.dp) else RoundedCornerShape(50))
+            .background(if (tinted) color.copy(alpha = 0.15f) else color)
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }
@@ -36,8 +42,8 @@ fun QualityBadge(label: String, modifier: Modifier = Modifier) {
         style = MaterialTheme.typography.labelSmall,
         color = AuxenColors.AmberPrimary,
         modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(AuxenColors.AmberPrimary.copy(alpha = 0.15f))
+            .clip(RoundedCornerShape(50))
+            .background(AuxenColors.AmberPrimary.copy(alpha = 0.2f))
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }

@@ -24,6 +24,7 @@ val DmSans = FontFamily(
     variable(R.font.dm_sans, FontWeight.Medium),
     variable(R.font.dm_sans, FontWeight.SemiBold),
     variable(R.font.dm_sans, FontWeight.Bold),
+    variable(R.font.dm_sans, FontWeight.ExtraBold),
 )
 
 /** Fraunces — display/brand serif, per the desktop design. */

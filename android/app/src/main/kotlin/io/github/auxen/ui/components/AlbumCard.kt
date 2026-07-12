@@ -52,7 +52,7 @@ fun AlbumCard(
                     .clip(RoundedCornerShape(10.dp)),
             )
             if (source != null) {
-                SourceBadge(source, modifier = Modifier.align(Alignment.TopStart).padding(6.dp))
+                SourceBadge(source, modifier = Modifier.align(Alignment.TopStart).padding(6.dp), tinted = true)
             }
             if (onPlay != null) {
                 IconButton(

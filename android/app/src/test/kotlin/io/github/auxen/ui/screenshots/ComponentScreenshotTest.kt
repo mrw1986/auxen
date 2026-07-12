@@ -214,7 +214,7 @@ class ComponentScreenshotTest {
         AlbumCard(title = "OutRun", artist = "Kavinsky", artUrl = null, source = Source.TIDAL, onClick = {}, onPlay = {})
     }
 
-    // --- SourceBadge + QualityBadge row ---
+    // --- SourceBadge (solid + tinted) + QualityBadge row — theme-parity badge pins ---
 
     @Test
     fun badgesRow_light() = captureComponent("badges-row-light", darkTheme = false) { BadgesRow() }
@@ -230,6 +230,7 @@ class ComponentScreenshotTest {
         ) {
             SourceBadge(Source.TIDAL)
             SourceBadge(Source.LOCAL)
+            SourceBadge(Source.TIDAL, tinted = true)
             QualityBadge("Hi-Res")
             QualityBadge("FLAC")
             QualityBadge("MP3")
