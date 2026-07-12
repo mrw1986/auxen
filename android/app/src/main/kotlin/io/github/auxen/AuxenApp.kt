@@ -20,6 +20,10 @@ import io.github.auxen.playback.TrackResolver
 import io.github.auxen.provider.local.LocalProvider
 import io.github.auxen.provider.tidal.TidalAuth
 import io.github.auxen.provider.tidal.TidalProvider
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -27,10 +31,54 @@ import java.util.concurrent.TimeUnit
 
 @UnstableApi
 class AuxenApp : Application() {
+    /** Application-scoped; outlives any UI, so restore work survives navigation. */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     override fun onCreate() {
         super.onCreate()
         Graph.init(this)
         EqController.initialize(this)
+        restoreAutoEqProfile()
+    }
+
+    /**
+     * Re-apply the AutoEq profile persisted by the Equalizer screen. Runs off
+     * the main thread because [AutoEqRepository.ensureLoaded] has a ~3s cold
+     * path. A profile that vanished after an asset update simply clears the
+     * setting — restore must never crash the app.
+     */
+    private fun restoreAutoEqProfile() {
+        appScope.launch {
+            runCatching {
+                val saved = Graph.library.getSetting(KEY_AUTOEQ_PROFILE)
+                if (saved.isNullOrBlank()) return@runCatching
+
+                if (saved.startsWith("custom:")) {
+                    val name = saved.removePrefix("custom:")
+                    val text = Graph.library.getSetting(KEY_AUTOEQ_CUSTOM_TEXT)
+                    if (text.isNullOrBlank()) {
+                        Graph.library.setSetting(KEY_AUTOEQ_PROFILE, "")
+                    } else {
+                        EqController.importAutoEq(text, name)
+                    }
+                    return@runCatching
+                }
+
+                Graph.autoEq.ensureLoaded()
+                val profile = Graph.autoEq.search(saved, limit = Int.MAX_VALUE)
+                    .firstOrNull { it.name == saved }
+                if (profile == null) {
+                    Graph.library.setSetting(KEY_AUTOEQ_PROFILE, "")
+                    return@runCatching
+                }
+                EqController.importAutoEq(Graph.autoEq.profileText(profile), profile.name)
+            }
+        }
+    }
+
+    private companion object {
+        const val KEY_AUTOEQ_PROFILE = "autoeq_profile"
+        const val KEY_AUTOEQ_CUSTOM_TEXT = "autoeq_custom_text"
     }
 }
 

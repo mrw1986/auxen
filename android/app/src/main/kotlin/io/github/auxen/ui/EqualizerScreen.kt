@@ -2,31 +2,44 @@ package io.github.auxen.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,20 +48,56 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
+import io.github.auxen.Graph
+import io.github.auxen.dsp.AutoEqProfile
 import io.github.auxen.dsp.EqController
 import io.github.auxen.dsp.EqState
+import kotlinx.coroutines.launch
+
+/** Settings key holding the active AutoEq profile name (or `custom:<name>`). */
+private const val KEY_AUTOEQ_PROFILE = "autoeq_profile"
+
+/** Settings key holding the raw text of an imported custom profile. */
+private const val KEY_AUTOEQ_CUSTOM_TEXT = "autoeq_custom_text"
 
 /**
  * Equalizer screen: enable toggle, the desktop app's 10-band graphic EQ with
- * its presets, and AutoEq profile import (Wavelet-style headphone correction).
+ * its presets, and a Wavelet-style AutoEq profile picker (search the bundled
+ * 8,850-headphone database, plus a file-import path for custom profiles).
  */
 @UnstableApi
 @Composable
 fun EqualizerScreen(modifier: Modifier = Modifier) {
     val state by EqController.state.collectAsState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val repo = Graph.autoEq
+
     var presetMenuOpen by remember { mutableStateOf(false) }
     var importError by remember { mutableStateOf<String?>(null) }
+
+    // AutoEq picker state.
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<AutoEqProfile>>(emptyList()) }
+    var loaded by remember { mutableStateOf(false) }
+    var activeProfile by remember { mutableStateOf<String?>(null) }
+
+    // Parse the ~1 MB index once (off the main thread) and read back the
+    // persisted active-profile name. ensureLoaded() has a ~3s cold path, so it
+    // must not block composition — LaunchedEffect suspends onto the IO
+    // dispatcher inside the repository.
+    LaunchedEffect(Unit) {
+        repo.ensureLoaded()
+        loaded = true
+        activeProfile = Graph.library.getSetting(KEY_AUTOEQ_PROFILE).toActiveProfileName()
+    }
+
+    // Recompute matches whenever the query changes or the index finishes
+    // loading. search() is an in-memory substring filter — cheap enough for the
+    // main thread — and caps at 50 hits.
+    LaunchedEffect(query, loaded) {
+        results = if (loaded && query.isNotBlank()) repo.search(query, limit = 50) else emptyList()
+    }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -61,8 +110,16 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
             importError = "Could not read file"
         } else {
             val name = uri.lastPathSegment?.substringAfterLast('/')?.removeSuffix(".txt")
-            EqController.importAutoEq(text, name)
-                .onSuccess { importError = null }
+            val displayName = name?.takeIf { it.isNotBlank() } ?: "Custom profile"
+            EqController.importAutoEq(text, displayName)
+                .onSuccess {
+                    importError = null
+                    activeProfile = displayName
+                    scope.launch {
+                        Graph.library.setSetting(KEY_AUTOEQ_CUSTOM_TEXT, text)
+                        Graph.library.setSetting(KEY_AUTOEQ_PROFILE, "custom:$displayName")
+                    }
+                }
                 .onFailure { importError = it.message }
         }
     }
@@ -76,15 +133,19 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
             Switch(checked = state.enabled, onCheckedChange = { EqController.setEnabled(it) })
         }
 
-        state.presetName?.let {
-            Text("Active profile: $it", style = MaterialTheme.typography.bodyMedium)
+        // Only the graphic EQ names a preset here; the active AutoEq profile
+        // (parametric, bands == null) is shown by its own row below.
+        if (state.bands != null) {
+            state.presetName?.let {
+                Text("Active profile: $it", style = MaterialTheme.typography.bodyMedium)
+            }
         }
         Text(
             "Preamp: %.1f dB".format(state.preampDb),
             style = MaterialTheme.typography.bodySmall,
         )
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row {
             Column {
                 OutlinedButton(onClick = { presetMenuOpen = true }) { Text("Presets") }
                 DropdownMenu(expanded = presetMenuOpen, onDismissRequest = { presetMenuOpen = false }) {
@@ -99,13 +160,6 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
                     }
                 }
             }
-            Button(onClick = { importLauncher.launch(arrayOf("text/plain")) }) {
-                Text("Import AutoEq profile")
-            }
-        }
-
-        importError?.let {
-            Text("Import failed: $it", color = MaterialTheme.colorScheme.error)
         }
 
         // 10-band graphic EQ. When a parametric AutoEq profile is active the
@@ -125,12 +179,137 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        Text(
-            "AutoEq profiles for ~5,000 headphones: github.com/jaakkopasanen/AutoEq " +
-                "(use the ParametricEq .txt export). Correction runs inside the player's " +
-                "float pipeline — no system EQ involved.",
-            style = MaterialTheme.typography.bodySmall,
+        HorizontalDivider()
+
+        // ---- AutoEq headphone-correction picker (Wavelet-style) ----
+        Text("Headphone correction", style = MaterialTheme.typography.titleMedium)
+
+        activeProfile?.let { name ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Active: $name",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { clearAutoEq(scope) { activeProfile = null } }) {
+                    Text("Clear")
+                }
+            }
+        }
+
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Search 8,850 headphone profiles") },
+            singleLine = true,
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { query = "" }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                    }
+                }
+            },
         )
+
+        if (query.isNotBlank()) {
+            if (results.isEmpty() && loaded) {
+                Text(
+                    "No matching profiles",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
+                    items(results, key = { it.index }) { profile ->
+                        ProfileRow(profile) {
+                            applyAutoEq(scope, repo, profile) { activeProfile = it }
+                            query = ""
+                        }
+                    }
+                }
+                if (results.size >= 50) {
+                    Text(
+                        "Showing the first 50 matches — refine your search.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        Button(onClick = { importLauncher.launch(arrayOf("text/plain")) }) {
+            Text("Import custom profile…")
+        }
+
+        importError?.let {
+            Text("Import failed: $it", color = MaterialTheme.colorScheme.error)
+        }
+
+        Text(
+            "Powered by AutoEq (MIT) — github.com/jaakkopasanen/AutoEq",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Turns a stored `autoeq_profile` value into its display name (drops `custom:`). */
+private fun String?.toActiveProfileName(): String? = when {
+    isNullOrBlank() -> null
+    startsWith("custom:") -> removePrefix("custom:")
+    else -> this
+}
+
+/**
+ * Apply a bundled AutoEq profile: read its ParametricEq body (IO), feed it
+ * through [EqController.importAutoEq], and persist the name for restore-on-start.
+ */
+@UnstableApi
+private fun applyAutoEq(
+    scope: kotlinx.coroutines.CoroutineScope,
+    repo: io.github.auxen.dsp.AutoEqRepository,
+    profile: AutoEqProfile,
+    onApplied: (String) -> Unit,
+) {
+    scope.launch {
+        val text = repo.profileText(profile)
+        EqController.importAutoEq(text, profile.name).onSuccess {
+            Graph.library.setSetting(KEY_AUTOEQ_PROFILE, profile.name)
+            onApplied(profile.name)
+        }
+    }
+}
+
+/** Clear the active profile: reset the graphic EQ to Flat and drop the setting. */
+@UnstableApi
+private fun clearAutoEq(scope: kotlinx.coroutines.CoroutineScope, onCleared: () -> Unit) {
+    EqController.applyPreset("Flat")
+    scope.launch { Graph.library.setSetting(KEY_AUTOEQ_PROFILE, "") }
+    onCleared()
+}
+
+/** One search-result row: profile name over a `source · rig` subtitle. */
+@Composable
+private fun ProfileRow(profile: AutoEqProfile, onClick: () -> Unit) {
+    val subtitle = listOf(profile.source, profile.rig)
+        .filter { it.isNotBlank() }
+        .joinToString(" · ")
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+    ) {
+        Text(profile.name, style = MaterialTheme.typography.bodyLarge)
+        if (subtitle.isNotEmpty()) {
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
