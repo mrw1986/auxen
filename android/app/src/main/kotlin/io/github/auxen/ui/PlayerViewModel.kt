@@ -58,9 +58,15 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     val localTracks = MutableStateFlow<List<Track>>(emptyList())
+    val searchQuery = MutableStateFlow("")
     val searchResults = MutableStateFlow<List<Track>>(emptyList())
     var searchInFlight by mutableStateOf(false)
         private set
+
+    val searchHistoryItems: StateFlow<List<String>> = Graph.library.searchHistory()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private var searchDebounceJob: Job? = null
 
     private val _tidalLogin = MutableStateFlow<TidalLoginState>(TidalLoginState.LoggedOut)
     val tidalLogin: StateFlow<TidalLoginState> = _tidalLogin
@@ -250,6 +256,35 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             searchResults.value = DuplicateResolver.merge(local, tidal, priority)
             searchInFlight = false
         }
+    }
+
+    /** Debounced live search — desktop SearchView's 300ms debounce. */
+    fun onSearchQueryChange(query: String) {
+        searchQuery.value = query
+        searchDebounceJob?.cancel()
+        if (query.isBlank()) {
+            searchResults.value = emptyList()
+            return
+        }
+        searchDebounceJob = viewModelScope.launch {
+            delay(300)
+            search(query)
+        }
+    }
+
+    /** Record the current query in history (called on keyboard submit). */
+    fun commitSearch() {
+        val query = searchQuery.value
+        if (query.isBlank()) return
+        viewModelScope.launch { runCatching { Graph.library.addSearchHistory(query) } }
+    }
+
+    fun deleteSearchHistory(query: String) {
+        viewModelScope.launch { runCatching { Graph.library.deleteSearchHistoryItem(query) } }
+    }
+
+    fun clearSearchHistory() {
+        viewModelScope.launch { runCatching { Graph.library.clearSearchHistory() } }
     }
 
     fun play(track: Track) {

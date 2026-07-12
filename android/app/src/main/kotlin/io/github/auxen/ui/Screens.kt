@@ -5,18 +5,15 @@ import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,63 +30,6 @@ import androidx.media3.common.util.UnstableApi
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.TrackActionSheet
-
-@UnstableApi
-@Composable
-fun SearchScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
-    var query by remember { mutableStateOf("") }
-    val results by viewModel.searchResults.collectAsState()
-    val favoriteKeys by viewModel.favoriteKeys.collectAsState()
-    val playlists by viewModel.playlists.collectAsState()
-    var sheetTrack by remember { mutableStateOf<Track?>(null) }
-
-    Column(modifier = modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            label = { Text("Search local + Tidal") },
-            singleLine = true,
-            trailingIcon = {
-                TextButton(onClick = { viewModel.search(query) }) { Text("Go") }
-            },
-        )
-        if (viewModel.searchInFlight) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally).padding(24.dp))
-        }
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(results, key = { "${it.source}:${it.sourceId}" }) { track ->
-                AuxenTrackRow(
-                    track = track,
-                    isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
-                    onPlay = { viewModel.play(track) },
-                    onToggleFavorite = { viewModel.toggleFavorite(track) },
-                    onLongPress = { sheetTrack = track },
-                    trailing = {
-                        IconButton(onClick = { viewModel.enqueue(track) }) {
-                            Icon(Icons.Filled.PlaylistAdd, contentDescription = "Add to queue")
-                        }
-                    },
-                )
-            }
-        }
-    }
-
-    sheetTrack?.let { track ->
-        TrackActionSheet(
-            track = track,
-            isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
-            playlists = playlists,
-            onDismiss = { sheetTrack = null },
-            onPlay = { viewModel.play(track) },
-            onPlayNext = { viewModel.playNext(track) },
-            onEnqueue = { viewModel.enqueue(track) },
-            onToggleFavorite = { viewModel.toggleFavorite(track) },
-            onAddToPlaylist = { viewModel.addToPlaylist(track, it) },
-            onCreatePlaylist = { viewModel.createPlaylistAndAdd(track, it) },
-        )
-    }
-}
 
 @UnstableApi
 @Composable
