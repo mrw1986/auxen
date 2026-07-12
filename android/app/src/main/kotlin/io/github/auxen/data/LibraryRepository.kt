@@ -3,6 +3,7 @@ package io.github.auxen.data
 import io.github.auxen.db.AuxenDatabase
 import io.github.auxen.db.FavoriteEntity
 import io.github.auxen.db.PlayHistoryEntity
+import io.github.auxen.db.PlaylistEntity
 import io.github.auxen.db.SettingEntity
 import io.github.auxen.db.toEntity
 import io.github.auxen.db.toTrack
@@ -52,6 +53,17 @@ class LibraryRepository(
         val now = clock()
         db.trackDao().recordPlay(entity.id, now)
         db.playHistoryDao().insert(PlayHistoryEntity(trackId = entity.id, playedAtMillis = now))
+    }
+
+    fun playlists(): Flow<List<PlaylistEntity>> = db.playlistDao().playlists()
+
+    /** Create a playlist with the desktop default amber color; returns its id. */
+    suspend fun createPlaylist(name: String, color: String = "#d4a039"): Long =
+        db.playlistDao().insert(PlaylistEntity(name = name, color = color))
+
+    suspend fun addTrackToPlaylist(track: Track, playlistId: Long) {
+        val trackId = upsert(track)
+        db.playlistDao().appendTrack(playlistId, trackId)
     }
 
     suspend fun sourcePriority(): SourcePriority =

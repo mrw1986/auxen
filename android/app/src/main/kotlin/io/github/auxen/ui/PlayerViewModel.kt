@@ -14,6 +14,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
 import io.github.auxen.Graph
+import io.github.auxen.db.PlaylistEntity
 import io.github.auxen.matching.DuplicateResolver
 import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
@@ -57,6 +58,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     val favorites: StateFlow<List<Track>> = Graph.library.favorites()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val playlists: StateFlow<List<PlaylistEntity>> = Graph.library.playlists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun toggleFavorite(track: Track) {
@@ -128,6 +132,30 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             runCatching { Graph.library.upsert(track) }
             val c = controller ?: return@launch
             runCatching { Graph.mediaItemFor(track) }.onSuccess { c.addMediaItem(it) }
+        }
+    }
+
+    /** Insert after the current queue item — desktop "Play Next". */
+    fun playNext(track: Track) {
+        viewModelScope.launch {
+            runCatching { Graph.library.upsert(track) }
+            val c = controller ?: return@launch
+            val item = runCatching { Graph.mediaItemFor(track) }.getOrNull() ?: return@launch
+            val index = if (c.mediaItemCount == 0) 0 else c.currentMediaItemIndex + 1
+            c.addMediaItem(index, item)
+        }
+    }
+
+    fun addToPlaylist(track: Track, playlistId: Long) {
+        viewModelScope.launch { runCatching { Graph.library.addTrackToPlaylist(track, playlistId) } }
+    }
+
+    fun createPlaylistAndAdd(track: Track, name: String) {
+        viewModelScope.launch {
+            runCatching {
+                val id = Graph.library.createPlaylist(name)
+                Graph.library.addTrackToPlaylist(track, id)
+            }
         }
     }
 

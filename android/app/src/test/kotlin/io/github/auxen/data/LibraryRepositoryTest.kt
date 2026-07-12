@@ -82,4 +82,24 @@ class LibraryRepositoryTest {
         repo.setSourcePriority(SourcePriority.PREFER_LOCAL)
         assertEquals(SourcePriority.PREFER_LOCAL, repo.sourcePriority())
     }
+
+    @Test
+    fun createPlaylistAndAddTrackRoundTrips() = runBlocking {
+        val playlistId = repo.createPlaylist("Road Trip")
+        repo.addTrackToPlaylist(tidalTrack, playlistId)
+        repo.addTrackToPlaylist(tidalTrack.copy(sourceId = "100", title = "Walk"), playlistId)
+
+        val names = repo.playlists().first().map { it.name }
+        assertEquals(listOf("Road Trip"), names)
+        assertEquals(
+            listOf("Everlong", "Walk"),
+            db.playlistDao().tracksIn(playlistId).map { it.title },
+        )
+    }
+
+    @Test
+    fun createPlaylistUsesDefaultAmberColor() = runBlocking {
+        repo.createPlaylist("Mix")
+        assertEquals("#d4a039", repo.playlists().first().single().color)
+    }
 }

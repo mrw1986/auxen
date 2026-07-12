@@ -41,13 +41,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import coil.compose.AsyncImage
+import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AuxenTrackRow
+import io.github.auxen.ui.components.TrackActionSheet
 
 @UnstableApi
 @Composable
 fun LibraryScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     val tracks by viewModel.localTracks.collectAsState()
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
+    val playlists by viewModel.playlists.collectAsState()
+    var sheetTrack by remember { mutableStateOf<Track?>(null) }
     LaunchedEffect(Unit) { viewModel.loadLibrary() }
 
     if (tracks.isEmpty()) {
@@ -70,6 +74,7 @@ fun LibraryScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                     isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
                     onPlay = { viewModel.play(track) },
                     onToggleFavorite = { viewModel.toggleFavorite(track) },
+                    onLongPress = { sheetTrack = track },
                     trailing = {
                         IconButton(onClick = { viewModel.enqueue(track) }) {
                             Icon(Icons.Filled.PlaylistAdd, contentDescription = "Add to queue")
@@ -79,6 +84,21 @@ fun LibraryScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
             }
         }
     }
+
+    sheetTrack?.let { track ->
+        TrackActionSheet(
+            track = track,
+            isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+            playlists = playlists,
+            onDismiss = { sheetTrack = null },
+            onPlay = { viewModel.play(track) },
+            onPlayNext = { viewModel.playNext(track) },
+            onEnqueue = { viewModel.enqueue(track) },
+            onToggleFavorite = { viewModel.toggleFavorite(track) },
+            onAddToPlaylist = { viewModel.addToPlaylist(track, it) },
+            onCreatePlaylist = { viewModel.createPlaylistAndAdd(track, it) },
+        )
+    }
 }
 
 @UnstableApi
@@ -87,6 +107,8 @@ fun SearchScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     var query by remember { mutableStateOf("") }
     val results by viewModel.searchResults.collectAsState()
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
+    val playlists by viewModel.playlists.collectAsState()
+    var sheetTrack by remember { mutableStateOf<Track?>(null) }
 
     Column(modifier = modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -109,6 +131,7 @@ fun SearchScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                     isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
                     onPlay = { viewModel.play(track) },
                     onToggleFavorite = { viewModel.toggleFavorite(track) },
+                    onLongPress = { sheetTrack = track },
                     trailing = {
                         IconButton(onClick = { viewModel.enqueue(track) }) {
                             Icon(Icons.Filled.PlaylistAdd, contentDescription = "Add to queue")
@@ -117,6 +140,21 @@ fun SearchScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                 )
             }
         }
+    }
+
+    sheetTrack?.let { track ->
+        TrackActionSheet(
+            track = track,
+            isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+            playlists = playlists,
+            onDismiss = { sheetTrack = null },
+            onPlay = { viewModel.play(track) },
+            onPlayNext = { viewModel.playNext(track) },
+            onEnqueue = { viewModel.enqueue(track) },
+            onToggleFavorite = { viewModel.toggleFavorite(track) },
+            onAddToPlaylist = { viewModel.addToPlaylist(track, it) },
+            onCreatePlaylist = { viewModel.createPlaylistAndAdd(track, it) },
+        )
     }
 }
 
@@ -189,6 +227,8 @@ fun AccountScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
 fun FavoritesScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     val tracks by viewModel.favorites.collectAsState()
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
+    val playlists by viewModel.playlists.collectAsState()
+    var sheetTrack by remember { mutableStateOf<Track?>(null) }
 
     if (tracks.isEmpty()) {
         Column(
@@ -207,6 +247,7 @@ fun FavoritesScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                     isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
                     onPlay = { viewModel.play(track) },
                     onToggleFavorite = { viewModel.toggleFavorite(track) },
+                    onLongPress = { sheetTrack = track },
                     trailing = {
                         IconButton(onClick = { viewModel.enqueue(track) }) {
                             Icon(Icons.Filled.PlaylistAdd, contentDescription = "Add to queue")
@@ -215,5 +256,20 @@ fun FavoritesScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                 )
             }
         }
+    }
+
+    sheetTrack?.let { track ->
+        TrackActionSheet(
+            track = track,
+            isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+            playlists = playlists,
+            onDismiss = { sheetTrack = null },
+            onPlay = { viewModel.play(track) },
+            onPlayNext = { viewModel.playNext(track) },
+            onEnqueue = { viewModel.enqueue(track) },
+            onToggleFavorite = { viewModel.toggleFavorite(track) },
+            onAddToPlaylist = { viewModel.addToPlaylist(track, it) },
+            onCreatePlaylist = { viewModel.createPlaylistAndAdd(track, it) },
+        )
     }
 }
