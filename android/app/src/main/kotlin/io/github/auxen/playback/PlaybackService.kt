@@ -52,9 +52,12 @@ import kotlinx.coroutines.withContext
  * switching, and (later) Android Auto — all driven by the one MediaSession.
  *
  * The audiophile part is in [EqRenderersFactory]: the EQ AudioProcessor is
- * installed directly into the player's audio sink with float output enabled,
- * so 24-bit content is never truncated to 16-bit on capable devices and the
- * DSP chain runs before the audio ever leaves the app.
+ * installed directly into the player's audio sink, so the DSP chain runs
+ * before the audio ever leaves the app. The sink still requests float output
+ * (so Hi-Res sources aren't truncated at the AudioTrack), but the EQ
+ * processor emits the same PCM encoding it receives — DefaultAudioSink's
+ * built-in trailing processors are 16-bit-only, so float mid-chain would
+ * break sink configuration (see [ParametricEqProcessor]).
  */
 @UnstableApi
 class PlaybackService : MediaSessionService() {
@@ -355,8 +358,11 @@ private class EqRenderersFactory(
         enableFloatOutput: Boolean,
         enableAudioTrackPlaybackParams: Boolean,
     ): AudioSink = DefaultAudioSink.Builder(context)
-        // Float output keeps 24-bit sources bit-exact through the EQ; on
-        // devices without float support the sink falls back automatically.
+        // Request float output so Hi-Res sources aren't truncated to 16-bit at
+        // the AudioTrack; devices without float support fall back automatically.
+        // The EQ processor still emits the encoding it receives (DefaultAudioSink's
+        // built-in trailing processors are 16-bit-only), and Hi-Res float content
+        // currently bypasses the EQ chain at the sink — a tracked follow-up.
         .setEnableFloatOutput(true)
         .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
         .setAudioProcessors(arrayOf(eqProcessor))

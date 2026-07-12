@@ -44,9 +44,10 @@ ExoPlayer decoder → ParametricEqProcessor (float64 biquads, float32 samples)
   direct form II, double-precision state (verified against the analytic
   transfer function: response at fc matches requested gain to <0.001 dB).
 - `dsp/ParametricEqProcessor.kt` — Media3 `AudioProcessor` installed via a
-  custom `RenderersFactory`. Promotes 16-bit input to float and emits float,
-  so nothing is re-quantised after the EQ; 24-bit sources stay bit-exact on
-  devices with float `AudioTrack` support.
+  custom `RenderersFactory`. Filters in double precision but emits the same
+  PCM encoding it receives — `DefaultAudioSink` appends 16-bit-only processors
+  after ours, so float output there breaks sink configuration; Hi-Res float
+  currently bypasses the EQ chain at the sink (a tracked follow-up).
 - `dsp/Eq.kt` — two front-ends over the same engine:
   - the desktop app's 10-band graphic EQ (same ISO bands, same ten presets),
     with automatic preamp = −(largest boost) to prevent clipping;
