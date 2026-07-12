@@ -43,8 +43,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import coil.compose.AsyncImage
@@ -90,7 +92,7 @@ fun NowPlayingScreen(viewModel: PlayerViewModel, onBack: () -> Unit) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     metadata?.title?.toString() ?: "Nothing playing",
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 22.sp),
                     maxLines = 1,
                     overflow = TextOverflow.Clip,
                     modifier = Modifier.basicMarquee(),
@@ -138,8 +140,16 @@ fun NowPlayingScreen(viewModel: PlayerViewModel, onBack: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
         )
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(formatDuration((dragPositionMs ?: positionMs) / 1000.0), style = MaterialTheme.typography.bodySmall)
-            Text(formatDuration(durationMs / 1000.0), style = MaterialTheme.typography.bodySmall)
+            Text(
+                formatDuration((dragPositionMs ?: positionMs) / 1000.0),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+            )
+            Text(
+                formatDuration(durationMs / 1000.0),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+            )
         }
         Spacer(Modifier.height(8.dp))
         Row(

@@ -44,8 +44,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.github.takahirom.roborazzi.captureRoboImage
 import io.github.auxen.db.PlaylistEntity
@@ -60,10 +62,12 @@ import io.github.auxen.ui.components.QualityBadge
 import io.github.auxen.ui.components.SectionHeader
 import io.github.auxen.ui.components.SourceBadge
 import io.github.auxen.ui.components.TrackActionSheetContent
+import io.github.auxen.ui.components.formatDuration
 import io.github.auxen.ui.testutil.TEST_DEVICE
 import io.github.auxen.ui.testutil.auxenScreenshotName
 import io.github.auxen.ui.theme.AuxenColors
 import io.github.auxen.ui.theme.AuxenTheme
+import io.github.auxen.ui.theme.Fraunces
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -137,6 +141,19 @@ import org.robolectric.annotation.GraphicsMode
  * real `MiniPlayerBar.kt`/`SearchScreen.kt` call sites (art radius, title
  * weight, play-button colors, field shape/colors) with placeholder state
  * instead of a wired ViewModel — same pattern as `TopBarBrandPreview`.
+ *
+ * ## Typography-details surface — pins facts no other golden exercises
+ * The theme-parity typography fixes have no other coverage: nothing in the
+ * app currently requests `FontWeight.Bold` in a `Fraunces` context (the
+ * registration guards a latent bug, not a visible one), and there is no
+ * `NowPlayingScreen` golden to catch its title's Fraunces-to-DM-Sans swap.
+ * `typography-details-*` renders, in one column: the NowPlayingScreen title
+ * style verbatim (`titleMedium.copy(fontSize = 22.sp)`, DM Sans, sans-serif
+ * — was Fraunces `headlineSmall`), Fraunces SemiBold next to Fraunces Bold
+ * (must now read visibly heavier, not identical — proves Bold no longer
+ * silently snaps to SemiBold's wght=600), and a monospace duration string
+ * (proves DM Sans's lack of a `tnum` feature is worked around by the font
+ * swap, not just documented).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @RunWith(RobolectricTestRunner::class)
@@ -527,5 +544,31 @@ class ComponentScreenshotTest {
                 unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
             ),
         )
+    }
+
+    // --- Typography details (see class KDoc) ---
+
+    @Test
+    fun typographyDetails_light() = captureComponent("typography-details-light", darkTheme = false) {
+        TypographyDetailsPreview()
+    }
+
+    @Test
+    fun typographyDetails_dark() = captureComponent("typography-details-dark", darkTheme = true) {
+        TypographyDetailsPreview()
+    }
+
+    @Composable
+    private fun TypographyDetailsPreview() {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // NowPlayingScreen.kt's title style, verbatim.
+            Text("Nightcall", style = MaterialTheme.typography.titleMedium.copy(fontSize = 22.sp))
+            Text("Fraunces SemiBold", fontFamily = Fraunces, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
+            Text("Fraunces Bold", fontFamily = Fraunces, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            Text(formatDuration(258.0), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+        }
     }
 }

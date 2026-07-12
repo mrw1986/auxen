@@ -32,6 +32,7 @@ val Fraunces = FontFamily(
     variable(R.font.fraunces, FontWeight.Light),
     variable(R.font.fraunces, FontWeight.Medium),
     variable(R.font.fraunces, FontWeight.SemiBold),
+    variable(R.font.fraunces, FontWeight.Bold),
 )
 
 /** Josefin Sans — brand wordmark face, per desktop .sidebar-brand-title/.splash-title. */
