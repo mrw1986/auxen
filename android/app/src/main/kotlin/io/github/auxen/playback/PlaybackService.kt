@@ -22,12 +22,14 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
 import androidx.media3.session.MediaSessionService
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import io.github.auxen.Graph
+import io.github.auxen.R
 import io.github.auxen.dsp.EqController
 import io.github.auxen.dsp.ParametricEqProcessor
 import io.github.auxen.model.Track
@@ -177,6 +179,12 @@ class PlaybackService : MediaSessionService() {
             .setSessionActivity(sessionActivity)
             .setCallback(AuxenSessionCallback())
             .build()
+
+        setMediaNotificationProvider(
+            DefaultMediaNotificationProvider(this).apply {
+                setSmallIcon(R.drawable.ic_stat_auxen)
+            },
+        )
 
         // Restore the persisted queue paused: the user decides when to hit
         // play, and no Tidal stream resolution happens until they do.

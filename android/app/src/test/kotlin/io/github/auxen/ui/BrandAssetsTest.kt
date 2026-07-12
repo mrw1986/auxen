@@ -20,4 +20,8 @@ class BrandAssetsTest {
         assertNotNull(context.getDrawable(R.drawable.splash_logo))
         assertNotNull(context.getDrawable(R.drawable.splash_logo_on_light))
     }
+
+    @Test fun notificationIconInflates() {
+        assertNotNull(context.getDrawable(R.drawable.ic_stat_auxen))
+    }
 }
