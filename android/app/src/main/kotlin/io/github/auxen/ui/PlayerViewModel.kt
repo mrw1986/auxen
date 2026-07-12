@@ -2,12 +2,14 @@ package io.github.auxen.ui
 
 import android.app.Application
 import android.content.ComponentName
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
@@ -96,6 +98,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     /** Current playback position and track duration, in milliseconds — polled while a controller exists. */
     val positionMs = MutableStateFlow(0L)
     val durationMs = MutableStateFlow(0L)
+
+    /** Last playback error, for the UI banner; null when none/dismissed. */
+    val playbackError = MutableStateFlow<String?>(null)
+
+    fun dismissPlaybackError() {
+        playbackError.value = null
+    }
 
     /** Selected Library tab (0=Albums, 1=Artists, 2=Tracks), persisted per session. */
     val libraryTab = MutableStateFlow(0)
@@ -250,6 +259,15 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
                 override fun onRepeatModeChanged(mode: Int) {
                     repeatMode = mode
+                }
+
+                override fun onPlayerError(error: PlaybackException) {
+                    Log.e("Auxen", "Playback error", error)
+                    val chain = generateSequence(error as Throwable) { it.cause }
+                        .joinToString(" ← ") { t ->
+                            t.javaClass.simpleName + (t.message?.let { ": $it" } ?: "")
+                        }
+                    playbackError.value = "${error.errorCodeName}\n$chain"
                 }
             })
         }, MoreExecutors.directExecutor())

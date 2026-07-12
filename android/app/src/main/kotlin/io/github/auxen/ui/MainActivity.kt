@@ -10,8 +10,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
@@ -26,10 +28,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -105,6 +111,27 @@ private fun MainScreen(viewModel: PlayerViewModel) {
         bottomBar = {
             if (currentRoute != "nowplaying") {
                 Column {
+                    val playbackError by viewModel.playbackError.collectAsState()
+                    playbackError?.let { message ->
+                        Surface(color = MaterialTheme.colorScheme.errorContainer) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    maxLines = 4,
+                                    modifier = Modifier.weight(1f).padding(start = 12.dp, top = 6.dp, bottom = 6.dp),
+                                )
+                                IconButton(onClick = { viewModel.dismissPlaybackError() }) {
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = "Dismiss error",
+                                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                                    )
+                                }
+                            }
+                        }
+                    }
                     MiniPlayerBar(viewModel, onOpen = { navController.navigate("nowplaying") })
                     NavigationBar {
                         destinations.forEach { dest ->
