@@ -47,6 +47,9 @@ import io.github.auxen.ui.components.MiniPlayerBar
 /** A bottom-nav tab: its route, label, and icon. */
 private data class Destination(val route: String, val label: String, val icon: @Composable () -> Unit)
 
+/** Global overlay routes pushed from the top bar, outside the tab back stacks. */
+private val OVERLAY_ROUTES = setOf("equalizer", "account")
+
 @UnstableApi
 class MainActivity : ComponentActivity() {
 
@@ -138,6 +141,12 @@ private fun MainScreen(viewModel: PlayerViewModel) {
                             NavigationBarItem(
                                 selected = currentRoute == dest.route,
                                 onClick = {
+                                    // Equalizer/Account are global overlays pushed from the top
+                                    // bar; pop them first so a tab's saved state never captures
+                                    // them (restoring such state made tab taps appear dead).
+                                    while (navController.currentDestination?.route in OVERLAY_ROUTES) {
+                                        navController.popBackStack()
+                                    }
                                     navController.navigate(dest.route) {
                                         popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                         launchSingleTop = true
