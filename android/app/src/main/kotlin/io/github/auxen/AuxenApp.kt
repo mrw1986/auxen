@@ -42,10 +42,21 @@ class AuxenApp : Application() {
     }
 
     /**
-     * Re-apply the AutoEq profile persisted by the Equalizer screen. Runs off
-     * the main thread because [AutoEqRepository.ensureLoaded] has a ~3s cold
-     * path. A profile that vanished after an asset update simply clears the
-     * setting — restore must never crash the app.
+     * Validate — and only if necessary re-apply — the AutoEq profile marker
+     * persisted by the Equalizer screen. Runs off the main thread because
+     * [AutoEqRepository.ensureLoaded] has a ~3s cold path. A profile that
+     * vanished after an asset update simply clears the setting — restore must
+     * never crash the app.
+     *
+     * [EqController.initialize] already restores the full [io.github.auxen.dsp.EqState]
+     * (filters, preamp, and the user's enabled flag) from DataStore, so once
+     * that has settled ([EqController.awaitInitialized]) re-applying the profile
+     * would be redundant and, worse, force `enabled = true` — clobbering a
+     * persisted `enabled = false` on every launch. So when the restored state
+     * already carries filters we only *validate* the marker (bundled name still
+     * in the index, or custom text still present) and clear it on a miss. We
+     * re-apply from the marker only when DataStore was empty/fresh (no filters),
+     * where the default `enabled = true` is correct.
      */
     private fun restoreAutoEqProfile() {
         appScope.launch {
@@ -53,13 +64,19 @@ class AuxenApp : Application() {
                 val saved = Graph.library.getSetting(KEY_AUTOEQ_PROFILE)
                 if (saved.isNullOrBlank()) return@runCatching
 
+                // Wait for the DataStore restore so `hasFilters` reflects a
+                // settled state rather than racing the load.
+                EqController.awaitInitialized()
+                val hasFilters = EqController.state.value.filters.isNotEmpty()
+
                 if (saved.startsWith("custom:")) {
                     val name = saved.removePrefix("custom:")
                     val text = Graph.library.getSetting(KEY_AUTOEQ_CUSTOM_TEXT)
-                    if (text.isNullOrBlank()) {
-                        Graph.library.setSetting(KEY_AUTOEQ_PROFILE, "")
-                    } else {
-                        EqController.importAutoEq(text, name)
+                    when {
+                        text.isNullOrBlank() -> Graph.library.setSetting(KEY_AUTOEQ_PROFILE, "")
+                        !hasFilters -> EqController.importAutoEq(text, name)
+                        // else: DataStore already restored the parametric state
+                        // (incl. the enabled flag); marker is valid, leave it.
                     }
                     return@runCatching
                 }
@@ -71,7 +88,10 @@ class AuxenApp : Application() {
                     Graph.library.setSetting(KEY_AUTOEQ_PROFILE, "")
                     return@runCatching
                 }
-                EqController.importAutoEq(Graph.autoEq.profileText(profile), profile.name)
+                if (!hasFilters) {
+                    EqController.importAutoEq(Graph.autoEq.profileText(profile), profile.name)
+                }
+                // else: marker validated against the index; DataStore state kept.
             }
         }
     }

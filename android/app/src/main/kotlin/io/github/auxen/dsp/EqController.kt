@@ -7,6 +7,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.media3.common.util.UnstableApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +35,9 @@ object EqController {
     private var processor: ParametricEqProcessor? = null
     private var appContext: Context? = null
 
+    @Volatile
+    private var initJob: Job? = null
+
     /** Called once from the playback service when it creates its audio sink. */
     fun attachProcessor(p: ParametricEqProcessor) {
         processor = p
@@ -44,11 +48,22 @@ object EqController {
     fun initialize(context: Context) {
         if (appContext != null) return
         appContext = context.applicationContext
-        scope.launch {
+        initJob = scope.launch {
             val stored = context.applicationContext.eqDataStore.data.first()[KEY_STATE] ?: return@launch
             runCatching { json.decodeFromString<EqState>(stored) }
                 .onSuccess { setState(it, persist = false) }
         }
+    }
+
+    /**
+     * Suspends until the DataStore restore started by [initialize] has settled,
+     * so a caller can read a fully-restored [state] instead of racing the load.
+     * Returns immediately if [initialize] was never called or already finished.
+     * Used by restore-on-start to decide whether the full [EqState] (filters,
+     * preamp, and the user's enabled flag) was already restored from DataStore.
+     */
+    internal suspend fun awaitInitialized() {
+        initJob?.join()
     }
 
     fun setState(newState: EqState, persist: Boolean = true) {

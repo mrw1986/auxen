@@ -69,13 +69,35 @@ class AutoEqRepository(context: Context) {
         }
     }
 
+    /**
+     * Returns the cached copy of `assets/autoeq.zip`, (re)copying it when stale.
+     *
+     * cacheDir survives app updates, so a "copy once if missing" check would
+     * keep serving an old database after the bundled asset changes. We instead
+     * re-copy whenever the cached file's length differs from the asset's
+     * uncompressed length ([assetZipLength]) — cheap to obtain and, since the
+     * copy is byte-for-byte, a reliable change signal across updates (two
+     * different AutoEq database builds virtually always differ in size).
+     */
     private fun cachedZip(): File {
         val cached = File(appContext.cacheDir, "autoeq.zip")
-        if (!cached.exists() || cached.length() == 0L) {
+        if (!cached.exists() || cached.length() != assetZipLength()) {
             appContext.assets.open("autoeq.zip").use { input ->
                 cached.outputStream().use { input.copyTo(it) }
             }
         }
         return cached
+    }
+
+    /**
+     * Uncompressed length of the bundled `autoeq.zip` asset. Prefers the asset
+     * file descriptor; AGP-compressed assets can't be opened as an fd, so we
+     * fall back to the asset stream's `available()`, which reports the full
+     * uncompressed length for an AssetManager stream.
+     */
+    private fun assetZipLength(): Long = runCatching {
+        appContext.assets.openFd("autoeq.zip").use { it.length }
+    }.getOrElse {
+        appContext.assets.open("autoeq.zip").use { it.available().toLong() }
     }
 }

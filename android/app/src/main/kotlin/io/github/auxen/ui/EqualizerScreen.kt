@@ -81,15 +81,20 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
     var results by remember { mutableStateOf<List<AutoEqProfile>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
     var activeProfile by remember { mutableStateOf<String?>(null) }
+    // Spam-guard for clearActiveProfileMarker: a slider drag fires onChange
+    // per-frame, so the first clear of a session persists once and the rest
+    // no-op. Re-armed (set false) whenever a new profile is applied below.
+    var markerCleared by remember { mutableStateOf(false) }
 
-    // Parse the ~1 MB index once (off the main thread) and read back the
-    // persisted active-profile name. ensureLoaded() has a ~3s cold path, so it
-    // must not block composition — LaunchedEffect suspends onto the IO
-    // dispatcher inside the repository.
+    // Hydrate the "Active: <name>" label FIRST from the persisted marker — a
+    // fast DB read that needs no index — so a band-drag in the first seconds
+    // has a marker to clear. ensureLoaded() (its ~3s cold path only gates
+    // search readiness) then runs; it must not block composition, so it
+    // suspends onto the IO dispatcher inside the repository.
     LaunchedEffect(Unit) {
+        activeProfile = Graph.library.getSetting(KEY_AUTOEQ_PROFILE).toActiveProfileName()
         repo.ensureLoaded()
         loaded = true
-        activeProfile = Graph.library.getSetting(KEY_AUTOEQ_PROFILE).toActiveProfileName()
     }
 
     // Recompute matches whenever the query changes or the index finishes
@@ -104,10 +109,13 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
     // "Active: <name>" lingers next to the graphic preset label and, worse,
     // restore-on-start re-applies the old profile over the user's graphic
     // edits at next launch. autoeq_custom_text is deliberately kept: a stored
-    // custom profile stays re-importable. Guarded so slider drags (which fire
-    // per-frame) don't spam DB writes.
+    // custom profile stays re-importable. The guard keys off `markerCleared`
+    // (not `activeProfile == null`) so the clear still persists during the
+    // cold-load window before the label has hydrated — otherwise an early
+    // band-drag would silently leave the stale marker on disk.
     fun clearActiveProfileMarker() {
-        if (activeProfile == null) return
+        if (markerCleared) return
+        markerCleared = true
         activeProfile = null
         scope.launch { Graph.library.setSetting(KEY_AUTOEQ_PROFILE, "") }
     }
@@ -128,6 +136,8 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
                 .onSuccess {
                     importError = null
                     activeProfile = displayName
+                    // Re-arm the clear guard for the newly-imported marker.
+                    markerCleared = false
                     scope.launch {
                         Graph.library.setSetting(KEY_AUTOEQ_CUSTOM_TEXT, text)
                         Graph.library.setSetting(KEY_AUTOEQ_PROFILE, "custom:$displayName")
@@ -222,7 +232,12 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
             results = results,
             noMatches = query.isNotBlank() && loaded && results.isEmpty(),
             onSelectProfile = { profile ->
-                applyAutoEq(scope, repo, profile) { activeProfile = it }
+                applyAutoEq(scope, repo, profile) {
+                    activeProfile = it
+                    // Re-arm the clear guard: a later band-drag must be able to
+                    // clear this freshly-applied marker.
+                    markerCleared = false
+                }
                 query = ""
             },
             onClearActive = {
