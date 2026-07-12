@@ -2,7 +2,6 @@ package io.github.auxen.ui
 
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,17 +15,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -46,8 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import coil.compose.AsyncImage
-import io.github.auxen.model.Source
-import io.github.auxen.model.Track
+import io.github.auxen.ui.components.AuxenTrackRow
 
 @UnstableApi
 @Composable
@@ -71,12 +65,16 @@ fun LibraryScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     } else {
         LazyColumn(modifier = modifier.fillMaxSize()) {
             items(tracks, key = { "${it.source}:${it.sourceId}" }) { track ->
-                TrackRow(
-                    track,
+                AuxenTrackRow(
+                    track = track,
                     isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
                     onPlay = { viewModel.play(track) },
-                    onEnqueue = { viewModel.enqueue(track) },
                     onToggleFavorite = { viewModel.toggleFavorite(track) },
+                    trailing = {
+                        IconButton(onClick = { viewModel.enqueue(track) }) {
+                            Icon(Icons.Filled.PlaylistAdd, contentDescription = "Add to queue")
+                        }
+                    },
                 )
             }
         }
@@ -106,59 +104,18 @@ fun SearchScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
         }
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(results, key = { "${it.source}:${it.sourceId}" }) { track ->
-                TrackRow(
-                    track,
+                AuxenTrackRow(
+                    track = track,
                     isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
                     onPlay = { viewModel.play(track) },
-                    onEnqueue = { viewModel.enqueue(track) },
                     onToggleFavorite = { viewModel.toggleFavorite(track) },
+                    trailing = {
+                        IconButton(onClick = { viewModel.enqueue(track) }) {
+                            Icon(Icons.Filled.PlaylistAdd, contentDescription = "Add to queue")
+                        }
+                    },
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun TrackRow(
-    track: Track,
-    isFavorite: Boolean,
-    onPlay: () -> Unit,
-    onEnqueue: () -> Unit,
-    onToggleFavorite: () -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onPlay).padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        AsyncImage(
-            model = track.albumArtUrl,
-            contentDescription = null,
-            modifier = Modifier.size(48.dp),
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(track.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                listOfNotNull(track.artist, track.album).joinToString(" — "),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Spacer(Modifier.width(8.dp))
-        AssistChip(
-            onClick = {},
-            label = { Text(if (track.source == Source.TIDAL) track.qualityLabel else "Local") },
-        )
-        IconButton(onClick = onToggleFavorite) {
-            Icon(
-                if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
-                tint = if (isFavorite) MaterialTheme.colorScheme.primary else LocalContentColor.current,
-            )
-        }
-        IconButton(onClick = onEnqueue) {
-            Icon(Icons.Filled.PlaylistAdd, contentDescription = "Add to queue")
         }
     }
 }
@@ -245,12 +202,16 @@ fun FavoritesScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     } else {
         LazyColumn(modifier = modifier.fillMaxSize()) {
             items(tracks, key = { "${it.source}:${it.sourceId}" }) { track ->
-                TrackRow(
-                    track,
+                AuxenTrackRow(
+                    track = track,
                     isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
                     onPlay = { viewModel.play(track) },
-                    onEnqueue = { viewModel.enqueue(track) },
                     onToggleFavorite = { viewModel.toggleFavorite(track) },
+                    trailing = {
+                        IconButton(onClick = { viewModel.enqueue(track) }) {
+                            Icon(Icons.Filled.PlaylistAdd, contentDescription = "Add to queue")
+                        }
+                    },
                 )
             }
         }
