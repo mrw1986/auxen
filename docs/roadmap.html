@@ -1,0 +1,240 @@
+<title>Auxen Android — Roadmap (Source of Truth)</title>
+<style>
+  :root {
+    --ground: #faf8f2; --surface: #ffffff; --elevated: #f1ede3;
+    --border: rgba(28,27,22,0.12); --text: #1c1b16; --text-2: #6b6860;
+    --accent: #b8860b; --accent-soft: rgba(184,134,11,0.12);
+    --done: #3e7a3c; --done-soft: rgba(62,122,60,0.12);
+    --active: #00747a; --active-soft: rgba(0,116,122,0.11);
+    --queued: #5a6572; --queued-soft: rgba(90,101,114,0.12);
+    --parked: #a4403c; --parked-soft: rgba(164,64,60,0.10);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0c0b0f; --surface: #141318; --elevated: #1c1b22;
+      --border: rgba(255,255,255,0.09); --text: #f0ece4; --text-2: #9e9a91;
+      --accent: #d4a039; --accent-soft: rgba(212,160,57,0.14);
+      --done: #7cb87a; --done-soft: rgba(124,184,122,0.13);
+      --active: #00c4cc; --active-soft: rgba(0,196,204,0.12);
+      --queued: #8f9aa8; --queued-soft: rgba(143,154,168,0.13);
+      --parked: #c75c5c; --parked-soft: rgba(199,92,92,0.11);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0c0b0f; --surface: #141318; --elevated: #1c1b22;
+    --border: rgba(255,255,255,0.09); --text: #f0ece4; --text-2: #9e9a91;
+    --accent: #d4a039; --accent-soft: rgba(212,160,57,0.14);
+    --done: #7cb87a; --done-soft: rgba(124,184,122,0.13);
+    --active: #00c4cc; --active-soft: rgba(0,196,204,0.12);
+    --queued: #8f9aa8; --queued-soft: rgba(143,154,168,0.13);
+    --parked: #c75c5c; --parked-soft: rgba(199,92,92,0.11);
+  }
+  :root[data-theme="light"] {
+    --ground: #faf8f2; --surface: #ffffff; --elevated: #f1ede3;
+    --border: rgba(28,27,22,0.12); --text: #1c1b16; --text-2: #6b6860;
+    --accent: #b8860b; --accent-soft: rgba(184,134,11,0.12);
+    --done: #3e7a3c; --done-soft: rgba(62,122,60,0.12);
+    --active: #00747a; --active-soft: rgba(0,116,122,0.11);
+    --queued: #5a6572; --queued-soft: rgba(90,101,114,0.12);
+    --parked: #a4403c; --parked-soft: rgba(164,64,60,0.10);
+  }
+
+  body {
+    background: var(--ground); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.55; margin: 0; padding: 2.5rem 1.25rem 4rem;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.6rem; }
+  .serif { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
+
+  header h1 { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: clamp(1.7rem, 4vw, 2.3rem); font-weight: 600; margin: 0 0 0.4rem; text-wrap: balance; }
+  header p { color: var(--text-2); margin: 0; max-width: 64ch; }
+  .meta { display: inline-flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.9rem; font-size: 0.8rem; color: var(--text-2); }
+  .meta span { background: var(--elevated); border: 1px solid var(--border); border-radius: 999px;
+    padding: 0.15rem 0.7rem; font-variant-numeric: tabular-nums; }
+
+  .chip { display: inline-block; border-radius: 999px; padding: 0.13rem 0.62rem;
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; white-space: nowrap; vertical-align: middle; }
+  .c-done { color: var(--done); background: var(--done-soft); }
+  .c-active { color: var(--active); background: var(--active-soft); }
+  .c-next { color: var(--accent); background: var(--accent-soft); }
+  .c-queued { color: var(--queued); background: var(--queued-soft); }
+  .c-parked { color: var(--parked); background: var(--parked-soft); }
+
+  .ms { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.25rem 1.4rem; }
+  .ms.next-up { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+  .ms h2 { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: 1.2rem; font-weight: 600; margin: 0; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+  .ms .scope { color: var(--text-2); font-size: 0.86rem; margin: 0.35rem 0 0.9rem; max-width: 70ch; }
+  .ms ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.9rem; }
+  .ms li { display: flex; gap: 0.6rem; align-items: baseline; }
+  .ms li::before { content: ""; flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--queued); position: relative; top: -0.12em; }
+  .ms li.done::before { background: var(--done); }
+  .ms li.doing::before { background: var(--active); }
+  .ms li span { color: var(--text-2); }
+  .dod { margin-top: 1rem; padding-top: 0.8rem; border-top: 1px dashed var(--border);
+    font-size: 0.82rem; color: var(--text-2); }
+  .dod b { color: var(--text); font-weight: 600; }
+
+  .lane { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-2); font-weight: 650; margin: 0.6rem 0 -0.6rem; }
+
+  .log { border: 1px solid var(--border); border-radius: 14px; background: var(--elevated); padding: 1.1rem 1.4rem; }
+  .log h2 { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: 1.05rem; margin: 0 0 0.6rem; }
+  .log table { border-collapse: collapse; width: 100%; font-size: 0.84rem; }
+  .log td { padding: 0.3rem 0.6rem 0.3rem 0; vertical-align: top; color: var(--text-2); }
+  .log td:first-child { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--text); font-weight: 550; }
+
+  footer { color: var(--text-2); font-size: 0.8rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Auxen Android — Roadmap</h1>
+    <p>The source of truth for everything between here and full desktop parity (and beyond it). Ordered by execution sequence; updated after every milestone, review, and scope decision. Companion to the <em>feature parity matrix</em>.</p>
+    <div class="meta">
+      <span>Updated 2026-07-12</span>
+      <span>@ 74f0db3</span>
+      <span>8 batches sequenced</span>
+    </div>
+  </header>
+
+  <p class="lane">In flight</p>
+
+  <div class="ms">
+    <h2>0 · Loose ends <span class="chip c-active">In progress</span></h2>
+    <p class="scope">Small items being closed out between milestones.</p>
+    <ul>
+      <li class="doing">CI emulator smoke flow — action-sheet step diagnosis <span>— screenshot diagnostic running; everything up to the long-press already passes on the CI emulator</span></li>
+      <li class="done">Feature parity matrix <span>— docs/feature-parity.html, published</span></li>
+      <li class="done">AutoEq picker keyboard fix + rename <span>— shipped in your current APK</span></li>
+    </ul>
+  </div>
+
+  <p class="lane">Next</p>
+
+  <div class="ms next-up">
+    <h2>1 · DSP &amp; Audio Suite <span class="chip c-next">Next up</span></h2>
+    <p class="scope">The Wavelet-class effects chain. Binding constraint: <b>every effect individually toggleable</b>, each with its own independently persisted enable flag — no coupling between effects. In-pipeline processors run in the same double-precision path as the EQ; platform effects attach to the audio session.</p>
+    <ul>
+      <li>Bass boost / bass tuner <span>— adjustable low-shelf (frequency + gain), in-pipeline</span></li>
+      <li>Channel balance <span>— per-channel gain, in-pipeline</span></li>
+      <li>Limiter <span>— soft-knee with attack/release, replaces today's hard clip; the real DSP work of the batch</span></li>
+      <li>Reverb <span>— platform PresetReverb via audio session</span></li>
+      <li>Virtualizer <span>— platform effect via audio session</span></li>
+      <li>ReplayGain <span>— tag-based volume normalization; desktop-parity item</span></li>
+      <li>Sleep timer <span>— folded in from the gap list; small, audio-adjacent</span></li>
+      <li>Per-effect toggle UI <span>— each section with its own switch; EQ's master toggle becomes section-scoped</span></li>
+    </ul>
+    <div class="dod"><b>Done means:</b> every effect audibly works with its own toggle, settings persist and restore independently, regression tests per processor, goldens for the new sections, shipped to your phone.</div>
+  </div>
+
+  <div class="ms">
+    <h2>2 · Desktop-Parity Screens &amp; Tidal Discovery <span class="chip c-queued">Queued</span></h2>
+    <p class="scope">The largest remaining batch: everything the desktop shows that Android doesn't yet, plus the Settings home for orphaned preferences. Design source: the inventory distilled from ui-mockup.html and auxen/views/.</p>
+    <ul>
+      <li>Tidal Home carousels <span>— personalized sections on Home when logged in</span></li>
+      <li>Explore <span>— genres, new releases, top tracks, Hi-Res section</span></li>
+      <li>Mixes &amp; Moods <span>— including save/remove mix actions</span></li>
+      <li>Collection: Tidal favorites merge <span>— favorites/albums/followed artists from the API alongside local</span></li>
+      <li>Favorites sync back to Tidal <span>— hearts push to your Tidal account (desktop favorites_sync)</span></li>
+      <li>Album detail: editorial review + similar albums <span>— Tidal enrichment</span></li>
+      <li>Artist detail: biography + similar artists <span>— Tidal enrichment</span></li>
+      <li>Track Radio / Artist Radio / Start Mix <span>— action-sheet entries</span></li>
+      <li>Context-menu completion <span>— Credits, Properties, and long-press sheets on album/artist cards</span></li>
+      <li>Settings screen <span>— theme toggle (system/dark/light), source priority, About; the home for future prefs</span></li>
+      <li>Queue screen <span>— view, jump, remove, drag-reorder (data layer already shipped)</span></li>
+    </ul>
+    <div class="dod"><b>Done means:</b> a Tidal-logged-in phone shows everything the desktop sidebar reaches, Settings exists, and the parity matrix's screen rows all read Shipped.</div>
+  </div>
+
+  <div class="ms">
+    <h2>3 · Quality &amp; Polish Pass <span class="chip c-queued">Queued</span></h2>
+    <p class="scope">The accumulated review backlog (every item was individually triaged as safe-to-defer) plus small parity gaps that fit the same sweep.</p>
+    <ul>
+      <li>Light-mode contrast pass <span>— badges + amber foregrounds via colorScheme, not hardcoded dark tokens</span></li>
+      <li>Rich local metadata enrichment <span>— bit depth / sample rate via MediaMetadataRetriever; fixes undersold FLAC badges</span></li>
+      <li>Artist image service <span>— circular artist art with disk cache, desktop-style</span></li>
+      <li>Scroll-position persistence <span>— was a P1 on desktop; carry over</span></li>
+      <li>Shuffle-aware play-next <span>— insert follows shuffle order when shuffle is on</span></li>
+      <li>Optimistic seek <span>— kill the 500 ms rubber-band after releasing the slider</span></li>
+      <li>Detail screens self-load after process death <span>— currently show 0 tracks if restored directly</span></li>
+      <li>Action-sheet dismiss animation + assorted minors <span>— stale dialog text, LazyList key hardening, StateFlow encapsulation, AutoEq hydration race, and the rest of the ledger's deferred list</span></li>
+    </ul>
+    <div class="dod"><b>Done means:</b> the deferred-minors ledger is empty or explicitly re-triaged; light mode passes a contrast check.</div>
+  </div>
+
+  <p class="lane">Then</p>
+
+  <div class="ms">
+    <h2>4 · Last.fm Scrobbling <span class="chip c-queued">Queued</span></h2>
+    <p class="scope">Standalone small batch; the desktop module's flow (auth, now-playing, scrobble on threshold) ports directly onto the existing play-recording hooks.</p>
+    <ul>
+      <li>Last.fm auth + settings entry</li>
+      <li>Now-playing updates + scrobbles <span>— driven by the same record-on-actual-play signal</span></li>
+      <li>Offline scrobble queue <span>— cache and submit when back online</span></li>
+    </ul>
+    <div class="dod"><b>Done means:</b> tracks you play on the phone appear on your Last.fm profile, including after offline listening.</div>
+  </div>
+
+  <div class="ms">
+    <h2>5 · Crossfade <span class="chip c-queued">Queued</span></h2>
+    <p class="scope">Real engine work: a second player instance with overlapping playback and gain ramps, coordinated with the queue and the DSP chain. Desktop has it; deliberately sequenced after the DSP suite so the chain architecture is settled first.</p>
+    <ul>
+      <li>Dual-player crossfade engine <span>— configurable duration, gapless fallback</span></li>
+      <li>Settings integration <span>— duration slider, on/off (individually toggleable, per the DSP rule)</span></li>
+    </ul>
+    <div class="dod"><b>Done means:</b> album playback can crossfade smoothly on-device without breaking gapless, queue persistence, or the EQ chain.</div>
+  </div>
+
+  <div class="ms">
+    <h2>6 · Smart Playlists <span class="chip c-queued">Queued</span></h2>
+    <p class="scope">The largest true gap — a rules engine, not a port. Schema for criteria (genre, year, play count, recency, source…), evaluation against the library, and management UI. Desktop's smart_playlists module is the behavioral spec.</p>
+    <ul>
+      <li>Rules schema + Room migration</li>
+      <li>Evaluation engine <span>— with tests mirroring desktop test_smart_playlists.py</span></li>
+      <li>Builder UI + Collection integration</li>
+    </ul>
+    <div class="dod"><b>Done means:</b> a rule-based playlist built on the phone matches what the same rules produce on desktop.</div>
+  </div>
+
+  <p class="lane">Later</p>
+
+  <div class="ms">
+    <h2>7 · Mobile Platform Features <span class="chip c-queued">Queued</span></h2>
+    <p class="scope">The original Android-native roadmap — things desktop can't do. Ordering within this batch is open.</p>
+    <ul>
+      <li>Android Auto <span>— MediaLibraryService browse tree</span></li>
+      <li>Chromecast / output routing</li>
+      <li>Home-screen widgets</li>
+      <li>Offline downloads <span>— local sync for Tidal content where licensing permits + local files</span></li>
+      <li>Per-device EQ profiles <span>— auto-switch on Bluetooth connect; the signature Wavelet UX</span></li>
+    </ul>
+  </div>
+
+  <div class="ms">
+    <h2>8 · Parked <span class="chip c-parked">Parked</span></h2>
+    <p class="scope">Not scheduled, with reasons — so they're decisions, not omissions.</p>
+    <ul>
+      <li>Spectrum visualizer <span>— blocked: Media3 exposes no real-time audio tap; revisit if a clean approach appears</span></li>
+      <li>M3U playlist export <span>— dropped: no consumer for the file on Android; say the word to revive</span></li>
+      <li>Mini-player floating window <span>— superseded: media notification + lock screen cover it</span></li>
+    </ul>
+  </div>
+
+  <div class="log">
+    <h2>Changelog</h2>
+    <table>
+      <tr><td>2026-07-12</td><td>Initial roadmap. Milestones 1–3b, AutoEq picker, and the testing suite already shipped (see parity matrix); sequence set as DSP → parity screens → polish → Last.fm → crossfade → smart playlists → platform features. Gap destinations from the parity review folded in.</td></tr>
+    </table>
+  </div>
+
+  <footer>
+    Maintained alongside <code>docs/feature-parity.html</code> in the repo; the published artifact URL is stable across updates. Progress ledger (per-task detail): <code>.superpowers/sdd/progress.md</code>.
+  </footer>
+</div>
