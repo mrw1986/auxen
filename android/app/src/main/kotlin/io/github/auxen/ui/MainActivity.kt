@@ -1,6 +1,7 @@
 package io.github.auxen.ui
 
 import android.Manifest
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -26,6 +27,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -132,12 +134,41 @@ private fun MainScreen(viewModel: PlayerViewModel) {
             modifier = Modifier.padding(innerPadding),
         ) {
             composable("home") { HomeScreen(viewModel) }
-            composable("library") { LibraryScreen(viewModel) }
+            composable("library") {
+                LibraryScreen(
+                    viewModel,
+                    onOpenAlbum = { album ->
+                        navController.navigate("album/${Uri.encode(album.album)}/${Uri.encode(album.albumArtist)}")
+                    },
+                    onOpenArtist = { artist -> navController.navigate("artist/${Uri.encode(artist)}") },
+                )
+            }
+            composable("album/{album}/{artist}") { backStack ->
+                DetailPlaceholder(
+                    title = Uri.decode(backStack.arguments?.getString("album") ?: ""),
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable("artist/{artist}") { backStack ->
+                DetailPlaceholder(
+                    title = Uri.decode(backStack.arguments?.getString("artist") ?: ""),
+                    onBack = { navController.popBackStack() },
+                )
+            }
             composable("search") { SearchScreen(viewModel) }
             composable("collection") { FavoritesScreen(viewModel) }
             composable("equalizer") { EqualizerScreen() }
             composable("account") { AccountScreen(viewModel) }
             composable("nowplaying") { NowPlayingScreen(viewModel, onBack = { navController.popBackStack() }) }
         }
+    }
+}
+
+/** Replaced by real detail screens in Task 7. */
+@Composable
+private fun DetailPlaceholder(title: String, onBack: () -> Unit) {
+    Column(modifier = Modifier.padding(24.dp)) {
+        TextButton(onClick = onBack) { Text("Back") }
+        Text(title, style = MaterialTheme.typography.displaySmall)
     }
 }

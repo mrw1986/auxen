@@ -79,6 +79,13 @@ class LibraryRepository(
     suspend fun setSourcePriority(priority: SourcePriority) =
         db.settingsDao().put(SettingEntity(KEY_SOURCE_PRIORITY, priority.name))
 
+    /** Read a raw settings value by key (desktop `get_setting`); null if unset. */
+    suspend fun getSetting(key: String): String? = db.settingsDao().get(key)
+
+    /** Persist a raw settings value by key (desktop `set_setting`). */
+    suspend fun setSetting(key: String, value: String) =
+        db.settingsDao().put(SettingEntity(key, value))
+
     /** Recent search queries, newest first — desktop get_search_history. */
     fun searchHistory(limit: Int = 10): Flow<List<String>> =
         db.searchHistoryDao().recent(limit).map { list -> list.map { it.query } }

@@ -14,6 +14,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
 import io.github.auxen.Graph
+import io.github.auxen.data.LibrarySort
 import io.github.auxen.db.PlaylistEntity
 import io.github.auxen.matching.DuplicateResolver
 import io.github.auxen.model.SourcePriority
@@ -80,6 +81,82 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     /** Current playback position and track duration, in milliseconds — polled while a controller exists. */
     val positionMs = MutableStateFlow(0L)
     val durationMs = MutableStateFlow(0L)
+
+    /** Selected Library tab (0=Albums, 1=Artists, 2=Tracks), persisted per session. */
+    val libraryTab = MutableStateFlow(0)
+
+    /** Active sort for the current Library tab, persisted per tab. */
+    val librarySort = MutableStateFlow(LibrarySort.RECENTLY_ADDED)
+
+    /** Sort direction for the current Library tab; true = ascending. */
+    val librarySortAscending = MutableStateFlow(true)
+
+    private fun libraryTabName(index: Int) = when (index) {
+        0 -> "albums"
+        1 -> "artists"
+        else -> "tracks"
+    }
+
+    private fun restoreLibraryState() {
+        viewModelScope.launch {
+            runCatching {
+                libraryTab.value = Graph.library.getSetting("library_tab")?.toIntOrNull()?.coerceIn(0, 2) ?: 0
+                restoreLibrarySortFor(libraryTab.value)
+            }
+        }
+    }
+
+    private suspend fun restoreLibrarySortFor(tab: Int) {
+        val name = libraryTabName(tab)
+        librarySort.value = Graph.library.getSetting("library_sort_$name")
+            ?.let { stored -> LibrarySort.entries.firstOrNull { it.name == stored } }
+            ?: LibrarySort.RECENTLY_ADDED
+        librarySortAscending.value = Graph.library.getSetting("library_dir_$name") != "desc"
+    }
+
+    fun setLibraryTab(index: Int) {
+        libraryTab.value = index
+        viewModelScope.launch {
+            runCatching {
+                Graph.library.setSetting("library_tab", index.toString())
+                restoreLibrarySortFor(index)
+            }
+        }
+    }
+
+    fun setLibrarySort(sort: LibrarySort) {
+        librarySort.value = sort
+        viewModelScope.launch {
+            runCatching { Graph.library.setSetting("library_sort_${libraryTabName(libraryTab.value)}", sort.name) }
+        }
+    }
+
+    fun toggleLibrarySortDirection() {
+        librarySortAscending.value = !librarySortAscending.value
+        viewModelScope.launch {
+            runCatching {
+                Graph.library.setSetting(
+                    "library_dir_${libraryTabName(libraryTab.value)}",
+                    if (librarySortAscending.value) "asc" else "desc",
+                )
+            }
+        }
+    }
+
+    /** Replace the queue with [tracks] and play — desktop Play All / Shuffle. */
+    fun playAll(tracks: List<Track>, shuffled: Boolean = false) {
+        if (tracks.isEmpty()) return
+        viewModelScope.launch {
+            val c = controller ?: return@launch
+            val ordered = if (shuffled) tracks.shuffled() else tracks
+            runCatching { ordered.forEach { Graph.library.upsert(it) } }
+            val items = ordered.mapNotNull { runCatching { Graph.mediaItemFor(it) }.getOrNull() }
+            if (items.isEmpty()) return@launch
+            c.setMediaItems(items)
+            c.prepare()
+            c.play()
+        }
+    }
 
     fun refreshRecentlyPlayed() {
         viewModelScope.launch {
@@ -151,6 +228,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             if (Graph.tidal.restoreSession()) _tidalLogin.value = TidalLoginState.LoggedIn
         }
+
+        restoreLibraryState()
     }
 
     fun loadLibrary() {

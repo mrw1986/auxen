@@ -20,7 +20,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,62 +33,6 @@ import androidx.media3.common.util.UnstableApi
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.TrackActionSheet
-
-@UnstableApi
-@Composable
-fun LibraryScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
-    val tracks by viewModel.localTracks.collectAsState()
-    val favoriteKeys by viewModel.favoriteKeys.collectAsState()
-    val playlists by viewModel.playlists.collectAsState()
-    var sheetTrack by remember { mutableStateOf<Track?>(null) }
-    LaunchedEffect(Unit) { viewModel.loadLibrary() }
-
-    if (tracks.isEmpty()) {
-        Column(
-            modifier = modifier.fillMaxSize().padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text("No local music found", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Grant the audio permission or add music to your device.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-    } else {
-        LazyColumn(modifier = modifier.fillMaxSize()) {
-            items(tracks, key = { "${it.source}:${it.sourceId}" }) { track ->
-                AuxenTrackRow(
-                    track = track,
-                    isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
-                    onPlay = { viewModel.play(track) },
-                    onToggleFavorite = { viewModel.toggleFavorite(track) },
-                    onLongPress = { sheetTrack = track },
-                    trailing = {
-                        IconButton(onClick = { viewModel.enqueue(track) }) {
-                            Icon(Icons.Filled.PlaylistAdd, contentDescription = "Add to queue")
-                        }
-                    },
-                )
-            }
-        }
-    }
-
-    sheetTrack?.let { track ->
-        TrackActionSheet(
-            track = track,
-            isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
-            playlists = playlists,
-            onDismiss = { sheetTrack = null },
-            onPlay = { viewModel.play(track) },
-            onPlayNext = { viewModel.playNext(track) },
-            onEnqueue = { viewModel.enqueue(track) },
-            onToggleFavorite = { viewModel.toggleFavorite(track) },
-            onAddToPlaylist = { viewModel.addToPlaylist(track, it) },
-            onCreatePlaylist = { viewModel.createPlaylistAndAdd(track, it) },
-        )
-    }
-}
 
 @UnstableApi
 @Composable

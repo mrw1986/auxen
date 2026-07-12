@@ -120,4 +120,11 @@ class LibraryRepositoryTest {
         repo.deleteSearchHistoryItem("radiohead")
         assertTrue(repo.searchHistory().first().isEmpty())
     }
+
+    @Test
+    fun settingsPassthroughRoundTrips() = runBlocking {
+        assertEquals(null, repo.getSetting("library_tab"))
+        repo.setSetting("library_tab", "2")
+        assertEquals("2", repo.getSetting("library_tab"))
+    }
 }
