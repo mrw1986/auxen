@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.serialization.decodeFromString
 
 /** UI-facing login status for the Tidal account screen. */
 sealed interface TidalLoginState {
@@ -45,6 +46,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     var nowPlaying: MediaMetadata? by mutableStateOf(null)
         private set
     var isPlaying: Boolean by mutableStateOf(false)
+        private set
+
+    /** The full track behind [nowPlaying], decoded from the media item's extras. */
+    var currentTrack: Track? by mutableStateOf(null)
+        private set
+    var shuffleEnabled: Boolean by mutableStateOf(false)
+        private set
+    var repeatMode: Int by mutableStateOf(Player.REPEAT_MODE_OFF)
         private set
 
     val localTracks = MutableStateFlow<List<Track>>(emptyList())
@@ -94,13 +103,27 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         future.addListener({
             val c = future.get()
             controller = c
+            // Seed state so a screen opened before any event shows the real values.
+            shuffleEnabled = c.shuffleModeEnabled
+            repeatMode = c.repeatMode
             c.addListener(object : Player.Listener {
                 override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
                     nowPlaying = mediaMetadata
+                    currentTrack = mediaMetadata.extras
+                        ?.getString(Graph.TRACK_EXTRA_KEY)
+                        ?.let { encoded -> runCatching { Graph.json.decodeFromString<Track>(encoded) }.getOrNull() }
                 }
 
                 override fun onIsPlayingChanged(playing: Boolean) {
                     isPlaying = playing
+                }
+
+                override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                    shuffleEnabled = shuffleModeEnabled
+                }
+
+                override fun onRepeatModeChanged(mode: Int) {
+                    repeatMode = mode
                 }
             })
         }, MoreExecutors.directExecutor())
@@ -208,6 +231,21 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun seekTo(ms: Long) {
         controller?.seekTo(ms)
+    }
+
+    fun toggleShuffle() {
+        controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled }
+    }
+
+    /** Off -> All -> One -> Off, like the desktop repeat button. */
+    fun cycleRepeat() {
+        controller?.let {
+            it.repeatMode = when (it.repeatMode) {
+                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                else -> Player.REPEAT_MODE_OFF
+            }
+        }
     }
 
     fun startTidalLogin() {

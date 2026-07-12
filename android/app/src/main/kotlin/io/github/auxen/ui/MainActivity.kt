@@ -26,7 +26,6 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -138,16 +137,7 @@ private fun MainScreen(viewModel: PlayerViewModel) {
             composable("collection") { FavoritesScreen(viewModel) }
             composable("equalizer") { EqualizerScreen() }
             composable("account") { AccountScreen(viewModel) }
-            composable("nowplaying") { NowPlayingScreenPlaceholder(onBack = { navController.popBackStack() }) }
+            composable("nowplaying") { NowPlayingScreen(viewModel, onBack = { navController.popBackStack() }) }
         }
-    }
-}
-
-/** Replaced by the real NowPlayingScreen in Task 6. */
-@Composable
-private fun NowPlayingScreenPlaceholder(onBack: () -> Unit) {
-    Column(modifier = Modifier.padding(24.dp)) {
-        TextButton(onClick = onBack) { Text("Back") }
-        Text("Now Playing", style = MaterialTheme.typography.displaySmall)
     }
 }
