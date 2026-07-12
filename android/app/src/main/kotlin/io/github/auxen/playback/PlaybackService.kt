@@ -20,6 +20,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
 import androidx.media3.session.MediaSessionService
@@ -29,6 +31,7 @@ import io.github.auxen.Graph
 import io.github.auxen.dsp.EqController
 import io.github.auxen.dsp.ParametricEqProcessor
 import io.github.auxen.model.Track
+import io.github.auxen.provider.StreamInfo
 import io.github.auxen.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +67,11 @@ class PlaybackService : MediaSessionService() {
     /** Last expiry-recovery attempt (elapsedRealtime), bounding the 4xx retry path. */
     private var lastExpiryRecoveryAtMillis = 0L
 
+    /** MediaId awaiting its first actual playback before a play is recorded. */
+    private var pendingPlayMediaId: String? = null
+
+    private var preResolveJob: Job? = null
+
     override fun onCreate() {
         super.onCreate()
 
@@ -76,7 +84,10 @@ class PlaybackService : MediaSessionService() {
         )
 
         val player = ExoPlayer.Builder(this, EqRenderersFactory(this, eqProcessor))
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(dataSourceFactory)
+                    .setLoadErrorHandlingPolicy(AuxenLoadErrorPolicy()),
+            )
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -90,9 +101,13 @@ class PlaybackService : MediaSessionService() {
 
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                val mediaId = mediaItem?.mediaId ?: return
-                serviceScope.launch { runCatching { Graph.library.recordPlay(mediaId) } }
+                pendingPlayMediaId = mediaItem?.mediaId
+                // Records immediately for mid-playback transitions (isPlaying
+                // still true); defers to onIsPlayingChanged for cold starts and
+                // paused queue edits, so restores never count as plays.
+                maybeRecordPendingPlay(player)
                 scheduleQueueSave(player)
+                preResolveUpcoming(player)
             }
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
@@ -100,7 +115,11 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (!isPlaying) scheduleQueueSave(player)
+                if (isPlaying) maybeRecordPendingPlay(player) else scheduleQueueSave(player)
+            }
+
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (playWhenReady) preResolveUpcoming(player)
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -108,25 +127,7 @@ class PlaybackService : MediaSessionService() {
 
                 val dash = findCause<TidalDashStreamException>(error)
                 if (dash != null) {
-                    // Swap every still-unresolved copy of the failing track —
-                    // mediaIds are not unique in a playlist, and repairing only
-                    // the first copy would loop forever on duplicates.
-                    val targetMediaId = "TIDAL:${dash.trackId}"
-                    var swapped = false
-                    for (i in 0 until currentPlayer.mediaItemCount) {
-                        val queued = currentPlayer.getMediaItemAt(i)
-                        if (queued.mediaId != targetMediaId) continue
-                        if (queued.localConfiguration?.uri?.scheme != "auxen") continue
-                        currentPlayer.replaceMediaItem(
-                            i,
-                            queued.buildUpon()
-                                .setUri(dash.streamInfo.uri)
-                                .setMimeType(MimeTypes.APPLICATION_MPD)
-                                .build(),
-                        )
-                        swapped = true
-                    }
-                    if (!swapped) return
+                    if (!swapDashCopies(currentPlayer, dash.trackId, dash.streamInfo)) return
                     currentPlayer.prepare()
                     currentPlayer.play()
                     return
@@ -205,6 +206,66 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    /** Record the pending item's play once the player is actually playing. */
+    private fun maybeRecordPendingPlay(player: Player) {
+        val mediaId = pendingPlayMediaId ?: return
+        if (!player.isPlaying) return
+        pendingPlayMediaId = null
+        serviceScope.launch { runCatching { Graph.library.recordPlay(mediaId) } }
+    }
+
+    /**
+     * Swap every still-unresolved (auxen-scheme) copy of the given Tidal track
+     * for its resolved DASH manifest. Returns true if anything was swapped.
+     */
+    private fun swapDashCopies(player: Player, trackId: String, streamInfo: StreamInfo): Boolean {
+        val targetMediaId = "TIDAL:$trackId"
+        var swapped = false
+        for (i in 0 until player.mediaItemCount) {
+            val queued = player.getMediaItemAt(i)
+            if (queued.mediaId != targetMediaId) continue
+            if (queued.localConfiguration?.uri?.scheme != "auxen") continue
+            player.replaceMediaItem(
+                i,
+                queued.buildUpon()
+                    .setUri(streamInfo.uri)
+                    .setMimeType(MimeTypes.APPLICATION_MPD)
+                    .build(),
+            )
+            swapped = true
+        }
+        return swapped
+    }
+
+    /**
+     * Resolve the current and next Tidal items ahead of playback and swap
+     * DASH copies proactively, so Hi-Res tracks play without bouncing
+     * through onPlayerError. Only runs when playback is intended
+     * (playWhenReady) — a paused restored queue stays unresolved.
+     */
+    private fun preResolveUpcoming(player: Player) {
+        if (!player.playWhenReady) return
+        if (player.mediaItemCount == 0) return
+        val current = player.currentMediaItemIndex
+        val ids = listOf(current, current + 1)
+            .filter { it < player.mediaItemCount }
+            .mapNotNull { i ->
+                val uri = player.getMediaItemAt(i).localConfiguration?.uri
+                if (uri?.scheme == "auxen") uri.lastPathSegment else null
+            }
+        if (ids.isEmpty()) return
+        preResolveJob?.cancel()
+        preResolveJob = serviceScope.launch {
+            for (id in ids) {
+                val info = runCatching { Graph.resolver.resolve(id) }.getOrNull() ?: continue
+                if (!info.uri.startsWith("data:")) continue
+                withContext(Dispatchers.Main) {
+                    mediaSession?.player?.let { p -> swapDashCopies(p, id, info) }
+                }
+            }
+        }
+    }
+
     private inner class AuxenSessionCallback : MediaSession.Callback {
         override fun onPlaybackResumption(
             mediaSession: MediaSession,
@@ -256,6 +317,7 @@ class PlaybackService : MediaSessionService() {
             release()
             mediaSession = null
         }
+        preResolveJob?.cancel()
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -270,6 +332,15 @@ private inline fun <reified T : Throwable> findCause(error: Throwable): T? {
         cause = cause.cause
     }
     return null
+}
+
+/** Skips load retries for errors that can only be fixed by a media-item swap. */
+@UnstableApi
+private class AuxenLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
+    override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+        if (findCause<TidalDashStreamException>(loadErrorInfo.exception) != null) return C.TIME_UNSET
+        return super.getRetryDelayMsFor(loadErrorInfo)
+    }
 }
 
 /** Renderers factory that injects the EQ into a float-output audio sink. */

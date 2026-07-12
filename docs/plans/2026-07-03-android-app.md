@@ -91,6 +91,10 @@ uses via `auxen.tidalClientId` / `auxen.tidalClientSecret` Gradle properties.
 Playlist UI is intentionally deferred to milestone 3; the DB layer and DAOs
 (favorites, playlists, play counts) landed in milestone 2.
 
+The very first track of a cold-start Hi-Res queue may still resolve through
+the (now non-retried) error path if the user hits play before pre-resolution
+completes; all subsequent transitions pre-swap gaplessly.
+
 ## Building
 
 Requires Android Studio (or SDK + JDK 17+):
