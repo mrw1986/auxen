@@ -100,7 +100,6 @@ jobs:
           target: google_apis
           disable-animations: true
           script: |
-            export PATH="$PATH:$HOME/.maestro/bin"
             adb install -r apk/app-debug.apk
             # Pre-grant so no runtime permission dialog blocks the flow.
             adb shell pm grant io.github.auxen android.permission.READ_MEDIA_AUDIO
@@ -119,7 +118,9 @@ jobs:
             # fit on one physical line.
             for i in $(seq 1 20); do adb shell content query --uri content://media/external/audio/media --projection title 2>/dev/null | grep -q "Smoke Tone" && break; sleep 2; done
             adb shell content query --uri content://media/external/audio/media --projection title | grep "Smoke Tone"
-            maestro test --debug-output "$GITHUB_WORKSPACE/maestro-debug" android/maestro/smoke.yaml
+            # Absolute path: each script line runs in its own sh, so an
+            # earlier `export PATH` line would not reach this one.
+            $HOME/.maestro/bin/maestro test --debug-output "$GITHUB_WORKSPACE/maestro-debug" android/maestro/smoke.yaml
 
       - name: Upload Maestro debug output
         if: always()
