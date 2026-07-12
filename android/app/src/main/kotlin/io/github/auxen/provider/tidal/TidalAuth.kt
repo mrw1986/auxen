@@ -66,6 +66,10 @@ class TidalAuth(context: Context, private val client: OkHttpClient) {
      * is what the UI shows / opens for the user.
      */
     suspend fun requestDeviceAuthorization(): DeviceAuthorization = withContext(Dispatchers.IO) {
+        check(credentialsConfigured(BuildConfig.TIDAL_CLIENT_ID, BuildConfig.TIDAL_CLIENT_SECRET)) {
+            "Tidal credentials are not configured in this build — add " +
+                "auxen.tidalClientId/auxen.tidalClientSecret to ~/.gradle/gradle.properties and rebuild"
+        }
         val body = FormBody.Builder()
             .add("client_id", BuildConfig.TIDAL_CLIENT_ID)
             .add("scope", SCOPE)
@@ -144,11 +148,15 @@ class TidalAuth(context: Context, private val client: OkHttpClient) {
         return session
     }
 
-    private companion object {
+    internal companion object {
         const val AUTH_BASE = "https://auth.tidal.com/v1/oauth2"
         const val SCOPE = "r_usr w_usr w_sub"
         val KEY_ACCESS = stringPreferencesKey("access_token")
         val KEY_REFRESH = stringPreferencesKey("refresh_token")
         val KEY_EXPIRES = stringPreferencesKey("expires_at")
+
+        /** True when both build-time Tidal credentials are present. */
+        fun credentialsConfigured(clientId: String, clientSecret: String): Boolean =
+            clientId.isNotBlank() && clientSecret.isNotBlank()
     }
 }
