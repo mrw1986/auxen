@@ -106,6 +106,15 @@ class DaoTest {
     }
 
     @Test
+    fun appendTrackDedupesLikeDesktop() = runBlocking {
+        val t1 = db.trackDao().upsert(track("1").toEntity(), nowMillis = 1)
+        val pl = db.playlistDao().insert(PlaylistEntity(name = "Mix", color = "#d4a039"))
+        db.playlistDao().appendTrack(pl, t1)
+        db.playlistDao().appendTrack(pl, t1)
+        assertEquals(listOf("Song 1"), db.playlistDao().tracksIn(pl).map { it.title })
+    }
+
+    @Test
     fun playlistReorderAndRecolor() = runBlocking {
         val t1 = db.trackDao().upsert(track("1").toEntity(), nowMillis = 1)
         val t2 = db.trackDao().upsert(track("2").toEntity(), nowMillis = 1)

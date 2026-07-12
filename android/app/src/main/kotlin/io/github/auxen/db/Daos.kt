@@ -102,8 +102,13 @@ interface PlaylistDao {
     @Query("SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = :playlistId")
     suspend fun nextPosition(playlistId: Long): Int
 
+    @Query("SELECT EXISTS(SELECT 1 FROM playlist_tracks WHERE playlist_id = :playlistId AND track_id = :trackId)")
+    suspend fun containsTrack(playlistId: Long, trackId: Long): Boolean
+
+    /** Append if absent — desktop add_track_to_playlist no-ops on duplicates. */
     @Transaction
     suspend fun appendTrack(playlistId: Long, trackId: Long) {
+        if (containsTrack(playlistId, trackId)) return
         insertTrack(PlaylistTrackEntity(playlistId, trackId, nextPosition(playlistId)))
     }
 
