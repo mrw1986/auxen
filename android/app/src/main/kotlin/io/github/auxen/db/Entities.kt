@@ -86,3 +86,10 @@ data class QueueItemEntity(
     @PrimaryKey val position: Int,
     @ColumnInfo(name = "track_json") val trackJson: String,
 )
+
+/** Recent search queries — desktop `search_history` table. */
+@Entity(tableName = "search_history")
+data class SearchHistoryEntity(
+    @PrimaryKey val query: String,
+    @ColumnInfo(name = "searched_at") val searchedAtMillis: Long,
+)

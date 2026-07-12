@@ -152,3 +152,18 @@ interface QueueDao {
     @Query("SELECT * FROM queue_items ORDER BY position")
     suspend fun all(): List<QueueItemEntity>
 }
+
+@Dao
+interface SearchHistoryDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun put(entry: SearchHistoryEntity)
+
+    @Query("SELECT * FROM search_history ORDER BY searched_at DESC LIMIT :limit")
+    fun recent(limit: Int): Flow<List<SearchHistoryEntity>>
+
+    @Query("DELETE FROM search_history WHERE `query` = :query")
+    suspend fun delete(query: String)
+
+    @Query("DELETE FROM search_history")
+    suspend fun clear()
+}

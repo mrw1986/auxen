@@ -4,6 +4,7 @@ import io.github.auxen.db.AuxenDatabase
 import io.github.auxen.db.FavoriteEntity
 import io.github.auxen.db.PlayHistoryEntity
 import io.github.auxen.db.PlaylistEntity
+import io.github.auxen.db.SearchHistoryEntity
 import io.github.auxen.db.SettingEntity
 import io.github.auxen.db.toEntity
 import io.github.auxen.db.toTrack
@@ -77,6 +78,20 @@ class LibraryRepository(
 
     suspend fun setSourcePriority(priority: SourcePriority) =
         db.settingsDao().put(SettingEntity(KEY_SOURCE_PRIORITY, priority.name))
+
+    /** Recent search queries, newest first — desktop get_search_history. */
+    fun searchHistory(limit: Int = 10): Flow<List<String>> =
+        db.searchHistoryDao().recent(limit).map { list -> list.map { it.query } }
+
+    suspend fun addSearchHistory(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return
+        db.searchHistoryDao().put(SearchHistoryEntity(trimmed, clock()))
+    }
+
+    suspend fun deleteSearchHistoryItem(query: String) = db.searchHistoryDao().delete(query)
+
+    suspend fun clearSearchHistory() = db.searchHistoryDao().clear()
 
     private companion object {
         const val KEY_SOURCE_PRIORITY = "source_priority"

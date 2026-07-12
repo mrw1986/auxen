@@ -109,4 +109,15 @@ class LibraryRepositoryTest {
         repo.recordPlay("TIDAL:99")
         assertEquals(listOf("Everlong"), repo.recentlyPlayed().map { it.title })
     }
+
+    @Test
+    fun searchHistoryRoundTripsTrimmedAndIgnoresBlank() = runBlocking {
+        repo.addSearchHistory("  radiohead  ")
+        repo.addSearchHistory("")
+        repo.addSearchHistory("   ")
+        assertEquals(listOf("radiohead"), repo.searchHistory().first())
+
+        repo.deleteSearchHistoryItem("radiohead")
+        assertTrue(repo.searchHistory().first().isEmpty())
+    }
 }
