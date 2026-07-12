@@ -17,6 +17,7 @@ import io.github.auxen.model.Track
 import io.github.auxen.ui.AutoEqPickerResults
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.AuxenTrackRow
+import io.github.auxen.ui.components.BrandBlock
 import io.github.auxen.ui.components.QualityBadge
 import io.github.auxen.ui.components.SectionHeader
 import io.github.auxen.ui.components.SourceBadge
@@ -226,6 +227,28 @@ class ComponentScreenshotTest {
             onShowPlaylists = {},
             onNewPlaylist = {},
         )
+    }
+
+    // --- BrandBlock (full + compact) ---
+
+    @Test
+    fun brandBlockFull_light() = captureComponent("brand-block-full-light", darkTheme = false) {
+        BrandBlock()
+    }
+
+    @Test
+    fun brandBlockFull_dark() = captureComponent("brand-block-full-dark", darkTheme = true) {
+        BrandBlock()
+    }
+
+    @Test
+    fun brandBlockCompact_light() = captureComponent("brand-block-compact-light", darkTheme = false) {
+        BrandBlock(compact = true)
+    }
+
+    @Test
+    fun brandBlockCompact_dark() = captureComponent("brand-block-compact-dark", darkTheme = true) {
+        BrandBlock(compact = true)
     }
 
     // --- AutoEq picker (active-profile row + fake search results) ---

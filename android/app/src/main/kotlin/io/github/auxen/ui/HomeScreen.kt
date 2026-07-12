@@ -21,13 +21,16 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
+import io.github.auxen.R
 import io.github.auxen.data.groupAlbums
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.AuxenTrackRow
+import io.github.auxen.ui.components.BrandBlock
 import io.github.auxen.ui.components.SectionHeader
 import io.github.auxen.ui.theme.AuxenColors
 import java.util.Calendar
@@ -63,6 +66,12 @@ fun HomeScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     }
 
     LazyColumn(modifier = modifier.fillMaxSize()) {
+        item {
+            BrandBlock(
+                compact = true,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+        }
         item {
             Text(
                 greetingForHour(Calendar.getInstance().get(Calendar.HOUR_OF_DAY)),
@@ -133,6 +142,11 @@ fun HomeScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                     Text(
                         "Play something from your Library or Search.",
                         style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        stringResource(R.string.empty_home_flavor),
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }

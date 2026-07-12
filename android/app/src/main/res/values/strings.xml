@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Auxen</string>
+    <string name="brand_name">AUXEN</string>
+    <string name="brand_tagline">UNORTHODOX AUDIO</string>
+    <string name="empty_home_flavor">Feed the ox — play something to get started.</string>
 </resources>

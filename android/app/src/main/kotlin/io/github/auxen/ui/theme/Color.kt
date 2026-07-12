@@ -24,4 +24,9 @@ object AuxenColors {
     val TidalBlue = Color(0xFF00C4CC)
     val LocalGreen = Color(0xFF7CB87A)
     val FavoriteRed = Color(0xFFC75C5C)
+
+    // Brand block — desktop .sidebar-brand-title/.sidebar-brand-subtitle colors
+    val BrandGold = Color(0xFFE0B868)
+    val BrandTitleOnLight = Color(0xFF8A6010)
+    val BrandSubtitleOnLight = Color(0xFF7A5820)
 }

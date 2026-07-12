@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
+import io.github.auxen.ui.components.BrandBlock
 
 @UnstableApi
 @Composable
@@ -28,6 +29,7 @@ fun AccountScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
         modifier = modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        BrandBlock()
         Text("Tidal", style = MaterialTheme.typography.headlineSmall)
         when (val state = loginState) {
             is TidalLoginState.LoggedOut -> {
