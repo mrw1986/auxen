@@ -20,10 +20,12 @@ import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
 import io.github.auxen.playback.PlaybackService
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /** UI-facing login status for the Tidal account screen. */
@@ -66,6 +68,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     /** Recently played tracks for the Home screen; refreshed on demand. */
     val recentlyPlayed = MutableStateFlow<List<Track>>(emptyList())
 
+    /** Current playback position and track duration, in milliseconds — polled while a controller exists. */
+    val positionMs = MutableStateFlow(0L)
+    val durationMs = MutableStateFlow(0L)
+
     fun refreshRecentlyPlayed() {
         viewModelScope.launch {
             runCatching { Graph.library.recentlyPlayed() }.onSuccess { recentlyPlayed.value = it }
@@ -98,6 +104,16 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 }
             })
         }, MoreExecutors.directExecutor())
+
+        viewModelScope.launch {
+            while (isActive) {
+                controller?.let {
+                    positionMs.value = it.currentPosition.coerceAtLeast(0)
+                    durationMs.value = it.duration.coerceAtLeast(0)
+                }
+                delay(500)
+            }
+        }
 
         viewModelScope.launch {
             if (Graph.tidal.restoreSession()) _tidalLogin.value = TidalLoginState.LoggedIn
@@ -180,6 +196,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             }
             else -> c.play()
         }
+    }
+
+    fun skipNext() {
+        controller?.seekToNext()
+    }
+
+    fun skipPrevious() {
+        controller?.seekToPrevious()
+    }
+
+    fun seekTo(ms: Long) {
+        controller?.seekTo(ms)
     }
 
     fun startTidalLogin() {

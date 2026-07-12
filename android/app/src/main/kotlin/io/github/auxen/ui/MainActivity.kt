@@ -37,6 +37,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import io.github.auxen.ui.components.MiniPlayerBar
 
 /** A bottom-nav tab: its route, label, and icon. */
 private data class Destination(val route: String, val label: String, val icon: @Composable () -> Unit)
@@ -105,7 +106,7 @@ private fun MainScreen(viewModel: PlayerViewModel) {
         bottomBar = {
             if (currentRoute != "nowplaying") {
                 Column {
-                    NowPlayingBar(viewModel)
+                    MiniPlayerBar(viewModel, onOpen = { navController.navigate("nowplaying") })
                     NavigationBar {
                         destinations.forEach { dest ->
                             NavigationBarItem(
