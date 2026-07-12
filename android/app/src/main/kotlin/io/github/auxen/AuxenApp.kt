@@ -6,6 +6,8 @@ import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
+import io.github.auxen.data.LibraryRepository
+import io.github.auxen.db.AuxenDatabase
 import io.github.auxen.dsp.EqController
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
@@ -38,6 +40,10 @@ object Graph {
         private set
     lateinit var tidal: TidalProvider
         private set
+    lateinit var db: AuxenDatabase
+        private set
+    lateinit var library: LibraryRepository
+        private set
 
     fun init(context: Context) {
         httpClient = OkHttpClient.Builder()
@@ -47,6 +53,8 @@ object Graph {
         local = LocalProvider(context)
         tidalAuth = TidalAuth(context, httpClient)
         tidal = TidalProvider(tidalAuth, httpClient)
+        db = AuxenDatabase.build(context)
+        library = LibraryRepository(db)
     }
 
     /**
