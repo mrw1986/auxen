@@ -26,6 +26,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,8 +61,9 @@ fun TrackActionSheet(
     var showPlaylists by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         TrackActionSheetContent(
             track = track,
             isFavorite = isFavorite,
