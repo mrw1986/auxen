@@ -52,10 +52,9 @@ jobs:
   emulator-smoke:
     runs-on: ubuntu-latest
     needs: build
-    # TODO(auxen): remove `continue-on-error` after two consecutive green
-    # emulator-smoke runs. First landing keeps it advisory as flaky-emulator
-    # insurance so a wobbly emulator can't red the whole workflow.
-    continue-on-error: true
+    # Required since 2026-07-12 after two consecutive green runs
+    # (29207916463, 29208254002). If emulator flakiness ever becomes chronic,
+    # prefer fixing the flake source over re-adding continue-on-error.
     steps:
       - uses: actions/checkout@v4
 
