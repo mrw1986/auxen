@@ -33,6 +33,11 @@ val Fraunces = FontFamily(
     variable(R.font.fraunces, FontWeight.SemiBold),
 )
 
+/** Josefin Sans — brand wordmark face, per desktop .sidebar-brand-title/.splash-title. */
+val JosefinSans = FontFamily(
+    variable(R.font.josefin_sans, FontWeight.Bold),
+)
+
 /**
  * Material type scale mapped to the desktop mockup's sizes: Fraunces for
  * greeting/brand/section titles, DM Sans for rows, labels, and badges.

@@ -30,7 +30,6 @@ import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.AuxenTrackRow
-import io.github.auxen.ui.components.BrandBlock
 import io.github.auxen.ui.components.SectionHeader
 import io.github.auxen.ui.theme.AuxenColors
 import java.util.Calendar
@@ -66,12 +65,6 @@ fun HomeScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     }
 
     LazyColumn(modifier = modifier.fillMaxSize()) {
-        item {
-            BrandBlock(
-                compact = true,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            )
-        }
         item {
             Text(
                 greetingForHour(Calendar.getInstance().get(Calendar.HOUR_OF_DAY)),

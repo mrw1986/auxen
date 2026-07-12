@@ -18,7 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.auxen.R
 import io.github.auxen.ui.theme.AuxenColors
-import io.github.auxen.ui.theme.Fraunces
+import io.github.auxen.ui.theme.JosefinSans
 
 /**
  * Desktop sidebar brand row (auxen/views/sidebar.py): theme-aware ox logo,
@@ -46,11 +46,11 @@ fun BrandBlock(compact: Boolean = false, modifier: Modifier = Modifier) {
         Column {
             Text(
                 stringResource(R.string.brand_name),
-                fontFamily = Fraunces,
+                fontFamily = JosefinSans,
                 fontWeight = FontWeight.Bold,
                 fontSize = if (compact) 16.sp else 22.sp,
                 letterSpacing = 1.sp,
-                color = if (dark) AuxenColors.TextPrimary else AuxenColors.BrandTitleOnLight,
+                color = if (dark) AuxenColors.BrandTitleGold else AuxenColors.BrandTitleOnLight,
             )
             if (!compact) {
                 Text(

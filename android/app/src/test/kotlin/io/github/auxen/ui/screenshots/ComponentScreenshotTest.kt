@@ -3,6 +3,13 @@ package io.github.auxen.ui.screenshots
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Equalizer
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -66,7 +73,15 @@ import org.robolectric.annotation.GraphicsMode
  * repository / `Graph` singleton). It is rendered with a hardcoded 3-entry
  * fake result list rather than a real search over the bundled AutoEq
  * database, so the golden can never drift when the database asset changes.
+ *
+ * ## Top-bar-brand surface — composed context, not BrandBlock in isolation
+ * The `top-bar-brand-*` goldens capture [BrandBlock] the way `MainActivity`
+ * actually uses it: as a `CenterAlignedTopAppBar` title alongside the real
+ * equalizer/account action icons, rather than standalone. This pins the
+ * actual on-screen treatment (sizing/centering next to the actions), which
+ * the standalone `brand-block-*` goldens above don't exercise.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = TEST_DEVICE, sdk = [35])
@@ -249,6 +264,29 @@ class ComponentScreenshotTest {
     @Test
     fun brandBlockCompact_dark() = captureComponent("brand-block-compact-dark", darkTheme = true) {
         BrandBlock(compact = true)
+    }
+
+    // --- Top bar with BrandBlock title (composed context — see class KDoc) ---
+
+    @Test
+    fun topBarBrand_light() = captureComponent("top-bar-brand-light", darkTheme = false) { TopBarBrandPreview() }
+
+    @Test
+    fun topBarBrand_dark() = captureComponent("top-bar-brand-dark", darkTheme = true) { TopBarBrandPreview() }
+
+    @Composable
+    private fun TopBarBrandPreview() {
+        CenterAlignedTopAppBar(
+            title = { BrandBlock(compact = true) },
+            actions = {
+                IconButton(onClick = {}) {
+                    Icon(Icons.Filled.Equalizer, contentDescription = "Equalizer")
+                }
+                IconButton(onClick = {}) {
+                    Icon(Icons.Filled.Person, contentDescription = "Account")
+                }
+            },
+        )
     }
 
     // --- AutoEq picker (active-profile row + fake search results) ---

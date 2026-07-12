@@ -43,6 +43,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import io.github.auxen.ui.components.BrandBlock
 import io.github.auxen.ui.components.MiniPlayerBar
 
 /** A bottom-nav tab: its route, label, and icon. */
@@ -101,7 +102,11 @@ private fun MainScreen(viewModel: PlayerViewModel) {
         topBar = {
             if (currentRoute != "nowplaying") {
                 CenterAlignedTopAppBar(
-                    title = { Text("Auxen", style = MaterialTheme.typography.headlineSmall) },
+                    // The top bar is the Android analog of the desktop sidebar
+                    // brand block; suppressed on "account", which shows its own
+                    // full BrandBlock at the top of its content instead, so the
+                    // brand appears exactly once per screen.
+                    title = { if (currentRoute != "account") BrandBlock(compact = true) },
                     actions = {
                         IconButton(onClick = { navController.navigate("equalizer") { launchSingleTop = true } }) {
                             Icon(Icons.Filled.Equalizer, contentDescription = "Equalizer")
