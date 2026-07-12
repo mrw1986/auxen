@@ -108,7 +108,17 @@ jobs:
             # Seed local media (emulator has none by default) and index it.
             adb shell mkdir -p /sdcard/Music
             adb push smoke-tone.mp3 /sdcard/Music/smoke-tone.mp3
-            adb shell cmd media scan /sdcard/Music/smoke-tone.mp3
+            # API 30+ media indexing: MediaProvider's scan_file content call
+            # ("cmd media scan" has no such service on modern images); legacy
+            # broadcast kept as a harmless belt-and-suspenders fallback.
+            adb shell content call --uri content://media/ --method scan_file --arg /sdcard/Music/smoke-tone.mp3 || true
+            adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Music/smoke-tone.mp3 || true
+            # Deterministic gate: wait until MediaStore actually indexed the tone.
+            for i in $(seq 1 20); do
+              adb shell content query --uri content://media/external/audio/media --projection title 2>/dev/null | grep -q "Smoke Tone" && break
+              sleep 2
+            done
+            adb shell content query --uri content://media/external/audio/media --projection title | grep "Smoke Tone"
             maestro test --debug-output "$GITHUB_WORKSPACE/maestro-debug" android/maestro/smoke.yaml
 
       - name: Upload Maestro debug output
