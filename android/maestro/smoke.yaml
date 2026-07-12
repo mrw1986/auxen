@@ -34,6 +34,10 @@ appId: io.github.auxen
 # New-playlist create path (JVM-unverifiable): long-press → Add to playlist →
 # New playlist… → type a name → Create.
 - longPressOn: "Smoke Tone"
+# Diagnostic: capture the display right after the gesture — distinguishes
+# "sheet never opened" from "sheet open but hierarchy can't see the dialog".
+# (Saves on the HOST relative to maestro's working directory.)
+- takeScreenshot: maestro-shots/after-longpress
 - assertVisible: "Add to playlist"
 - tapOn: "Add to playlist"
 - tapOn: "New playlist…"

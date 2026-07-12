@@ -119,8 +119,14 @@ jobs:
             for i in $(seq 1 20); do adb shell content query --uri content://media/external/audio/media --projection title 2>/dev/null | grep -q "Smoke Tone" && break; sleep 2; done
             adb shell content query --uri content://media/external/audio/media --projection title | grep "Smoke Tone"
             # Absolute path: each script line runs in its own sh, so an
-            # earlier `export PATH` line would not reach this one.
-            $HOME/.maestro/bin/maestro test --debug-output "$GITHUB_WORKSPACE/maestro-debug" android/maestro/smoke.yaml
+            # earlier `export PATH` line would not reach this one. The
+            # touch-file trick lets later lines run (env vars don't survive
+            # between per-line shells) so diagnostics upload on failure, while
+            # the final `test` line preserves the pass/fail signal.
+            $HOME/.maestro/bin/maestro test --debug-output "$GITHUB_WORKSPACE/maestro-debug" android/maestro/smoke.yaml || touch /tmp/maestro_failed
+            ls -laR "$GITHUB_WORKSPACE/maestro-debug" maestro-shots "$HOME/.maestro" 2>&1 | head -60 || true
+            cp -r maestro-shots "$GITHUB_WORKSPACE/maestro-debug-shots" 2>/dev/null || true
+            test ! -f /tmp/maestro_failed
 
       - name: Upload Maestro debug output
         if: always()
@@ -132,5 +138,7 @@ jobs:
           # a secondary in case a newer CLI honors it differently.
           path: |
             maestro-debug/
+            maestro-debug-shots/
+            maestro-shots/
             ~/.maestro/tests/
           if-no-files-found: ignore
