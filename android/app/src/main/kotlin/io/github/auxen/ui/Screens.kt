@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
@@ -24,6 +26,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -50,6 +53,7 @@ import io.github.auxen.model.Track
 @Composable
 fun LibraryScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     val tracks by viewModel.localTracks.collectAsState()
+    val favoriteKeys by viewModel.favoriteKeys.collectAsState()
     LaunchedEffect(Unit) { viewModel.loadLibrary() }
 
     if (tracks.isEmpty()) {
@@ -67,7 +71,13 @@ fun LibraryScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     } else {
         LazyColumn(modifier = modifier.fillMaxSize()) {
             items(tracks, key = { "${it.source}:${it.sourceId}" }) { track ->
-                TrackRow(track, onPlay = { viewModel.play(track) }, onEnqueue = { viewModel.enqueue(track) })
+                TrackRow(
+                    track,
+                    isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+                    onPlay = { viewModel.play(track) },
+                    onEnqueue = { viewModel.enqueue(track) },
+                    onToggleFavorite = { viewModel.toggleFavorite(track) },
+                )
             }
         }
     }
@@ -78,6 +88,7 @@ fun LibraryScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
 fun SearchScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     var query by remember { mutableStateOf("") }
     val results by viewModel.searchResults.collectAsState()
+    val favoriteKeys by viewModel.favoriteKeys.collectAsState()
 
     Column(modifier = modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -95,14 +106,26 @@ fun SearchScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
         }
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(results, key = { "${it.source}:${it.sourceId}" }) { track ->
-                TrackRow(track, onPlay = { viewModel.play(track) }, onEnqueue = { viewModel.enqueue(track) })
+                TrackRow(
+                    track,
+                    isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+                    onPlay = { viewModel.play(track) },
+                    onEnqueue = { viewModel.enqueue(track) },
+                    onToggleFavorite = { viewModel.toggleFavorite(track) },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun TrackRow(track: Track, onPlay: () -> Unit, onEnqueue: () -> Unit) {
+private fun TrackRow(
+    track: Track,
+    isFavorite: Boolean,
+    onPlay: () -> Unit,
+    onEnqueue: () -> Unit,
+    onToggleFavorite: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onPlay).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -127,6 +150,13 @@ private fun TrackRow(track: Track, onPlay: () -> Unit, onEnqueue: () -> Unit) {
             onClick = {},
             label = { Text(if (track.source == Source.TIDAL) track.qualityLabel else "Local") },
         )
+        IconButton(onClick = onToggleFavorite) {
+            Icon(
+                if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                tint = if (isFavorite) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+            )
+        }
         IconButton(onClick = onEnqueue) {
             Icon(Icons.Filled.PlaylistAdd, contentDescription = "Add to queue")
         }
@@ -192,6 +222,36 @@ fun AccountScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
             is TidalLoginState.Error -> {
                 Text("Login failed: ${state.message}", color = MaterialTheme.colorScheme.error)
                 Button(onClick = { viewModel.startTidalLogin() }) { Text("Try again") }
+            }
+        }
+    }
+}
+
+@UnstableApi
+@Composable
+fun FavoritesScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
+    val tracks by viewModel.favorites.collectAsState()
+    val favoriteKeys by viewModel.favoriteKeys.collectAsState()
+
+    if (tracks.isEmpty()) {
+        Column(
+            modifier = modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("No favorites yet", style = MaterialTheme.typography.titleMedium)
+            Text("Tap the heart on any track to add it here.", style = MaterialTheme.typography.bodyMedium)
+        }
+    } else {
+        LazyColumn(modifier = modifier.fillMaxSize()) {
+            items(tracks, key = { "${it.source}:${it.sourceId}" }) { track ->
+                TrackRow(
+                    track,
+                    isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+                    onPlay = { viewModel.play(track) },
+                    onEnqueue = { viewModel.enqueue(track) },
+                    onToggleFavorite = { viewModel.toggleFavorite(track) },
+                )
             }
         }
     }

@@ -20,7 +20,9 @@ import io.github.auxen.model.Track
 import io.github.auxen.playback.PlaybackService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /** UI-facing login status for the Tidal account screen. */
@@ -49,6 +51,20 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _tidalLogin = MutableStateFlow<TidalLoginState>(TidalLoginState.LoggedOut)
     val tidalLogin: StateFlow<TidalLoginState> = _tidalLogin
+
+    /** "SOURCE:sourceId" keys of favorited tracks, for O(1) heart-state lookups. */
+    val favoriteKeys: StateFlow<Set<String>> = Graph.library.favoriteKeys()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    val favorites: StateFlow<List<Track>> = Graph.library.favorites()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun toggleFavorite(track: Track) {
+        viewModelScope.launch {
+            val key = "${track.source.name}:${track.sourceId}"
+            runCatching { Graph.library.setFavorite(track, key !in favoriteKeys.value) }
+        }
+    }
 
     private var loginJob: Job? = null
 
@@ -97,6 +113,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun play(track: Track) {
         viewModelScope.launch {
+            runCatching { Graph.library.upsert(track) }
             val c = controller ?: return@launch
             runCatching { Graph.mediaItemFor(track) }.onSuccess { item ->
                 c.setMediaItem(item)
@@ -108,6 +125,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun enqueue(track: Track) {
         viewModelScope.launch {
+            runCatching { Graph.library.upsert(track) }
             val c = controller ?: return@launch
             runCatching { Graph.mediaItemFor(track) }.onSuccess { c.addMediaItem(it) }
         }

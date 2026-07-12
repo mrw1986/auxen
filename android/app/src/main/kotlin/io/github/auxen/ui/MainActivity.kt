@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Equalizer
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -68,6 +69,7 @@ private fun MainScreen(viewModel: PlayerViewModel) {
     val tabs = listOf(
         Tab("Library") { Icon(Icons.Filled.LibraryMusic, contentDescription = null) },
         Tab("Search") { Icon(Icons.Filled.Search, contentDescription = null) },
+        Tab("Favorites") { Icon(Icons.Filled.Favorite, contentDescription = null) },
         Tab("Equalizer") { Icon(Icons.Filled.Equalizer, contentDescription = null) },
         Tab("Account") { Icon(Icons.Filled.Person, contentDescription = null) },
     )
@@ -93,8 +95,9 @@ private fun MainScreen(viewModel: PlayerViewModel) {
         when (selectedTab) {
             0 -> LibraryScreen(viewModel, contentModifier)
             1 -> SearchScreen(viewModel, contentModifier)
-            2 -> EqualizerScreen(contentModifier)
-            3 -> AccountScreen(viewModel, contentModifier)
+            2 -> FavoritesScreen(viewModel, contentModifier)
+            3 -> EqualizerScreen(contentModifier)
+            4 -> AccountScreen(viewModel, contentModifier)
         }
     }
 }
