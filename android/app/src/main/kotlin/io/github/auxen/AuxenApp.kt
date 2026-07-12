@@ -11,6 +11,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
 import io.github.auxen.data.LibraryRepository
 import io.github.auxen.db.AuxenDatabase
+import io.github.auxen.dsp.AutoEqRepository
 import io.github.auxen.dsp.EqController
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
@@ -53,6 +54,8 @@ object Graph {
         private set
     lateinit var queueStore: QueueStateStore
         private set
+    lateinit var autoEq: AutoEqRepository
+        private set
 
     /** MediaMetadata extras key holding the serialized [Track] JSON. */
     const val TRACK_EXTRA_KEY = "auxen.track"
@@ -73,6 +76,7 @@ object Graph {
         db = AuxenDatabase.build(context)
         library = LibraryRepository(db)
         queueStore = QueueStateStore(db)
+        autoEq = AutoEqRepository(context)
         resolver = TrackResolver(fetch = { id -> tidal.getStreamInfoById(id) })
     }
 
