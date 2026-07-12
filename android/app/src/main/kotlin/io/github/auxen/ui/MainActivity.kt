@@ -156,7 +156,22 @@ private fun MainScreen(viewModel: PlayerViewModel) {
                 )
             }
             composable("search") { SearchScreen(viewModel) }
-            composable("collection") { FavoritesScreen(viewModel) }
+            composable("collection") {
+                CollectionScreen(
+                    viewModel,
+                    onOpenPlaylist = { id -> navController.navigate("playlist/$id") },
+                    onOpenAlbum = { album ->
+                        navController.navigate("album/${Uri.encode(album.album)}/${Uri.encode(album.albumArtist)}")
+                    },
+                    onOpenArtist = { artist -> navController.navigate("artist/${Uri.encode(artist)}") },
+                )
+            }
+            composable("playlist/{playlistId}") { backStack ->
+                DetailPlaceholder(
+                    title = "Playlist ${backStack.arguments?.getString("playlistId")}",
+                    onBack = { navController.popBackStack() },
+                )
+            }
             composable("equalizer") { EqualizerScreen() }
             composable("account") { AccountScreen(viewModel) }
             composable("nowplaying") { NowPlayingScreen(viewModel, onBack = { navController.popBackStack() }) }

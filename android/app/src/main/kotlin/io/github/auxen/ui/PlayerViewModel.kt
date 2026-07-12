@@ -87,6 +87,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     /** Home source filter ("all"/"tidal"/"local"), persisted under `home_filter`. */
     val homeFilter = MutableStateFlow("all")
 
+    /** Collection source filter ("all"/"tidal"/"local"), persisted under `collection_filter`. */
+    val collectionFilter = MutableStateFlow("all")
+
     /** Most recently added local tracks for the Home carousel; refreshed on demand. */
     val recentlyAdded = MutableStateFlow<List<Track>>(emptyList())
 
@@ -115,6 +118,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 libraryTab.value = Graph.library.getSetting("library_tab")?.toIntOrNull()?.coerceIn(0, 2) ?: 0
                 restoreLibrarySortFor(libraryTab.value)
                 homeFilter.value = Graph.library.getSetting("home_filter") ?: "all"
+                collectionFilter.value = Graph.library.getSetting("collection_filter") ?: "all"
             }
         }
     }
@@ -180,6 +184,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun setHomeFilter(value: String) {
         homeFilter.value = value
         viewModelScope.launch { runCatching { Graph.library.setSetting("home_filter", value) } }
+    }
+
+    fun setCollectionFilter(value: String) {
+        collectionFilter.value = value
+        viewModelScope.launch { runCatching { Graph.library.setSetting("collection_filter", value) } }
     }
 
     /** Refresh Home data: recently added (MediaStore) + recently played (DB). */
