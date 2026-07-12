@@ -26,6 +26,18 @@ jobs:
         working-directory: android
         run: ./gradlew test --stacktrace
 
+      - name: Roborazzi verification
+        working-directory: android
+        run: ./gradlew verifyRoborazziDebug --stacktrace
+
+      - name: Upload Roborazzi diffs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roborazzi-diffs
+          path: android/app/build/outputs/roborazzi/
+          if-no-files-found: ignore
+
       - name: Build debug APK
         working-directory: android
         run: ./gradlew assembleDebug --stacktrace
@@ -36,3 +48,72 @@ jobs:
           name: auxen-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+  emulator-smoke:
+    runs-on: ubuntu-latest
+    needs: build
+    # TODO(auxen): remove `continue-on-error` after two consecutive green
+    # emulator-smoke runs. First landing keeps it advisory as flaky-emulator
+    # insurance so a wobbly emulator can't red the whole workflow.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      # setup-java gives the emulator action a known JDK for its sdkmanager calls.
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Reuse the exact APK the build job tested — no second Gradle build.
+      - name: Download debug APK
+        uses: actions/download-artifact@v4
+        with:
+          name: auxen-debug-apk
+          path: apk
+
+      # ffmpeg is preinstalled on ubuntu runners. Embed a title so the on-device
+      # track name is deterministic ("Smoke Tone") regardless of MediaStore's
+      # filename-to-title heuristics.
+      - name: Generate test tone MP3
+        run: |
+          ffmpeg -f lavfi -i "sine=frequency=440:duration=10" \
+            -metadata title="Smoke Tone" -metadata artist="Auxen QA" \
+            -y smoke-tone.mp3
+
+      - name: Install Maestro
+        run: curl -fsSL https://get.maestro.mobile.dev | bash
+
+      - name: Run smoke flow on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: |
+            export PATH="$PATH:$HOME/.maestro/bin"
+            adb install -r apk/app-debug.apk
+            # Pre-grant so no runtime permission dialog blocks the flow.
+            adb shell pm grant io.github.auxen android.permission.READ_MEDIA_AUDIO
+            adb shell pm grant io.github.auxen android.permission.POST_NOTIFICATIONS
+            # Seed local media (emulator has none by default) and index it.
+            adb shell mkdir -p /sdcard/Music
+            adb push smoke-tone.mp3 /sdcard/Music/smoke-tone.mp3
+            adb shell cmd media scan /sdcard/Music/smoke-tone.mp3
+            maestro test --debug-output "$GITHUB_WORKSPACE/maestro-debug" android/maestro/smoke.yaml
+
+      - name: Upload Maestro debug output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-debug
+          path: maestro-debug/
+          if-no-files-found: ignore
