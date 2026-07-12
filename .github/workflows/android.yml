@@ -123,6 +123,14 @@ jobs:
             # between per-line shells) so diagnostics upload on failure, while
             # the final `test` line preserves the pass/fail signal.
             $HOME/.maestro/bin/maestro test --debug-output "$GITHUB_WORKSPACE/maestro-debug" android/maestro/smoke.yaml || touch /tmp/maestro_failed
+            # Runtime proof PlaybackService.onCreate()'s media-notification wiring
+            # (DefaultMediaNotificationProvider + ic_stat_auxen) actually works: the
+            # flow's last step tapped "Smoke Tone" to start playback, so the resulting
+            # MediaStyle notification should now be posted for our package. Retry loop
+            # covers the small gap between the flow exiting and NotificationManager
+            # finishing the post; final line is the authoritative check + failure gate.
+            for i in $(seq 1 10); do adb shell dumpsys notification | grep -q io.github.auxen && break; sleep 1; done
+            adb shell dumpsys notification | grep -q io.github.auxen || touch /tmp/maestro_failed
             ls -laR "$GITHUB_WORKSPACE/maestro-debug" maestro-shots "$HOME/.maestro" 2>&1 | head -60 || true
             cp -r maestro-shots "$GITHUB_WORKSPACE/maestro-debug-shots" 2>/dev/null || true
             test ! -f /tmp/maestro_failed
