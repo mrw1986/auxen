@@ -1,16 +1,24 @@
 package io.github.auxen.ui.screenshots
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -18,18 +26,27 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.github.takahirom.roborazzi.captureRoboImage
 import io.github.auxen.db.PlaylistEntity
 import io.github.auxen.dsp.AutoEqProfile
@@ -109,6 +126,17 @@ import org.robolectric.annotation.GraphicsMode
  * and the button's content color here must read amber/warm; a regression
  * back to Material's baseline purple or white-on-amber should be visible at
  * a glance and fail the pixel diff.
+ *
+ * ## Mini-player-controls / search-field surfaces — faithful previews, not the real screens
+ * `MiniPlayerBar` takes a live `PlayerViewModel` and `SearchScreen`'s field is
+ * wired to one directly; neither has a stateless content composable to
+ * extract (unlike `TrackActionSheetContent`/`AutoEqPickerResults`, which this
+ * repo's authors already split out for testability). Rather than refactor
+ * production code beyond this task's stated file list, `mini-player-controls-*`
+ * and `search-field-*` reproduce the exact same widgets/parameters as the
+ * real `MiniPlayerBar.kt`/`SearchScreen.kt` call sites (art radius, title
+ * weight, play-button colors, field shape/colors) with placeholder state
+ * instead of a wired ViewModel — same pattern as `TopBarBrandPreview`.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @RunWith(RobolectricTestRunner::class)
@@ -415,6 +443,89 @@ class ComponentScreenshotTest {
             noMatches = false,
             onSelectProfile = {},
             onClearActive = {},
+        )
+    }
+
+    // --- Mini-player controls (see class KDoc) ---
+
+    @Test
+    fun miniPlayerControls_light() = captureComponent("mini-player-controls-light", darkTheme = false) {
+        MiniPlayerControlsPreview()
+    }
+
+    @Test
+    fun miniPlayerControls_dark() = captureComponent("mini-player-controls-dark", darkTheme = true) {
+        MiniPlayerControlsPreview()
+    }
+
+    @Composable
+    private fun MiniPlayerControlsPreview() {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AsyncImage(
+                // A null model + Coil's empty placeholder renders fully
+                // transparent (confirmed against the existing track-row
+                // goldens: the art area is solid background-color, invisible
+                // regardless of clip shape) — a visible fill here is required
+                // for the 6dp radius this golden exists to pin to actually
+                // show up in the pixel diff.
+                model = null,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF808080)),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Nightcall", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(
+                    "Kavinsky",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+            IconButton(
+                onClick = {},
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = AuxenColors.AmberPrimary,
+                    contentColor = AuxenColors.BgDeep,
+                ),
+            ) {
+                Icon(Icons.Filled.PlayArrow, contentDescription = "Play")
+            }
+            IconButton(onClick = {}) {
+                Icon(Icons.Filled.SkipNext, contentDescription = "Next")
+            }
+        }
+    }
+
+    // --- Search field (see class KDoc) ---
+
+    @Test
+    fun searchField_light() = captureComponent("search-field-light", darkTheme = false) { SearchFieldPreview() }
+
+    @Test
+    fun searchField_dark() = captureComponent("search-field-dark", darkTheme = true) { SearchFieldPreview() }
+
+    @Composable
+    private fun SearchFieldPreview() {
+        OutlinedTextField(
+            value = "",
+            onValueChange = {},
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            label = { Text("Search local + Tidal") },
+            singleLine = true,
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+            ),
         )
     }
 }

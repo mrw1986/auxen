@@ -68,7 +68,7 @@ fun AuxenTrackRow(
         AsyncImage(
             model = track.albumArtUrl,
             contentDescription = null,
-            modifier = Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)),
+            modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
         )
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -28,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
@@ -58,13 +60,14 @@ fun MiniPlayerBar(viewModel: PlayerViewModel, onOpen: () -> Unit) {
                 AsyncImage(
                     model = metadata.artworkUri,
                     contentDescription = null,
-                    modifier = Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)),
+                    modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
                 )
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         title,
                         style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Clip,
                         modifier = Modifier.basicMarquee(),
@@ -79,11 +82,16 @@ fun MiniPlayerBar(viewModel: PlayerViewModel, onOpen: () -> Unit) {
                         )
                     }
                 }
-                IconButton(onClick = { viewModel.togglePlayPause() }) {
+                IconButton(
+                    onClick = { viewModel.togglePlayPause() },
+                    colors = IconButtonDefaults.iconButtonColors(
+                        containerColor = AuxenColors.AmberPrimary,
+                        contentColor = AuxenColors.BgDeep,
+                    ),
+                ) {
                     Icon(
                         if (viewModel.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                         contentDescription = if (viewModel.isPlaying) "Pause" else "Play",
-                        tint = AuxenColors.AmberPrimary,
                     )
                 }
                 IconButton(onClick = { viewModel.skipNext() }) {
