@@ -2,6 +2,7 @@ package io.github.auxen.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -11,10 +12,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -43,6 +47,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
@@ -65,6 +70,7 @@ private const val KEY_AUTOEQ_CUSTOM_TEXT = "autoeq_custom_text"
  * its presets, and a Wavelet-style AutoEq profile picker (search the bundled
  * 8,850-headphone database, plus a file-import path for custom profiles).
  */
+@OptIn(ExperimentalFoundationApi::class)
 @UnstableApi
 @Composable
 fun EqualizerScreen(modifier: Modifier = Modifier) {
@@ -81,6 +87,10 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
     var results by remember { mutableStateOf<List<AutoEqProfile>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
     var activeProfile by remember { mutableStateOf<String?>(null) }
+    // Keeps the search field + its results scrolled above the IME — see the
+    // bringIntoViewRequester() usage on the picker section below.
+    val searchSectionBringIntoView = remember { BringIntoViewRequester() }
+    var searchFieldFocused by remember { mutableStateOf(false) }
     // Spam-guard for clearActiveProfileMarker: a slider drag fires onChange
     // per-frame, so the first clear of a session persists once and the rest
     // no-op. Re-armed (set false) whenever a new profile is applied below.
@@ -102,6 +112,15 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
     // main thread — and caps at 50 hits.
     LaunchedEffect(query, loaded) {
         results = if (loaded && query.isNotBlank()) repo.search(query, limit = 50) else emptyList()
+    }
+
+    // Re-scroll the search section into view once results land while the
+    // field is still focused — covers the case where the field itself was
+    // already visible above the IME but the results below it were not.
+    LaunchedEffect(results, searchFieldFocused) {
+        if (searchFieldFocused && results.isNotEmpty()) {
+            searchSectionBringIntoView.bringIntoView()
+        }
     }
 
     // Switching to graphic mode (touching a band or applying a preset)
@@ -148,7 +167,11 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
     }
 
     Column(
-        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        modifier = modifier
+            .fillMaxSize()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -209,42 +232,59 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
         HorizontalDivider()
 
         // ---- AutoEq headphone-correction picker (Wavelet-style) ----
-        Text("Headphone correction", style = MaterialTheme.typography.titleMedium)
+        Text("Tune for your headphones", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Corrections for 8,850 headphones, tuned to a neutral reference.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Search 8,850 headphone profiles") },
-            singleLine = true,
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            trailingIcon = {
-                if (query.isNotEmpty()) {
-                    IconButton(onClick = { query = "" }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Clear search")
+        Column(
+            modifier = Modifier.bringIntoViewRequester(searchSectionBringIntoView),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { focusState ->
+                        searchFieldFocused = focusState.isFocused
+                        if (focusState.isFocused) {
+                            scope.launch { searchSectionBringIntoView.bringIntoView() }
+                        }
+                    },
+                label = { Text("Find your headphone model") },
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { query = "" }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                        }
                     }
-                }
-            },
-        )
+                },
+            )
 
-        AutoEqPickerResults(
-            activeProfile = activeProfile,
-            results = results,
-            noMatches = query.isNotBlank() && loaded && results.isEmpty(),
-            onSelectProfile = { profile ->
-                applyAutoEq(scope, repo, profile) {
-                    activeProfile = it
-                    // Re-arm the clear guard: a later band-drag must be able to
-                    // clear this freshly-applied marker.
-                    markerCleared = false
-                }
-                query = ""
-            },
-            onClearActive = {
-                EqController.applyPreset("Flat")
-                clearActiveProfileMarker()
-            },
-        )
+            AutoEqPickerResults(
+                activeProfile = activeProfile,
+                results = results,
+                noMatches = query.isNotBlank() && loaded && results.isEmpty(),
+                onSelectProfile = { profile ->
+                    applyAutoEq(scope, repo, profile) {
+                        activeProfile = it
+                        // Re-arm the clear guard: a later band-drag must be able to
+                        // clear this freshly-applied marker.
+                        markerCleared = false
+                    }
+                    query = ""
+                },
+                onClearActive = {
+                    EqController.applyPreset("Flat")
+                    clearActiveProfileMarker()
+                },
+            )
+        }
 
         Button(onClick = { importLauncher.launch(arrayOf("text/plain")) }) {
             Text("Import custom profile…")
