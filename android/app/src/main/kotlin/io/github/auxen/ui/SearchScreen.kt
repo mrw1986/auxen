@@ -27,6 +27,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,7 +57,7 @@ fun SearchScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     val history by viewModel.searchHistoryItems.collectAsState()
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
-    var typeFilter by remember { mutableStateOf("All") }
+    var typeFilter by rememberSaveable { mutableStateOf("All") }
     var sheetTrack by remember { mutableStateOf<Track?>(null) }
     val keyboard = LocalSoftwareKeyboardController.current
 

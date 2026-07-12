@@ -144,8 +144,8 @@ private fun MainScreen(viewModel: PlayerViewModel) {
             composable("album/{album}/{artist}") { backStack ->
                 AlbumDetailScreen(
                     viewModel,
-                    album = Uri.decode(backStack.arguments?.getString("album") ?: ""),
-                    artist = Uri.decode(backStack.arguments?.getString("artist") ?: ""),
+                    album = backStack.arguments?.getString("album").orEmpty(),
+                    artist = backStack.arguments?.getString("artist").orEmpty(),
                     onBack = { navController.popBackStack() },
                     onOpenArtist = { artist -> navController.navigate("artist/${Uri.encode(artist)}") },
                 )
@@ -153,7 +153,7 @@ private fun MainScreen(viewModel: PlayerViewModel) {
             composable("artist/{artist}") { backStack ->
                 ArtistDetailScreen(
                     viewModel,
-                    artist = Uri.decode(backStack.arguments?.getString("artist") ?: ""),
+                    artist = backStack.arguments?.getString("artist").orEmpty(),
                     onBack = { navController.popBackStack() },
                     onOpenAlbum = { album ->
                         navController.navigate("album/${Uri.encode(album.album)}/${Uri.encode(album.albumArtist)}")

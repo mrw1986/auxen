@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,7 +68,7 @@ fun CollectionScreen(
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val filter by viewModel.collectionFilter.collectAsState()
-    var tab by remember { mutableIntStateOf(0) }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     var sheetTrack by remember { mutableStateOf<Track?>(null) }
 
     fun matches(track: Track): Boolean = when (filter) {

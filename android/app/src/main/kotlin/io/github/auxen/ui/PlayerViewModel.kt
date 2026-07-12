@@ -169,6 +169,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             runCatching { ordered.forEach { Graph.library.upsert(it) } }
             val items = ordered.mapNotNull { runCatching { Graph.mediaItemFor(it) }.getOrNull() }
             if (items.isEmpty()) return@launch
+            // The queue's static order is the source of truth — Play All is
+            // in-order and Shuffle pre-randomizes client-side (desktop
+            // semantics), so the player's shuffle mode must not reorder it.
+            c.shuffleModeEnabled = false
             c.setMediaItems(items)
             c.prepare()
             c.play()

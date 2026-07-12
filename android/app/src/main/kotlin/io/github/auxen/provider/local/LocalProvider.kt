@@ -28,12 +28,19 @@ class LocalProvider(private val context: Context) : MusicProvider {
             limit = limit,
         )
 
-    /** Return the full local library, ordered by artist / album / track number. */
+    /**
+     * Return the full local library, ordered newest-first (DATE_ADDED desc).
+     *
+     * The Library's default "Recently Added" sort keeps input order as its
+     * recency proxy, so the list must arrive in recency order; name/artist
+     * sorts re-sort this list explicitly.
+     */
     suspend fun allTracks(limit: Int = 5000): List<Track> =
         queryTracks(
             selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0",
             selectionArgs = null,
             limit = limit,
+            sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC",
         )
 
     /** Most recently added local tracks — desktop "Recently Added" section. */

@@ -64,7 +64,8 @@ fun sortAlbums(albums: List<AlbumGroup>, sort: LibrarySort, ascending: Boolean):
     val sorted = when (sort) {
         LibrarySort.NAME -> albums.sortedBy { it.album.lowercase() }
         LibrarySort.ARTIST -> albums.sortedBy { it.albumArtist.lowercase() }
-        // MediaStore order is the recency proxy: keep input order.
+        // The library list arrives DATE_ADDED-descending (see LocalProvider.
+        // allTracks), so keeping input order IS recency for RECENTLY_ADDED.
         LibrarySort.RECENTLY_ADDED, LibrarySort.TRACK_COUNT -> albums
     }
     return if (ascending) sorted else sorted.reversed()
