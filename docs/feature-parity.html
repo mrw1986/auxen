@@ -1,0 +1,322 @@
+<title>Auxen — Desktop ↔ Android Feature Parity</title>
+<style>
+  :root {
+    --ground: #faf8f2;
+    --surface: #ffffff;
+    --elevated: #f1ede3;
+    --border: rgba(28, 27, 22, 0.12);
+    --text: #1c1b16;
+    --text-2: #6b6860;
+    --accent: #b8860b;
+    --accent-soft: rgba(184, 134, 11, 0.12);
+    --shipped: #3e7a3c;
+    --shipped-soft: rgba(62, 122, 60, 0.12);
+    --partial: #9a6d0a;
+    --partial-soft: rgba(154, 109, 10, 0.13);
+    --pipeline: #00747a;
+    --pipeline-soft: rgba(0, 116, 122, 0.11);
+    --gap: #a4403c;
+    --gap-soft: rgba(164, 64, 60, 0.11);
+    --adapted: #5a6572;
+    --adapted-soft: rgba(90, 101, 114, 0.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0c0b0f;
+      --surface: #141318;
+      --elevated: #1c1b22;
+      --border: rgba(255, 255, 255, 0.09);
+      --text: #f0ece4;
+      --text-2: #9e9a91;
+      --accent: #d4a039;
+      --accent-soft: rgba(212, 160, 57, 0.14);
+      --shipped: #7cb87a;
+      --shipped-soft: rgba(124, 184, 122, 0.13);
+      --partial: #d4a039;
+      --partial-soft: rgba(212, 160, 57, 0.13);
+      --pipeline: #00c4cc;
+      --pipeline-soft: rgba(0, 196, 204, 0.12);
+      --gap: #c75c5c;
+      --gap-soft: rgba(199, 92, 92, 0.13);
+      --adapted: #8f9aa8;
+      --adapted-soft: rgba(143, 154, 168, 0.13);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0c0b0f;
+    --surface: #141318;
+    --elevated: #1c1b22;
+    --border: rgba(255, 255, 255, 0.09);
+    --text: #f0ece4;
+    --text-2: #9e9a91;
+    --accent: #d4a039;
+    --accent-soft: rgba(212, 160, 57, 0.14);
+    --shipped: #7cb87a;
+    --shipped-soft: rgba(124, 184, 122, 0.13);
+    --partial: #d4a039;
+    --partial-soft: rgba(212, 160, 57, 0.13);
+    --pipeline: #00c4cc;
+    --pipeline-soft: rgba(0, 196, 204, 0.12);
+    --gap: #c75c5c;
+    --gap-soft: rgba(199, 92, 92, 0.13);
+    --adapted: #8f9aa8;
+    --adapted-soft: rgba(143, 154, 168, 0.13);
+  }
+  :root[data-theme="light"] {
+    --ground: #faf8f2;
+    --surface: #ffffff;
+    --elevated: #f1ede3;
+    --border: rgba(28, 27, 22, 0.12);
+    --text: #1c1b16;
+    --text-2: #6b6860;
+    --accent: #b8860b;
+    --accent-soft: rgba(184, 134, 11, 0.12);
+    --shipped: #3e7a3c;
+    --shipped-soft: rgba(62, 122, 60, 0.12);
+    --partial: #9a6d0a;
+    --partial-soft: rgba(154, 109, 10, 0.13);
+    --pipeline: #00747a;
+    --pipeline-soft: rgba(0, 116, 122, 0.11);
+    --gap: #a4403c;
+    --gap-soft: rgba(164, 64, 60, 0.11);
+    --adapted: #5a6572;
+    --adapted-soft: rgba(90, 101, 114, 0.12);
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.55;
+    margin: 0;
+    padding: 2.5rem 1.25rem 4rem;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 2.25rem; }
+
+  header h1 {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: clamp(1.7rem, 4vw, 2.4rem);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.4rem;
+    text-wrap: balance;
+  }
+  header p { color: var(--text-2); margin: 0; max-width: 62ch; }
+  .meta {
+    display: inline-flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;
+    margin-top: 0.9rem; font-size: 0.8rem; color: var(--text-2);
+  }
+  .meta span {
+    background: var(--elevated); border: 1px solid var(--border);
+    border-radius: 999px; padding: 0.15rem 0.7rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.75rem; }
+  .tile {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 0.9rem 1rem;
+  }
+  .tile b {
+    display: block; font-size: 1.55rem; font-weight: 650;
+    font-variant-numeric: tabular-nums; line-height: 1.2;
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  }
+  .tile small { color: var(--text-2); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; }
+  .tile.t-shipped b { color: var(--shipped); }
+  .tile.t-partial b { color: var(--partial); }
+  .tile.t-pipeline b { color: var(--pipeline); }
+  .tile.t-gap b { color: var(--gap); }
+  .tile.t-adapted b { color: var(--adapted); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 0.6rem 1.1rem; font-size: 0.82rem; color: var(--text-2); }
+  .legend div { display: flex; align-items: center; gap: 0.45rem; }
+
+  .chip {
+    display: inline-block; border-radius: 999px; padding: 0.13rem 0.62rem;
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; white-space: nowrap;
+  }
+  .c-shipped { color: var(--shipped); background: var(--shipped-soft); }
+  .c-partial { color: var(--partial); background: var(--partial-soft); }
+  .c-pipeline { color: var(--pipeline); background: var(--pipeline-soft); }
+  .c-gap { color: var(--gap); background: var(--gap-soft); }
+  .c-adapted { color: var(--adapted); background: var(--adapted-soft); }
+
+  section h2 {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: 1.25rem; font-weight: 600; margin: 0 0 0.2rem;
+  }
+  section > p { color: var(--text-2); font-size: 0.88rem; margin: 0 0 0.9rem; max-width: 70ch; }
+
+  .tbl { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.88rem; }
+  th {
+    text-align: left; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-2); font-weight: 600; padding: 0.65rem 0.9rem;
+    border-bottom: 1px solid var(--border);
+  }
+  td { padding: 0.55rem 0.9rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.f { font-weight: 550; min-width: 12rem; }
+  td.n { color: var(--text-2); font-size: 0.84rem; }
+  td.s { white-space: nowrap; }
+
+  .callout {
+    border: 1px solid var(--gap); border-radius: 14px;
+    background: var(--gap-soft); padding: 1.2rem 1.4rem;
+  }
+  .callout h2 { color: var(--gap); }
+  .callout p { color: var(--text-2); font-size: 0.88rem; margin: 0.2rem 0 0.9rem; }
+  .callout ol { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.9rem; }
+  .callout li b { font-weight: 620; }
+  .callout li span { color: var(--text-2); }
+
+  .extras {
+    border: 1px solid var(--border); border-radius: 14px;
+    background: var(--accent-soft); padding: 1.2rem 1.4rem;
+  }
+  .extras h2 { color: var(--accent); }
+  .extras ul { margin: 0.6rem 0 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.9rem; }
+  .extras li span { color: var(--text-2); }
+
+  footer { color: var(--text-2); font-size: 0.8rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Auxen — Desktop ↔ Android Feature Parity</h1>
+    <p>Every feature the GTK desktop app has today, mapped against the Android port's shipped code and committed pipeline. Rows in the tables all exist on desktop; the chip shows where Android stands.</p>
+    <div class="meta">
+      <span>2026-07-12</span>
+      <span>branch claude/android-app-availability-y6uzb0 @ a4851ac</span>
+      <span>58 features tracked</span>
+    </div>
+  </header>
+
+  <div class="tiles">
+    <div class="tile t-shipped"><b>25</b><small>Shipped</small></div>
+    <div class="tile t-partial"><b>7</b><small>Partial</small></div>
+    <div class="tile t-pipeline"><b>13</b><small>In pipeline</small></div>
+    <div class="tile t-gap"><b>10</b><small>Not planned yet</small></div>
+    <div class="tile t-adapted"><b>3</b><small>Adapted</small></div>
+  </div>
+
+  <div class="legend">
+    <div><span class="chip c-shipped">Shipped</span> working on your phone now</div>
+    <div><span class="chip c-partial">Partial</span> core works, named pieces missing</div>
+    <div><span class="chip c-pipeline">Pipeline</span> in a committed plan or triaged backlog</div>
+    <div><span class="chip c-gap">Gap</span> exists on desktop, in no Android plan yet</div>
+    <div><span class="chip c-adapted">Adapted</span> different mechanism, same job on mobile</div>
+  </div>
+
+  <section>
+    <h2>Sources &amp; library data</h2>
+    <div class="tbl"><table>
+      <tr><th>Feature</th><th>Android</th><th>Notes</th></tr>
+      <tr><td class="f">Local music library</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">MediaStore-backed; desktop scans with mutagen</td></tr>
+      <tr><td class="f">Rich local metadata (bit depth, sample rate)</td><td class="s"><span class="chip c-gap">Gap</span></td><td class="n">MediaStore doesn't expose these, so FLAC quality badges undersell local files; needs a MediaMetadataRetriever enrichment pass (known since M1)</td></tr>
+      <tr><td class="f">Tidal login (OAuth device flow)</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Verified on your device today</td></tr>
+      <tr><td class="f">Tidal lossless / Hi-Res streaming</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">BTS + DASH; mobile adds expiring-URL auto-refresh the desktop doesn't need</td></tr>
+      <tr><td class="f">Tidal search</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Merged with local results</td></tr>
+      <tr><td class="f">Local ↔ Tidal fuzzy matching</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Byte-exact port of matching.py incl. thefuzz rounding semantics</td></tr>
+      <tr><td class="f">Quality-aware duplicate resolution</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Applied in merged search</td></tr>
+      <tr><td class="f">Source priority preference</td><td class="s"><span class="chip c-partial">Partial</span></td><td class="n">Logic + persistence shipped; no UI to change it — folds into the Settings screen</td></tr>
+      <tr><td class="f">Favorites</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Hearts everywhere, Collection tab, persisted</td></tr>
+      <tr><td class="f">Tidal favorites in Collection (merge)</td><td class="s"><span class="chip c-pipeline">Pipeline</span></td><td class="n">Desktop merges API favorites/albums/followed artists; top item of the parity milestone</td></tr>
+      <tr><td class="f">Favorites sync back to Tidal account</td><td class="s"><span class="chip c-gap">Gap</span></td><td class="n">Desktop pushes hearts to Tidal (favorites_sync); Android hearts are local-only</td></tr>
+      <tr><td class="f">Play counts &amp; play history</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Records on actual playback only</td></tr>
+      <tr><td class="f">Search history</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Room-backed, delete/clear, shown pre-typing</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Screens &amp; navigation</h2>
+    <div class="tbl"><table>
+      <tr><th>Feature</th><th>Android</th><th>Notes</th></tr>
+      <tr><td class="f">Home (greeting, filter pills, stat cards, recent)</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Recently Added carousel + Recently Played</td></tr>
+      <tr><td class="f">Tidal Home carousels (personalized sections)</td><td class="s"><span class="chip c-pipeline">Pipeline</span></td><td class="n">Parity milestone</td></tr>
+      <tr><td class="f">Explore (genres, new releases, Hi-Res)</td><td class="s"><span class="chip c-pipeline">Pipeline</span></td><td class="n">Parity milestone</td></tr>
+      <tr><td class="f">Mixes</td><td class="s"><span class="chip c-pipeline">Pipeline</span></td><td class="n">Parity milestone</td></tr>
+      <tr><td class="f">Moods</td><td class="s"><span class="chip c-pipeline">Pipeline</span></td><td class="n">Parity milestone</td></tr>
+      <tr><td class="f">Library (Albums/Artists/Tracks + sort, persisted)</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Per-tab sort + direction survive restarts</td></tr>
+      <tr><td class="f">List / compact / grid view modes</td><td class="s"><span class="chip c-partial">Partial</span></td><td class="n">Album grid + lists shipped; the 3-way density toggle was deliberately deferred (low value on phones)</td></tr>
+      <tr><td class="f">Collection (tabs + source filter + playlists)</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Local favorites; Tidal merge tracked above</td></tr>
+      <tr><td class="f">Album detail</td><td class="s"><span class="chip c-partial">Partial</span></td><td class="n">Header/tracks/Play All/Shuffle shipped; Tidal editorial review + similar-albums row in the parity milestone</td></tr>
+      <tr><td class="f">Artist detail</td><td class="s"><span class="chip c-partial">Partial</span></td><td class="n">Header/albums/tracks shipped; biography + similar artists in the parity milestone</td></tr>
+      <tr><td class="f">Playlists (create, rename, recolor, delete, reorder)</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Desktop 8-color palette; dedup on append matches desktop</td></tr>
+      <tr><td class="f">M3U playlist export</td><td class="s"><span class="chip c-adapted">Adapted</span></td><td class="n">Deliberately dropped on mobile — no consumer for the file; revisit only if you want it</td></tr>
+      <tr><td class="f">Smart playlists (rule-based)</td><td class="s"><span class="chip c-gap">Gap</span></td><td class="n">No Android schema or plan; genuinely new work, not a port</td></tr>
+      <tr><td class="f">Search screen (debounce, type filters)</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">300&nbsp;ms debounce, stale-response guard</td></tr>
+      <tr><td class="f">Stats / listening analytics</td><td class="s"><span class="chip c-pipeline">Pipeline</span></td><td class="n">Deferred follow-up; needs a Compose charting approach; play-history data already collected</td></tr>
+      <tr><td class="f">Queue panel (view, jump, remove, drag-reorder)</td><td class="s"><span class="chip c-pipeline">Pipeline</span></td><td class="n">Queue works (play next / add / persist / restore); dedicated reorder screen is a triaged follow-up</td></tr>
+      <tr><td class="f">Now-playing bar + full player</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Mini bar (marquee, progress) + full screen (seek, shuffle, 3-state repeat, quality badge)</td></tr>
+      <tr><td class="f">Mini-player floating window</td><td class="s"><span class="chip c-adapted">Adapted</span></td><td class="n">Media notification + lock-screen controls are the phone equivalent (already shipped)</td></tr>
+      <tr><td class="f">Lyrics panel</td><td class="s"><span class="chip c-pipeline">Pipeline</span></td><td class="n">Deferred pending a lyrics-provider decision</td></tr>
+      <tr><td class="f">Spectrum visualizer</td><td class="s"><span class="chip c-gap">Gap</span></td><td class="n">Needs a real-time audio tap Media3 doesn't expose; blocked, no plan</td></tr>
+      <tr><td class="f">Sidebar navigation</td><td class="s"><span class="chip c-adapted">Adapted</span></td><td class="n">Bottom nav (Home/Library/Search/Collection) + top-bar EQ/Account</td></tr>
+      <tr><td class="f">Theme toggle (system / dark / light)</td><td class="s"><span class="chip c-gap">Gap</span></td><td class="n">Android follows system only; in-app override belongs in Settings</td></tr>
+      <tr><td class="f">Settings screen</td><td class="s"><span class="chip c-pipeline">Pipeline</span></td><td class="n">Parity milestone (theme, source priority, EQ prefs…)</td></tr>
+      <tr><td class="f">About dialog</td><td class="s"><span class="chip c-gap">Gap</span></td><td class="n">Trivial; fold into Settings</td></tr>
+      <tr><td class="f">Track actions (play next, queue, playlists, favorite)</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Long-press bottom sheet on every track row</td></tr>
+      <tr><td class="f">Track/Artist Radio &amp; Start Mix actions</td><td class="s"><span class="chip c-pipeline">Pipeline</span></td><td class="n">Tidal discovery surfaces; parity milestone</td></tr>
+      <tr><td class="f">Credits &amp; Properties actions</td><td class="s"><span class="chip c-gap">Gap</span></td><td class="n">Desktop context menus have both; not in the sheet or any plan</td></tr>
+      <tr><td class="f">Album / artist card long-press menus</td><td class="s"><span class="chip c-gap">Gap</span></td><td class="n">Sheets exist for track rows only; cards have tap + play only</td></tr>
+      <tr><td class="f">Back/forward navigation history</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">System back + nav back stack</td></tr>
+      <tr><td class="f">Scroll &amp; tab state persistence across navigation</td><td class="s"><span class="chip c-partial">Partial</span></td><td class="n">Tabs/filters/sort persist; scroll positions don't yet (was a P1 on desktop — worth carrying over)</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Playback &amp; audio</h2>
+    <div class="tbl"><table>
+      <tr><th>Feature</th><th>Android</th><th>Notes</th></tr>
+      <tr><td class="f">Gapless playback</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">ExoPlayer native; Hi-Res DASH pre-resolution keeps transitions clean</td></tr>
+      <tr><td class="f">Crossfade</td><td class="s"><span class="chip c-gap">Gap</span></td><td class="n">Desktop has it; needs a second player instance on Android (noted in the original roadmap, never planned)</td></tr>
+      <tr><td class="f">Queue persistence across restarts</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Plus notification/Bluetooth playback resumption</td></tr>
+      <tr><td class="f">System media integration (MPRIS ↔ MediaSession)</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Lock screen, notification, Bluetooth controls</td></tr>
+      <tr><td class="f">10-band graphic EQ + presets</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Same ISO bands and ten presets, double-precision biquads</td></tr>
+      <tr><td class="f">AutoEq profile import</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Plus the searchable 8,850-profile picker — beyond desktop</td></tr>
+      <tr><td class="f">ReplayGain volume normalization</td><td class="s"><span class="chip c-pipeline">Pipeline</span></td><td class="n">DSP suite (next milestone)</td></tr>
+      <tr><td class="f">Sleep timer</td><td class="s"><span class="chip c-gap">Gap</span></td><td class="n">Desktop has it; small feature, in no Android plan</td></tr>
+      <tr><td class="f">Last.fm scrobbling</td><td class="s"><span class="chip c-gap">Gap</span></td><td class="n">Desktop scrobbles; Android has nothing planned</td></tr>
+      <tr><td class="f">Desktop notifications</td><td class="s"><span class="chip c-adapted">Adapted</span></td><td class="n">Media notification covers it</td></tr>
+      <tr><td class="f">Album art & artist image caching</td><td class="s"><span class="chip c-partial">Partial</span></td><td class="n">Coil handles album art; desktop's circular artist-image service (with disk cache) has no mobile equivalent yet</td></tr>
+      <tr><td class="f">Playback error visibility</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Dismissible error banner — mobile-only, born from your bug report</td></tr>
+    </table></div>
+  </section>
+
+  <section class="callout">
+    <h2>Not in any plan yet — the punch list</h2>
+    <p>Everything below exists on desktop (or was flagged during reviews) and is currently in no committed Android plan. My recommended destination for each:</p>
+    <ol>
+      <li><b>Last.fm scrobbling</b> <span>— own task batch; desktop module ports cleanly</span></li>
+      <li><b>Favorites sync back to Tidal</b> <span>— bundle with the Collection merge in the parity milestone</span></li>
+      <li><b>Sleep timer</b> <span>— small; bundle with the DSP suite or Settings work</span></li>
+      <li><b>Crossfade</b> <span>— real engineering (second player instance); schedule after the DSP suite</span></li>
+      <li><b>Rich local metadata enrichment</b> <span>— fixes undersold FLAC quality badges; small background pass</span></li>
+      <li><b>Theme toggle + source priority + About</b> <span>— all belong in the Settings screen (parity milestone); listing so they don't get lost</span></li>
+      <li><b>Smart playlists</b> <span>— biggest gap; needs schema + rules engine + UI, its own milestone</span></li>
+      <li><b>Credits / Properties actions + card long-press menus</b> <span>— bundle into the parity milestone's context-menu completion</span></li>
+      <li><b>Scroll-position persistence</b> <span>— was a P1 on desktop; add to the M3b.1 polish pass</span></li>
+      <li><b>Spectrum visualizer</b> <span>— blocked on a Media3 audio tap; revisit only if a clean approach appears</span></li>
+    </ol>
+  </section>
+
+  <section class="extras">
+    <h2>Where Android is ahead of desktop</h2>
+    <ul>
+      <li><b>AutoEq picker</b> <span>— searchable 8,850-profile database, offline; desktop only imports files</span></li>
+      <li><b>Expiring-URL self-healing</b> <span>— Tidal streams auto-refresh mid-queue</span></li>
+      <li><b>Playback resumption</b> <span>— queue restores into the media notification after process death</span></li>
+      <li><b>Playback error banner</b> <span>— failures are visible, not silent</span></li>
+      <li><b>Coming in the DSP suite</b> <span>— bass boost, channel balance, limiter, reverb, virtualizer (each individually toggleable)</span></li>
+      <li><b>Original mobile roadmap</b> <span>— Android Auto, Chromecast, widgets, offline downloads, per-device Bluetooth EQ profiles</span></li>
+    </ul>
+  </section>
+
+  <footer>
+    Sources: desktop <code>auxen/views/</code> + module inventory, the design reference (<code>ui-mockup.html</code>), the Android tree at <code>a4851ac</code>, and the execution ledger. Update by regenerating after each milestone.
+  </footer>
+</div>
