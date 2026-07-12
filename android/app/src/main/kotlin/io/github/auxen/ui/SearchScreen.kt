@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +43,7 @@ import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.SectionHeader
 import io.github.auxen.ui.components.TrackActionSheet
+import io.github.auxen.ui.theme.AuxenColors
 
 private val TYPE_FILTERS = listOf("All", "Local", "Tidal")
 
@@ -131,6 +133,10 @@ fun SearchScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                         selected = typeFilter == filter,
                         onClick = { typeFilter = filter },
                         label = { Text(filter) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AuxenColors.AmberPrimary,
+                            selectedLabelColor = AuxenColors.BgDeep,
+                        ),
                     )
                 }
             }

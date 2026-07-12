@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -82,6 +83,10 @@ fun HomeScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                         selected = filter == value,
                         onClick = { viewModel.setHomeFilter(value) },
                         label = { Text(label) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AuxenColors.AmberPrimary,
+                            selectedLabelColor = AuxenColors.BgDeep,
+                        ),
                     )
                 }
             }

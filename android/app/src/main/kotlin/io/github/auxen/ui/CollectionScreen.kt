@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -100,6 +101,10 @@ fun CollectionScreen(
                         selected = filter == value,
                         onClick = { viewModel.setCollectionFilter(value) },
                         label = { Text(label) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AuxenColors.AmberPrimary,
+                            selectedLabelColor = AuxenColors.BgDeep,
+                        ),
                     )
                 }
             }

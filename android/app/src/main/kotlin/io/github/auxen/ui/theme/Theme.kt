@@ -29,11 +29,19 @@ private val AuxenDarkColors = darkColorScheme(
     onError = Color.White,
     outline = Color(0x1AFFFFFF),
     outlineVariant = Color(0x0FFFFFFF),
+    // Desktop nav-selection glow: rgba(212,160,57,0.15) over BgSurface (style.css:184-195)
+    secondaryContainer = Color(0xFF31281D),
+    onSecondaryContainer = AuxenColors.AmberPrimary,
+    // Desktop soft-red error treatment: rgba(231,76,60,0.12) over BgSurface (style.css:776-777)
+    errorContainer = Color(0xFF2D1A1C),
+    onErrorContainer = Color(0xFFE74C3C),
 )
 
 private val AuxenLightColors = lightColorScheme(
     primary = AuxenColors.Amber600,
-    onPrimary = Color.White,
+    // was Color.White — desktop accent_fg_color #0c0b0f is scheme-invariant (style.css:8-11),
+    // and every hard-coded amber button already uses BgDeep content in both themes
+    onPrimary = AuxenColors.BgDeep,
     primaryContainer = Color(0xFFF5E6C4),
     onPrimaryContainer = Color(0xFF3D2E00),
     secondary = Color(0xFF00747A),
@@ -50,6 +58,17 @@ private val AuxenLightColors = lightColorScheme(
     onError = Color.White,
     outline = Color(0x1F000000),
     outlineVariant = Color(0x14000000),
+    secondaryContainer = Color(0xFFF5E6C4),
+    onSecondaryContainer = Color(0xFF3D2E00),
+    errorContainer = Color(0xFFF8E3DC),   // rgba(231,76,60,0.12) over #FAF8F2
+    onErrorContainer = Color(0xFFC0392B),
+    // Warm-neutral container ramp — the dark scheme already overrides these, light must too,
+    // or NavigationBar/ModalBottomSheet/AlertDialog/slider tracks render M3 baseline lavender
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFF7F4EC),
+    surfaceContainer = Color(0xFFF1EDE3),
+    surfaceContainerHigh = Color(0xFFEBE6D9),
+    surfaceContainerHighest = Color(0xFFE5DFD0),
 )
 
 /**
