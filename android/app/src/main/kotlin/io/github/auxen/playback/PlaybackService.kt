@@ -87,19 +87,25 @@ class PlaybackService : MediaSessionService() {
 
                 val dash = findCause<TidalDashStreamException>(error)
                 if (dash != null) {
-                    // The failing load may be the pre-buffering NEXT item, not
-                    // the current one — locate it by mediaId instead of
-                    // assuming currentMediaItem.
+                    // Swap every still-unresolved copy of the failing track —
+                    // mediaIds are not unique in a playlist, and repairing only
+                    // the first copy would loop forever on duplicates.
                     val targetMediaId = "TIDAL:${dash.trackId}"
-                    val index = (0 until currentPlayer.mediaItemCount)
-                        .firstOrNull { currentPlayer.getMediaItemAt(it).mediaId == targetMediaId }
-                        ?: return
-                    val item = currentPlayer.getMediaItemAt(index)
-                    val newItem = item.buildUpon()
-                        .setUri(dash.streamInfo.uri)
-                        .setMimeType(MimeTypes.APPLICATION_MPD)
-                        .build()
-                    currentPlayer.replaceMediaItem(index, newItem)
+                    var swapped = false
+                    for (i in 0 until currentPlayer.mediaItemCount) {
+                        val queued = currentPlayer.getMediaItemAt(i)
+                        if (queued.mediaId != targetMediaId) continue
+                        if (queued.localConfiguration?.uri?.scheme != "auxen") continue
+                        currentPlayer.replaceMediaItem(
+                            i,
+                            queued.buildUpon()
+                                .setUri(dash.streamInfo.uri)
+                                .setMimeType(MimeTypes.APPLICATION_MPD)
+                                .build(),
+                        )
+                        swapped = true
+                    }
+                    if (!swapped) return
                     currentPlayer.prepare()
                     currentPlayer.play()
                     return
@@ -108,6 +114,9 @@ class PlaybackService : MediaSessionService() {
                 val http = findCause<HttpDataSource.InvalidResponseCodeException>(error)
                 val expired = http != null && http.responseCode in intArrayOf(401, 403, 410)
                 if (expired) {
+                    val anyTidal = (0 until currentPlayer.mediaItemCount)
+                        .any { currentPlayer.getMediaItemAt(it).mediaId.startsWith("TIDAL:") }
+                    if (!anyTidal) return
                     val now = SystemClock.elapsedRealtime()
                     if (now - lastExpiryRecoveryAtMillis < RETRY_COOLDOWN_MILLIS) return
                     lastExpiryRecoveryAtMillis = now
