@@ -55,6 +55,10 @@ class LibraryRepository(
         db.playHistoryDao().insert(PlayHistoryEntity(trackId = entity.id, playedAtMillis = now))
     }
 
+    /** Most recently played tracks (desktop get_recently_played). */
+    suspend fun recentlyPlayed(limit: Int = 20): List<Track> =
+        db.playHistoryDao().recentlyPlayed(limit).map { it.toTrack() }
+
     fun playlists(): Flow<List<PlaylistEntity>> = db.playlistDao().playlists()
 
     /** Create a playlist with the desktop default amber color; returns its id. */

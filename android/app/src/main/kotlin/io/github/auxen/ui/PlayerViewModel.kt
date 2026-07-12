@@ -63,6 +63,15 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     val playlists: StateFlow<List<PlaylistEntity>> = Graph.library.playlists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** Recently played tracks for the Home screen; refreshed on demand. */
+    val recentlyPlayed = MutableStateFlow<List<Track>>(emptyList())
+
+    fun refreshRecentlyPlayed() {
+        viewModelScope.launch {
+            runCatching { Graph.library.recentlyPlayed() }.onSuccess { recentlyPlayed.value = it }
+        }
+    }
+
     fun toggleFavorite(track: Track) {
         viewModelScope.launch {
             val key = "${track.source.name}:${track.sourceId}"

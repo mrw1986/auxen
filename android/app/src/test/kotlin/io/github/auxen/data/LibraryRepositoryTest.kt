@@ -102,4 +102,11 @@ class LibraryRepositoryTest {
         repo.createPlaylist("Mix")
         assertEquals("#d4a039", repo.playlists().first().single().color)
     }
+
+    @Test
+    fun recentlyPlayedMapsHistoryToTracks() = runBlocking {
+        repo.upsert(tidalTrack)
+        repo.recordPlay("TIDAL:99")
+        assertEquals(listOf("Everlong"), repo.recentlyPlayed().map { it.title })
+    }
 }

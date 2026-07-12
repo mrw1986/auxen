@@ -13,23 +13,33 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 
-private data class Tab(val label: String, val icon: @Composable () -> Unit)
+/** A bottom-nav tab: its route, label, and icon. */
+private data class Destination(val route: String, val label: String, val icon: @Composable () -> Unit)
 
 @UnstableApi
 class MainActivity : ComponentActivity() {
@@ -62,42 +72,81 @@ class MainActivity : ComponentActivity() {
     }.toTypedArray()
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @UnstableApi
 @Composable
 private fun MainScreen(viewModel: PlayerViewModel) {
-    var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf(
-        Tab("Library") { Icon(Icons.Filled.LibraryMusic, contentDescription = null) },
-        Tab("Search") { Icon(Icons.Filled.Search, contentDescription = null) },
-        Tab("Favorites") { Icon(Icons.Filled.Favorite, contentDescription = null) },
-        Tab("Equalizer") { Icon(Icons.Filled.Equalizer, contentDescription = null) },
-        Tab("Account") { Icon(Icons.Filled.Person, contentDescription = null) },
+    val navController = rememberNavController()
+    val destinations = listOf(
+        Destination("home", "Home") { Icon(Icons.Filled.Home, contentDescription = null) },
+        Destination("library", "Library") { Icon(Icons.Filled.LibraryMusic, contentDescription = null) },
+        Destination("search", "Search") { Icon(Icons.Filled.Search, contentDescription = null) },
+        Destination("collection", "Collection") { Icon(Icons.Filled.Favorite, contentDescription = null) },
     )
+    val backStack by navController.currentBackStackEntryAsState()
+    val currentRoute = backStack?.destination?.route
 
     Scaffold(
+        topBar = {
+            if (currentRoute != "nowplaying") {
+                CenterAlignedTopAppBar(
+                    title = { Text("Auxen", style = MaterialTheme.typography.headlineSmall) },
+                    actions = {
+                        IconButton(onClick = { navController.navigate("equalizer") }) {
+                            Icon(Icons.Filled.Equalizer, contentDescription = "Equalizer")
+                        }
+                        IconButton(onClick = { navController.navigate("account") }) {
+                            Icon(Icons.Filled.Person, contentDescription = "Account")
+                        }
+                    },
+                )
+            }
+        },
         bottomBar = {
-            Column {
-                NowPlayingBar(viewModel)
-                NavigationBar {
-                    tabs.forEachIndexed { index, tab ->
-                        NavigationBarItem(
-                            selected = selectedTab == index,
-                            onClick = { selectedTab = index },
-                            icon = tab.icon,
-                            label = { Text(tab.label) },
-                        )
+            if (currentRoute != "nowplaying") {
+                Column {
+                    NowPlayingBar(viewModel)
+                    NavigationBar {
+                        destinations.forEach { dest ->
+                            NavigationBarItem(
+                                selected = currentRoute == dest.route,
+                                onClick = {
+                                    navController.navigate(dest.route) {
+                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                },
+                                icon = dest.icon,
+                                label = { Text(dest.label) },
+                            )
+                        }
                     }
                 }
             }
         },
     ) { innerPadding ->
-        val contentModifier = Modifier.padding(innerPadding)
-        when (selectedTab) {
-            0 -> LibraryScreen(viewModel, contentModifier)
-            1 -> SearchScreen(viewModel, contentModifier)
-            2 -> FavoritesScreen(viewModel, contentModifier)
-            3 -> EqualizerScreen(contentModifier)
-            4 -> AccountScreen(viewModel, contentModifier)
+        NavHost(
+            navController = navController,
+            startDestination = "home",
+            modifier = Modifier.padding(innerPadding),
+        ) {
+            composable("home") { HomeScreen(viewModel) }
+            composable("library") { LibraryScreen(viewModel) }
+            composable("search") { SearchScreen(viewModel) }
+            composable("collection") { FavoritesScreen(viewModel) }
+            composable("equalizer") { EqualizerScreen() }
+            composable("account") { AccountScreen(viewModel) }
+            composable("nowplaying") { NowPlayingScreenPlaceholder(onBack = { navController.popBackStack() }) }
         }
+    }
+}
+
+/** Replaced by the real NowPlayingScreen in Task 6. */
+@Composable
+private fun NowPlayingScreenPlaceholder(onBack: () -> Unit) {
+    Column(modifier = Modifier.padding(24.dp)) {
+        TextButton(onClick = onBack) { Text("Back") }
+        Text("Now Playing", style = MaterialTheme.typography.displaySmall)
     }
 }
