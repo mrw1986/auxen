@@ -3,6 +3,7 @@ package io.github.auxen.playback
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -48,8 +49,8 @@ class PlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** mediaId -> last recovery attempt, to stop error/retry loops. */
-    private val retryGuard = mutableMapOf<String, Long>()
+    /** Last expiry-recovery attempt (elapsedRealtime), bounding the 4xx retry path. */
+    private var lastExpiryRecoveryAtMillis = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -83,16 +84,22 @@ class PlaybackService : MediaSessionService() {
 
             override fun onPlayerError(error: PlaybackException) {
                 val currentPlayer = mediaSession?.player ?: return
-                val item = currentPlayer.currentMediaItem ?: return
 
                 val dash = findCause<TidalDashStreamException>(error)
                 if (dash != null) {
-                    // Swap the stable auxen:// item for the resolved DASH manifest.
+                    // The failing load may be the pre-buffering NEXT item, not
+                    // the current one — locate it by mediaId instead of
+                    // assuming currentMediaItem.
+                    val targetMediaId = "TIDAL:${dash.trackId}"
+                    val index = (0 until currentPlayer.mediaItemCount)
+                        .firstOrNull { currentPlayer.getMediaItemAt(it).mediaId == targetMediaId }
+                        ?: return
+                    val item = currentPlayer.getMediaItemAt(index)
                     val newItem = item.buildUpon()
                         .setUri(dash.streamInfo.uri)
                         .setMimeType(MimeTypes.APPLICATION_MPD)
                         .build()
-                    currentPlayer.replaceMediaItem(currentPlayer.currentMediaItemIndex, newItem)
+                    currentPlayer.replaceMediaItem(index, newItem)
                     currentPlayer.prepare()
                     currentPlayer.play()
                     return
@@ -100,13 +107,25 @@ class PlaybackService : MediaSessionService() {
 
                 val http = findCause<HttpDataSource.InvalidResponseCodeException>(error)
                 val expired = http != null && http.responseCode in intArrayOf(401, 403, 410)
-                if (expired && item.mediaId.startsWith("TIDAL:")) {
-                    val now = System.currentTimeMillis()
-                    if (now - (retryGuard[item.mediaId] ?: 0) < RETRY_COOLDOWN_MILLIS) return
-                    retryGuard[item.mediaId] = now
-                    // Cached URL went stale: drop it and re-prepare — the
-                    // auxen:// URI re-resolves to a fresh URL on open.
-                    Graph.resolver.invalidate(item.mediaId.substringAfter(':'))
+                if (expired) {
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastExpiryRecoveryAtMillis < RETRY_COOLDOWN_MILLIS) return
+                    lastExpiryRecoveryAtMillis = now
+                    // The expired URL may belong to any queued Tidal item
+                    // (current or pre-buffering): drop every cached stream URL
+                    // and restore the stable auxen:// URI on previously
+                    // DASH-swapped items so re-prepare can re-resolve them.
+                    Graph.resolver.invalidateAll()
+                    for (i in 0 until currentPlayer.mediaItemCount) {
+                        val queued = currentPlayer.getMediaItemAt(i)
+                        if (!queued.mediaId.startsWith("TIDAL:")) continue
+                        if (queued.localConfiguration?.uri?.scheme == "auxen") continue
+                        val restored = queued.buildUpon()
+                            .setUri("auxen://tidal/${queued.mediaId.substringAfter(':')}")
+                            .setMimeType(null)
+                            .build()
+                        currentPlayer.replaceMediaItem(i, restored)
+                    }
                     currentPlayer.prepare()
                     currentPlayer.play()
                 }

@@ -50,4 +50,14 @@ class TrackResolverTest {
         resolver.resolve("1")
         assertEquals(2, fetchCount)
     }
+
+    @Test
+    fun invalidateAllForcesRefetchForEveryTrack() = runBlocking {
+        resolver.resolve("1")
+        resolver.resolve("2")
+        resolver.invalidateAll()
+        resolver.resolve("1")
+        resolver.resolve("2")
+        assertEquals(4, fetchCount)
+    }
 }

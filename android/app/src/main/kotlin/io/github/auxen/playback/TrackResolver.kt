@@ -32,6 +32,11 @@ class TrackResolver(
         cache.remove(tidalTrackId)
     }
 
+    /** Drop every cached entry, e.g. after an expired-URL recovery sweep. */
+    fun invalidateAll() {
+        cache.clear()
+    }
+
     private companion object {
         const val DEFAULT_TTL_MILLIS = 20L * 60 * 1000
     }
