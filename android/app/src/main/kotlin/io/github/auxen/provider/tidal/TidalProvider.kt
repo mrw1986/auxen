@@ -121,9 +121,16 @@ class TidalProvider(
      * either a BTS manifest (direct FLAC/AAC URLs) or a DASH MPD, which is
      * passed to ExoPlayer as a data: URI (media3-exoplayer-dash handles it).
      */
-    override suspend fun getStreamInfo(track: Track): StreamInfo {
+    override suspend fun getStreamInfo(track: Track): StreamInfo = getStreamInfoById(track.sourceId)
+
+    /**
+     * Resolve a playable stream by Tidal track id. Requests Hi-Res lossless;
+     * Tidal answers with either a BTS manifest (direct FLAC/AAC URLs) or a
+     * DASH MPD, which is passed to ExoPlayer as a data: URI.
+     */
+    suspend fun getStreamInfoById(trackId: String): StreamInfo {
         val token = validToken() ?: error("Not logged in to Tidal")
-        val url = "$API_BASE/tracks/${track.sourceId}/playbackinfopostpaywall".toHttpUrl()
+        val url = "$API_BASE/tracks/$trackId/playbackinfopostpaywall".toHttpUrl()
             .newBuilder()
             .addQueryParameter("audioquality", "HI_RES_LOSSLESS")
             .addQueryParameter("playbackmode", "STREAM")
@@ -137,7 +144,7 @@ class TidalProvider(
                 val decoded = String(Base64.decode(info.manifest, Base64.DEFAULT))
                 val bts = json.decodeFromString<BtsManifest>(decoded)
                 StreamInfo(
-                    uri = bts.urls.firstOrNull() ?: error("Empty BTS manifest for track ${track.sourceId}"),
+                    uri = bts.urls.firstOrNull() ?: error("Empty BTS manifest for track $trackId"),
                     mimeType = bts.mimeType,
                     sampleRateHz = info.sampleRate,
                     bitDepth = info.bitDepth,
