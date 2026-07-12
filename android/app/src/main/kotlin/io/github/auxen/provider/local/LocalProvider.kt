@@ -36,6 +36,15 @@ class LocalProvider(private val context: Context) : MusicProvider {
             limit = limit,
         )
 
+    /** Most recently added local tracks — desktop "Recently Added" section. */
+    suspend fun recentlyAdded(limit: Int = 30): List<Track> =
+        queryTracks(
+            selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0",
+            selectionArgs = null,
+            limit = limit,
+            sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC",
+        )
+
     override suspend fun getStreamInfo(track: Track): StreamInfo {
         val uri = ContentUris.withAppendedId(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -48,6 +57,7 @@ class LocalProvider(private val context: Context) : MusicProvider {
         selection: String,
         selectionArgs: Array<String>?,
         limit: Int,
+        sortOrder: String = "${MediaStore.Audio.Media.ARTIST}, ${MediaStore.Audio.Media.ALBUM}, ${MediaStore.Audio.Media.TRACK}",
     ): List<Track> = withContext(Dispatchers.IO) {
         val projection = arrayOf(
             MediaStore.Audio.Media._ID,
@@ -68,7 +78,7 @@ class LocalProvider(private val context: Context) : MusicProvider {
             projection,
             selection,
             selectionArgs,
-            "${MediaStore.Audio.Media.ARTIST}, ${MediaStore.Audio.Media.ALBUM}, ${MediaStore.Audio.Media.TRACK}",
+            sortOrder,
         )?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
             val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
