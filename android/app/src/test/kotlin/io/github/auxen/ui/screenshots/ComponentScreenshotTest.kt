@@ -11,8 +11,10 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
 import com.github.takahirom.roborazzi.captureRoboImage
 import io.github.auxen.db.PlaylistEntity
+import io.github.auxen.dsp.AutoEqProfile
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
+import io.github.auxen.ui.AutoEqPickerResults
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.QualityBadge
@@ -31,7 +33,7 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * Roborazzi golden screenshots for the core reusable components, in both the
- * light and dark [AuxenTheme] variants (6 surfaces × 2 themes = 12 goldens).
+ * light and dark [AuxenTheme] variants (7 surfaces × 2 themes = 14 goldens).
  *
  * ## How goldens are produced / checked
  * `./gradlew :app:recordRoborazziDebug` writes the PNGs under
@@ -55,6 +57,14 @@ import org.robolectric.annotation.GraphicsMode
  * cannot capture the sheet reproducibly. The content composable renders in the
  * main composition and is pixel-stable, showing the same root action page a user
  * sees when the sheet opens.
+ *
+ * ## AutoEq picker surface — fake results, not the live 8,850-profile asset
+ * The `autoeq-picker-*` goldens capture [AutoEqPickerResults] (extracted
+ * from `EqualizerScreen` for the same reason as [TrackActionSheetContent]:
+ * it is a stateless slice of a screen that otherwise depends on a live
+ * repository / `Graph` singleton). It is rendered with a hardcoded 3-entry
+ * fake result list rather than a real search over the bundled AutoEq
+ * database, so the golden can never drift when the database asset changes.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -94,6 +104,14 @@ class ComponentScreenshotTest {
     private val playlists = listOf(
         PlaylistEntity(id = 1, name = "Road Trip", color = "#3498db"),
         PlaylistEntity(id = 2, name = "Chill", color = "#2ecc71"),
+    )
+
+    // Fake AutoEq search results — a golden must never depend on the bundled
+    // 8,850-profile database, so this is a fixed 3-entry stand-in.
+    private val autoEqResults = listOf(
+        AutoEqProfile(index = 0, name = "Sennheiser HD 650", source = "AutoEq", rig = "Averaged"),
+        AutoEqProfile(index = 1, name = "Sony WH-1000XM4", source = "AutoEq", rig = "Harman over-ear 2018"),
+        AutoEqProfile(index = 2, name = "Sennheiser HD 800S", source = "Crinacle", rig = "5128"),
     )
 
     /**
@@ -207,6 +225,25 @@ class ComponentScreenshotTest {
             onAddToPlaylist = {},
             onShowPlaylists = {},
             onNewPlaylist = {},
+        )
+    }
+
+    // --- AutoEq picker (active-profile row + fake search results) ---
+
+    @Test
+    fun autoEqPicker_light() = captureComponent("autoeq-picker-light", darkTheme = false) { AutoEqPickerPreview() }
+
+    @Test
+    fun autoEqPicker_dark() = captureComponent("autoeq-picker-dark", darkTheme = true) { AutoEqPickerPreview() }
+
+    @Composable
+    private fun AutoEqPickerPreview() {
+        AutoEqPickerResults(
+            activeProfile = "Sennheiser HD 650",
+            results = autoEqResults,
+            noMatches = false,
+            onSelectProfile = {},
+            onClearActive = {},
         )
     }
 }

@@ -52,8 +52,12 @@ ExoPlayer decoder → ParametricEqProcessor (float64 biquads, float32 samples)
   - the desktop app's 10-band graphic EQ (same ISO bands, same ten presets),
     with automatic preamp = −(largest boost) to prevent clipping;
   - `AutoEqParser` for AutoEq `ParametricEq.txt` exports (PK/LSC/HSC lines),
-    i.e. correction profiles for ~5,000 headphone models — the Wavelet
+    i.e. correction profiles for 8,850 headphone models — the Wavelet
     feature, but in-app and in float.
+
+The Equalizer screen bundles that full 8,850-profile AutoEq database as an
+asset with an in-app search picker (Wavelet parity, no network round-trip),
+MIT-attributed to the upstream AutoEq project.
 
 ### Tidal
 

@@ -201,24 +201,6 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
         // ---- AutoEq headphone-correction picker (Wavelet-style) ----
         Text("Headphone correction", style = MaterialTheme.typography.titleMedium)
 
-        activeProfile?.let { name ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "Active: $name",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(
-                    onClick = {
-                        EqController.applyPreset("Flat")
-                        clearActiveProfileMarker()
-                    },
-                ) {
-                    Text("Clear")
-                }
-            }
-        }
-
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -235,31 +217,19 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
             },
         )
 
-        if (query.isNotBlank()) {
-            if (results.isEmpty() && loaded) {
-                Text(
-                    "No matching profiles",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
-                    items(results, key = { it.index }) { profile ->
-                        ProfileRow(profile) {
-                            applyAutoEq(scope, repo, profile) { activeProfile = it }
-                            query = ""
-                        }
-                    }
-                }
-                if (results.size >= 50) {
-                    Text(
-                        "Showing the first 50 matches — refine your search.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
+        AutoEqPickerResults(
+            activeProfile = activeProfile,
+            results = results,
+            noMatches = query.isNotBlank() && loaded && results.isEmpty(),
+            onSelectProfile = { profile ->
+                applyAutoEq(scope, repo, profile) { activeProfile = it }
+                query = ""
+            },
+            onClearActive = {
+                EqController.applyPreset("Flat")
+                clearActiveProfileMarker()
+            },
+        )
 
         Button(onClick = { importLauncher.launch(arrayOf("text/plain")) }) {
             Text("Import custom profile…")
@@ -304,6 +274,65 @@ private fun applyAutoEq(
                 Graph.library.setSetting(KEY_AUTOEQ_PROFILE, profile.name)
                 onApplied(profile.name)
             }
+        }
+    }
+}
+
+/**
+ * Stateless body of the AutoEq picker's active-profile row and search
+ * results list — the part of [EqualizerScreen]'s picker section with no
+ * dependency on a live [io.github.auxen.dsp.AutoEqRepository] or [Graph]
+ * settings I/O.
+ *
+ * Extracted from [EqualizerScreen] (same pattern as
+ * [io.github.auxen.ui.components.TrackActionSheetContent]) so
+ * `ComponentScreenshotTest` can golden it with a FAKE result list rather
+ * than exercising the bundled 8,850-profile asset, which would make the
+ * goldens depend on database contents.
+ *
+ * [noMatches] is computed by the caller (`query.isNotBlank() && loaded &&
+ * results.isEmpty()`) rather than inferred here, since an empty [results]
+ * list is also the steady state before the user has typed anything.
+ */
+@Composable
+internal fun AutoEqPickerResults(
+    activeProfile: String?,
+    results: List<AutoEqProfile>,
+    noMatches: Boolean,
+    onSelectProfile: (AutoEqProfile) -> Unit,
+    onClearActive: () -> Unit,
+) {
+    activeProfile?.let { name ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Active: $name",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onClearActive) {
+                Text("Clear")
+            }
+        }
+    }
+
+    if (noMatches) {
+        Text(
+            "No matching profiles",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    } else if (results.isNotEmpty()) {
+        LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
+            items(results, key = { it.index }) { profile ->
+                ProfileRow(profile) { onSelectProfile(profile) }
+            }
+        }
+        if (results.size >= 50) {
+            Text(
+                "Showing the first 50 matches — refine your search.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

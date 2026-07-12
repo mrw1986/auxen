@@ -38,4 +38,18 @@ class AutoEqRepositoryTest {
         val state = AutoEqParser.parse(text, profile.name)
         assertTrue("expected filters in ${profile.name}", state.filters.isNotEmpty())
     }
+
+    /**
+     * Models the restore-on-start lookup in `AuxenApp.restoreAutoEqProfile`:
+     * the persisted setting stores a profile's FULL name, and restore
+     * searches for it again to re-resolve the [AutoEqProfile]. The known
+     * name is picked dynamically (via a broad "Sennheiser" search) so the
+     * test doesn't hardcode bundled-database contents.
+     */
+    @Test
+    fun exactNameRoundTripsThroughSearch() = runBlocking {
+        repo.ensureLoaded()
+        val name = repo.search("Sennheiser").first().name
+        assertEquals(name, repo.search(name).first().name)
+    }
 }
