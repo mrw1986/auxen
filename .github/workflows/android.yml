@@ -79,11 +79,12 @@ jobs:
           name: auxen-debug-apk
           path: apk
 
-      # ffmpeg is preinstalled on ubuntu runners. Embed a title so the on-device
-      # track name is deterministic ("Smoke Tone") regardless of MediaStore's
-      # filename-to-title heuristics.
+      # Embed a title so the on-device track name is deterministic
+      # ("Smoke Tone") regardless of MediaStore's filename-to-title heuristics.
+      # ubuntu-latest (24.04) does not preinstall ffmpeg.
       - name: Generate test tone MP3
         run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
           ffmpeg -f lavfi -i "sine=frequency=440:duration=10" \
             -metadata title="Smoke Tone" -metadata artist="Auxen QA" \
             -y smoke-tone.mp3
