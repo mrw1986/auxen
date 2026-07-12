@@ -105,6 +105,23 @@ class DaoTest {
         assertTrue(db.playlistDao().tracksIn(pl).isEmpty())
     }
 
+    @Test
+    fun playlistReorderAndRecolor() = runBlocking {
+        val t1 = db.trackDao().upsert(track("1").toEntity(), nowMillis = 1)
+        val t2 = db.trackDao().upsert(track("2").toEntity(), nowMillis = 1)
+        val t3 = db.trackDao().upsert(track("3").toEntity(), nowMillis = 1)
+        val pl = db.playlistDao().insert(PlaylistEntity(name = "Mix", color = "#d4a039"))
+        db.playlistDao().appendTrack(pl, t1)
+        db.playlistDao().appendTrack(pl, t2)
+        db.playlistDao().appendTrack(pl, t3)
+
+        db.playlistDao().reorder(pl, listOf(t3, t1, t2))
+        assertEquals(listOf("Song 3", "Song 1", "Song 2"), db.playlistDao().tracksIn(pl).map { it.title })
+
+        db.playlistDao().recolor(pl, "#3498db")
+        assertEquals("#3498db", db.playlistDao().playlists().first().single().color)
+    }
+
     // ---------------- play history ----------------
 
     @Test

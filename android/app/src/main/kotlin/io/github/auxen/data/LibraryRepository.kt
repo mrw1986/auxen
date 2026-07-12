@@ -71,6 +71,31 @@ class LibraryRepository(
         db.playlistDao().appendTrack(playlistId, trackId)
     }
 
+    /** Ordered tracks in a playlist (desktop get_playlist_tracks). */
+    suspend fun playlistTracks(playlistId: Long): List<Track> =
+        db.playlistDao().tracksIn(playlistId).map { it.toTrack() }
+
+    suspend fun renamePlaylist(id: Long, name: String) = db.playlistDao().rename(id, name)
+
+    suspend fun recolorPlaylist(id: Long, color: String) = db.playlistDao().recolor(id, color)
+
+    suspend fun deletePlaylist(id: Long) = db.playlistDao().deleteWithTracks(id)
+
+    suspend fun removeFromPlaylist(playlistId: Long, track: Track) {
+        val entity = db.trackDao().bySourceId(track.source.name, track.sourceId) ?: return
+        db.playlistDao().removeTrack(playlistId, entity.id)
+    }
+
+    /** Move one entry and rewrite positions — desktop reorder_playlist_track. */
+    suspend fun movePlaylistTrack(playlistId: Long, fromIndex: Int, toIndex: Int) {
+        val entities = db.playlistDao().tracksIn(playlistId)
+        if (fromIndex !in entities.indices || toIndex !in entities.indices) return
+        val ids = entities.map { it.id }.toMutableList()
+        val moved = ids.removeAt(fromIndex)
+        ids.add(toIndex, moved)
+        db.playlistDao().reorder(playlistId, ids)
+    }
+
     suspend fun sourcePriority(): SourcePriority =
         db.settingsDao().get(KEY_SOURCE_PRIORITY)
             ?.let { stored -> SourcePriority.entries.firstOrNull { it.name == stored } }

@@ -81,6 +81,9 @@ interface PlaylistDao {
     @Query("UPDATE playlists SET name = :name WHERE id = :id")
     suspend fun rename(id: Long, name: String)
 
+    @Query("UPDATE playlists SET color = :color WHERE id = :id")
+    suspend fun recolor(id: Long, color: String)
+
     @Query("DELETE FROM playlists WHERE id = :id")
     suspend fun delete(id: Long)
 
@@ -112,6 +115,15 @@ interface PlaylistDao {
             "WHERE pt.playlist_id = :playlistId ORDER BY pt.position",
     )
     suspend fun tracksIn(playlistId: Long): List<TrackEntity>
+
+    /** Rewrite the playlist's ordering in one transaction. */
+    @Transaction
+    suspend fun reorder(playlistId: Long, orderedTrackIds: List<Long>) {
+        clearTracks(playlistId)
+        orderedTrackIds.forEachIndexed { index, trackId ->
+            insertTrack(PlaylistTrackEntity(playlistId, trackId, index))
+        }
+    }
 }
 
 @Dao

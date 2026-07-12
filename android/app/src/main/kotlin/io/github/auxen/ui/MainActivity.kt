@@ -27,11 +27,9 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -174,8 +172,9 @@ private fun MainScreen(viewModel: PlayerViewModel) {
                 )
             }
             composable("playlist/{playlistId}") { backStack ->
-                DetailPlaceholder(
-                    title = "Playlist ${backStack.arguments?.getString("playlistId")}",
+                PlaylistDetailScreen(
+                    viewModel,
+                    playlistId = backStack.arguments?.getString("playlistId")?.toLongOrNull() ?: -1L,
                     onBack = { navController.popBackStack() },
                 )
             }
@@ -183,14 +182,5 @@ private fun MainScreen(viewModel: PlayerViewModel) {
             composable("account") { AccountScreen(viewModel) }
             composable("nowplaying") { NowPlayingScreen(viewModel, onBack = { navController.popBackStack() }) }
         }
-    }
-}
-
-/** Replaced by real detail screens in Task 7. */
-@Composable
-private fun DetailPlaceholder(title: String, onBack: () -> Unit) {
-    Column(modifier = Modifier.padding(24.dp)) {
-        TextButton(onClick = onBack) { Text("Back") }
-        Text(title, style = MaterialTheme.typography.displaySmall)
     }
 }

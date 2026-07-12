@@ -104,6 +104,30 @@ class LibraryRepositoryTest {
     }
 
     @Test
+    fun playlistManagementRoundTrip() = runBlocking {
+        val id = repo.createPlaylist("Mix")
+        repo.addTrackToPlaylist(tidalTrack, id)
+        repo.addTrackToPlaylist(tidalTrack.copy(sourceId = "100", title = "Walk"), id)
+
+        assertEquals(listOf("Everlong", "Walk"), repo.playlistTracks(id).map { it.title })
+
+        repo.movePlaylistTrack(id, fromIndex = 1, toIndex = 0)
+        assertEquals(listOf("Walk", "Everlong"), repo.playlistTracks(id).map { it.title })
+
+        repo.renamePlaylist(id, "Road Trip")
+        repo.recolorPlaylist(id, "#3498db")
+        val entity = repo.playlists().first().single()
+        assertEquals("Road Trip", entity.name)
+        assertEquals("#3498db", entity.color)
+
+        repo.removeFromPlaylist(id, tidalTrack.copy(sourceId = "100", title = "Walk"))
+        assertEquals(listOf("Everlong"), repo.playlistTracks(id).map { it.title })
+
+        repo.deletePlaylist(id)
+        assertTrue(repo.playlists().first().isEmpty())
+    }
+
+    @Test
     fun recentlyPlayedMapsHistoryToTracks() = runBlocking {
         repo.upsert(tidalTrack)
         repo.recordPlay("TIDAL:99")

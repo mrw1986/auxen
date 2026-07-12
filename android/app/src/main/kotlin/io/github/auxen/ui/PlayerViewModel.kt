@@ -366,6 +366,41 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Ordered tracks of the open playlist — reloaded after every membership/order change. */
+    val playlistTracks = MutableStateFlow<List<Track>>(emptyList())
+
+    fun loadPlaylist(id: Long) {
+        viewModelScope.launch {
+            runCatching { Graph.library.playlistTracks(id) }.onSuccess { playlistTracks.value = it }
+        }
+    }
+
+    fun renamePlaylist(id: Long, name: String) {
+        viewModelScope.launch { runCatching { Graph.library.renamePlaylist(id, name) } }
+    }
+
+    fun recolorPlaylist(id: Long, color: String) {
+        viewModelScope.launch { runCatching { Graph.library.recolorPlaylist(id, color) } }
+    }
+
+    fun deletePlaylist(id: Long) {
+        viewModelScope.launch { runCatching { Graph.library.deletePlaylist(id) } }
+    }
+
+    fun removeFromPlaylist(id: Long, track: Track) {
+        viewModelScope.launch {
+            runCatching { Graph.library.removeFromPlaylist(id, track) }
+            loadPlaylist(id)
+        }
+    }
+
+    fun movePlaylistTrack(id: Long, from: Int, to: Int) {
+        viewModelScope.launch {
+            runCatching { Graph.library.movePlaylistTrack(id, from, to) }
+            loadPlaylist(id)
+        }
+    }
+
     fun togglePlayPause() {
         val c = controller ?: return
         when {
