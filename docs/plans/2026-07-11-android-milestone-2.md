@@ -127,6 +127,12 @@ class FuzzRatioTest {
         assertEquals(100, fuzzRatio("", ""))
         assertEquals(0, fuzzRatio("abc", ""))
     }
+
+    @Test
+    fun tiesRoundHalfToEvenLikePython() {
+        // LCS=1, lensum=16 → raw 12.5; Python round() gives 12, not 13.
+        assertEquals(12, fuzzRatio("abcdefgh", "zyxwvuta"))
+    }
 }
 
 class TracksMatchTest {
@@ -228,7 +234,6 @@ package io.github.auxen.matching
 
 import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
-import kotlin.math.roundToInt
 
 /**
  * Track matching and source-priority logic — Kotlin port of
@@ -253,12 +258,13 @@ fun normalizeForMatching(text: String): String {
 
 /**
  * Similarity score in 0..100, matching `thefuzz.fuzz.ratio` (the indel /
- * normalized-Levenshtein ratio): round(200 * LCS / (|a| + |b|)).
+ * normalized-Levenshtein ratio): round(200 * LCS / (|a| + |b|)), with
+ * Python's round-half-to-even tie behavior.
  */
 fun fuzzRatio(a: String, b: String): Int {
     val lensum = a.length + b.length
     if (lensum == 0) return 100
-    return (200.0 * lcsLength(a, b) / lensum).roundToInt()
+    return Math.rint(200.0 * lcsLength(a, b) / lensum).toInt()
 }
 
 /** Longest-common-subsequence length, O(min) two-row DP. */
