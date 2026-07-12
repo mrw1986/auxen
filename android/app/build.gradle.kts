@@ -60,6 +60,15 @@ android {
     }
 }
 
+// Unit tests run on the debug variant only: the Compose test activity
+// (ui-test-manifest) is debug-scoped, and the release unit-test variant
+// would duplicate identical JVM tests minus that infra.
+androidComponents {
+    beforeVariants(selector().withBuildType("release")) { variant ->
+        (variant as? com.android.build.api.variant.HasUnitTestBuilder)?.enableUnitTest = false
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

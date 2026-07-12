@@ -24,7 +24,7 @@ jobs:
 
       - name: Unit tests
         working-directory: android
-        run: ./gradlew test --stacktrace
+        run: ./gradlew testDebugUnitTest --stacktrace
 
       - name: Roborazzi verification
         working-directory: android
