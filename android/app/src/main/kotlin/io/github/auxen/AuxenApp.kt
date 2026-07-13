@@ -12,6 +12,7 @@ import androidx.media3.common.util.UnstableApi
 import io.github.auxen.data.LibraryRepository
 import io.github.auxen.db.AuxenDatabase
 import io.github.auxen.dsp.AudioFxController
+import io.github.auxen.dsp.AutoEqController
 import io.github.auxen.dsp.AutoEqRepository
 import io.github.auxen.dsp.EqController
 import io.github.auxen.model.Source
@@ -39,6 +40,12 @@ class AuxenApp : Application() {
         super.onCreate()
         Graph.init(this)
         EqController.initialize(this)
+        // AutoEqController.initialize also runs the one-time legacy
+        // migration (a pre-split install's AutoEq profile, merged into
+        // EqController's old combined eq_state) -- must come after
+        // EqController.initialize so the migration reads a real restored
+        // state, not defaults from a race (AutoEq split, Task 1).
+        AutoEqController.initialize(this)
         AudioFxController.initialize(this)
         restoreAutoEqProfile()
     }
@@ -50,15 +57,20 @@ class AuxenApp : Application() {
      * vanished after an asset update simply clears the setting — restore must
      * never crash the app.
      *
-     * [EqController.initialize] already restores the full [io.github.auxen.dsp.EqState]
-     * (filters, preamp, and the user's enabled flag) from DataStore, so once
-     * that has settled ([EqController.awaitInitialized]) re-applying the profile
-     * would be redundant and, worse, force `enabled = true` — clobbering a
-     * persisted `enabled = false` on every launch. So when the restored state
-     * already carries filters we only *validate* the marker (bundled name still
-     * in the index, or custom text still present) and clear it on a miss. We
-     * re-apply from the marker only when DataStore was empty/fresh (no filters),
-     * where the default `enabled = true` is correct.
+     * [AutoEqController.initialize] already restores the full
+     * [io.github.auxen.dsp.EqState] (filters, preamp, and the user's enabled
+     * flag) from ITS OWN DataStore, so once that has settled
+     * ([AutoEqController.awaitInitialized]) re-applying the profile would be
+     * redundant and, worse, force `enabled = true` — clobbering a persisted
+     * `enabled = false` on every launch. So when the restored state already
+     * carries filters we only *validate* the marker (bundled name still in
+     * the index, or custom text still present) and clear it on a miss. We
+     * re-apply from the marker only when DataStore was empty/fresh (no
+     * filters), where the default `enabled = true` is correct.
+     *
+     * Targets [AutoEqController], not [EqController], as of the AutoEq
+     * split (Task 1) — this marker/restore mechanism has always been about
+     * the searched/imported correction profile, never the graphic EQ.
      */
     private fun restoreAutoEqProfile() {
         appScope.launch {
@@ -68,15 +80,15 @@ class AuxenApp : Application() {
 
                 // Wait for the DataStore restore so `hasFilters` reflects a
                 // settled state rather than racing the load.
-                EqController.awaitInitialized()
-                val hasFilters = EqController.state.value.filters.isNotEmpty()
+                AutoEqController.awaitInitialized()
+                val hasFilters = AutoEqController.state.value.filters.isNotEmpty()
 
                 if (saved.startsWith("custom:")) {
                     val name = saved.removePrefix("custom:")
                     val text = Graph.library.getSetting(KEY_AUTOEQ_CUSTOM_TEXT)
                     when {
                         text.isNullOrBlank() -> Graph.library.setSetting(KEY_AUTOEQ_PROFILE, "")
-                        !hasFilters -> EqController.importAutoEq(text, name)
+                        !hasFilters -> AutoEqController.importAutoEq(text, name)
                         // else: DataStore already restored the parametric state
                         // (incl. the enabled flag); marker is valid, leave it.
                     }
@@ -91,7 +103,7 @@ class AuxenApp : Application() {
                     return@runCatching
                 }
                 if (!hasFilters) {
-                    EqController.importAutoEq(Graph.autoEq.profileText(profile), profile.name)
+                    AutoEqController.importAutoEq(Graph.autoEq.profileText(profile), profile.name)
                 }
                 // else: marker validated against the index; DataStore state kept.
             }

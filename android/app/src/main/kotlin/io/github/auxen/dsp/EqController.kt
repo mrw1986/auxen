@@ -90,8 +90,4 @@ object EqController {
         val gains = EqState.PRESETS[name] ?: return
         setState(EqState.fromBands(gains, enabled = true, presetName = name))
     }
-
-    /** Import an AutoEq ParametricEq profile (the Wavelet-style feature). */
-    fun importAutoEq(text: String, profileName: String?): Result<EqState> =
-        runCatching { AutoEqParser.parse(text, profileName) }.onSuccess { setState(it) }
 }

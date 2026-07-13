@@ -58,6 +58,7 @@ import androidx.media3.common.util.UnstableApi
 import io.github.auxen.Graph
 import io.github.auxen.R
 import io.github.auxen.dsp.AudioFxController
+import io.github.auxen.dsp.AutoEqController
 import io.github.auxen.dsp.AutoEqProfile
 import io.github.auxen.dsp.EqController
 import io.github.auxen.dsp.EqState
@@ -193,7 +194,7 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
         } else {
             val name = uri.lastPathSegment?.substringAfterLast('/')?.removeSuffix(".txt")
             val displayName = name?.takeIf { it.isNotBlank() } ?: "Custom profile"
-            EqController.importAutoEq(text, displayName)
+            AutoEqController.importAutoEq(text, displayName)
                 .onSuccess {
                     importError = null
                     activeProfile = displayName
@@ -403,7 +404,7 @@ private fun String?.toActiveProfileName(): String? = when {
 
 /**
  * Apply a bundled AutoEq profile: read its ParametricEq body (IO), feed it
- * through [EqController.importAutoEq], and persist the name for restore-on-start.
+ * through [AutoEqController.importAutoEq], and persist the name for restore-on-start.
  * runCatching keeps a corrupt/missing zip entry (profileText throws) from
  * crashing the composition scope — matching the import/restore paths.
  */
@@ -417,7 +418,7 @@ private fun applyAutoEq(
     scope.launch {
         runCatching {
             val text = repo.profileText(profile)
-            EqController.importAutoEq(text, profile.name).onSuccess {
+            AutoEqController.importAutoEq(text, profile.name).onSuccess {
                 Graph.library.setSetting(KEY_AUTOEQ_PROFILE, profile.name)
                 onApplied(profile.name)
             }

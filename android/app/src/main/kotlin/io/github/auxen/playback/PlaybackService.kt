@@ -34,6 +34,7 @@ import com.google.common.util.concurrent.SettableFuture
 import io.github.auxen.Graph
 import io.github.auxen.R
 import io.github.auxen.dsp.AudioFxController
+import io.github.auxen.dsp.AutoEqController
 import io.github.auxen.dsp.BalanceProcessor
 import io.github.auxen.dsp.BassBoostProcessor
 import io.github.auxen.dsp.EncodingRestorerProcessor
@@ -66,17 +67,20 @@ import kotlinx.coroutines.withContext
  * app and more: lockscreen/notification controls, Bluetooth AVRCP, output
  * switching, and (later) Android Auto — all driven by the one MediaSession.
  *
- * The audiophile part is in [EqRenderersFactory]: the full six-stage DSP
+ * The audiophile part is in [EqRenderersFactory]: the full seven-stage DSP
  * chain is installed directly into the player's audio sink, so it runs
- * before the audio ever leaves the app. Chain order (`ReplayGain ->
- * ParametricEq -> BassBoost -> Balance -> Limiter -> EncodingRestorer`) is
- * LAW — see [ParametricEqProcessor]'s KDoc for why. The sink still requests
- * float output (so Hi-Res sources aren't truncated at the AudioTrack), and
- * every stage but the last runs unclamped float — chain-level headroom, not
- * per-processor clamping. [EncodingRestorerProcessor] alone converts back to
- * 16-bit at the tail, because DefaultAudioSink's built-in trailing
- * processors are 16-bit-only and float mid-chain would break sink
- * configuration.
+ * before the audio ever leaves the app. Chain order (`ReplayGain -> AutoEq
+ * -> ParametricEq (graphic) -> BassBoost -> Balance -> Limiter ->
+ * EncodingRestorer`) is LAW — see [ParametricEqProcessor]'s KDoc for why.
+ * AutoEq (headphone correction) and the graphic EQ are independent
+ * [ParametricEqProcessor] instances, attached to [AutoEqController] and
+ * [EqController] respectively (AutoEq split, Task 1). The sink still
+ * requests float output (so Hi-Res sources aren't truncated at the
+ * AudioTrack), and every stage but the last runs unclamped float —
+ * chain-level headroom, not per-processor clamping. [EncodingRestorerProcessor]
+ * alone converts back to 16-bit at the tail, because DefaultAudioSink's
+ * built-in trailing processors are 16-bit-only and float mid-chain would
+ * break sink configuration.
  *
  * Each effect stage (bass boost, balance, limiter, ReplayGain) is
  * individually toggleable — [AudioFxController] owns each effect's state
@@ -161,6 +165,12 @@ class PlaybackService : MediaSessionService() {
         val eqProcessor = ParametricEqProcessor()
         EqController.attachProcessor(eqProcessor)
 
+        // Headphone correction (AutoEq) is its own stage now, independent of
+        // the graphic EQ above -- a second ParametricEqProcessor instance,
+        // attached to AutoEqController instead (AutoEq split, Task 1).
+        val autoEqProcessor = ParametricEqProcessor()
+        AutoEqController.attachProcessor(autoEqProcessor)
+
         val replayGainProcessor = ReplayGainProcessor()
         val bassBoostProcessor = BassBoostProcessor()
         val balanceProcessor = BalanceProcessor()
@@ -185,6 +195,7 @@ class PlaybackService : MediaSessionService() {
         val renderersFactory = EqRenderersFactory(
             this,
             replayGainProcessor,
+            autoEqProcessor,
             eqProcessor,
             bassBoostProcessor,
             balanceProcessor,
@@ -690,17 +701,24 @@ private class AuxenLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
 }
 
 /**
- * Builds the six-stage DSP processor array in chain order. Extracted out of
- * [EqRenderersFactory.buildAudioSink] so a production regression test
+ * Builds the seven-stage DSP processor array in chain order. Extracted out
+ * of [EqRenderersFactory.buildAudioSink] so a production regression test
  * ([io.github.auxen.playback.ProcessorChainOrderTest]) can call the exact
  * function the real audio sink uses, instead of asserting against a
  * hand-rolled list that could silently drift out of sync if this order ever
  * changed here without the test noticing (fix round, review of commit
  * dd1bd55, Important #2). Order is LAW -- see [ParametricEqProcessor]'s KDoc.
+ *
+ * [autoEqProcessor] and [eqProcessor] are both [ParametricEqProcessor]
+ * instances -- AutoEq split, Task 1: headphone correction and the 10-band
+ * graphic EQ are now two independent stages (AutoEq first, right after
+ * ReplayGain, before the user's graphic taste; both LTI, but each carries
+ * its own preamp so headroom composes predictably).
  */
 @UnstableApi
 internal fun buildDspProcessorChain(
     replayGainProcessor: ReplayGainProcessor,
+    autoEqProcessor: ParametricEqProcessor,
     eqProcessor: ParametricEqProcessor,
     bassBoostProcessor: BassBoostProcessor,
     balanceProcessor: BalanceProcessor,
@@ -708,6 +726,7 @@ internal fun buildDspProcessorChain(
     encodingRestorerProcessor: EncodingRestorerProcessor,
 ): Array<AudioProcessor> = arrayOf(
     replayGainProcessor,
+    autoEqProcessor,
     eqProcessor,
     bassBoostProcessor,
     balanceProcessor,
@@ -720,6 +739,7 @@ internal fun buildDspProcessorChain(
 private class EqRenderersFactory(
     context: Context,
     private val replayGainProcessor: ReplayGainProcessor,
+    private val autoEqProcessor: ParametricEqProcessor,
     private val eqProcessor: ParametricEqProcessor,
     private val bassBoostProcessor: BassBoostProcessor,
     private val balanceProcessor: BalanceProcessor,
@@ -745,6 +765,7 @@ private class EqRenderersFactory(
         .setAudioProcessors(
             buildDspProcessorChain(
                 replayGainProcessor,
+                autoEqProcessor,
                 eqProcessor,
                 bassBoostProcessor,
                 balanceProcessor,
