@@ -7,7 +7,9 @@
 1. **Reverb is an AUXILIARY (send) effect, never routed.** `PresetReverb(_, sessionId).setEnabled(true)` alone is inaudible. It must be sent into the AudioTrack via Media3's public `player.setAuxEffectInfo(AuxEffectInfo(reverb.id, sendLevel))` (→ `AudioTrack.attachAuxEffect` + `setAuxEffectSendLevel`). Requires `MODIFY_AUDIO_SETTINGS`. Per-session reverb IS feasible this way — no session 0, no raw-AudioTrack access needed.
 2. **Virtualizer hits a known Android 13/14 platform bug.** It's an insert effect (no aux routing), but on 13/14 it's silent unless `forceVirtualizationMode(VIRTUALIZATION_MODE_BINAURAL)` is called ~50 ms AFTER `enabled = true`. Sourced from the Wavelet author's documented workaround.
 
-**Also wrong (contributing fragility):** effects are built eagerly in `onCreate` before any AudioTrack exists (a documented failure mode, androidx/media #1397), against a session forced via `setAudioSessionId(C.AUDIO_SESSION_ID_UNSET)`. Working apps read the stable `player.audioSessionId` and create/apply effects LAZILY tied to real playback, re-applying on track transitions.
+**STRONGEST reverb cause (guaranteed, device-independent), added after the diagnosis workflow (wf_87583ade):** enabling reverb leaves `preset` at its default `0 = PRESET_NONE` ("No reverb"). The enable toggle (`FxSections.kt:311`) sends only `copy(enabled = it)` — no preset — and the preset dropdown is a separate control. So "reverb on" = reverberation preset none = zero effect, before any routing question. This alone likely explains the reverb report and must be fixed first.
+
+**RECONCILIATION — the two investigations disagreed on the session id; the diagnosis wins.** The reference research said to drop `setAudioSessionId(C.AUDIO_SESSION_ID_UNSET)`. The diagnosis workflow bytecode-verified (Media3 1.5.1) that this call is CORRECT and NECESSARY: the constructor session id is never propagated to the sink without it; with it, the AudioTrack is built with that exact id, stable across transitions, and session-mismatch is RULED OUT. **KEEP `setAudioSessionId(UNSET)` — do NOT remove it.** (This corrects the first draft of this plan.) Effects created before an AudioTrack is the standard documented pattern and is sound as long as the id matches (it does) — so re-applying on playback start is belt-and-suspenders, not a required rewrite.
 
 ## Fix
 
@@ -16,10 +18,11 @@
 ### 1. Manifest
 Add `<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />` (normal permission, no runtime request needed).
 
-### 2. Session id + timing
-- Remove `player.setAudioSessionId(C.AUDIO_SESSION_ID_UNSET)` and its long justification comment.
-- Remove the eager `onCreate` effect build and the reliance on the synthetic `onAudioSessionIdChanged`. Keep the `onAudioSessionIdChanged` override (harmless, fires on genuine changes) but drive effects off `player.audioSessionId`.
-- Build/apply effects LAZILY on playback start and re-apply on transitions: apply from `onMediaItemTransition` (and `onIsPlayingChanged(true)`), guarding against `C.AUDIO_SESSION_ID_UNSET`. Store desired state; apply when a real session exists.
+### 2. Reverb preset-on-enable (FIX 1 — the strongest, cheapest, do first)
+Never enable reverb with `PRESET_NONE`. Default `ReverbState.preset = 1` (`PRESET_SMALLROOM`, `AudioFxState.kt`) AND, at the enable toggle, if enabling while `preset == 0` set a real preset (e.g. 1). Unit-testable. On devices where per-session PresetReverb resolves as an inline insert, this alone fixes reverb.
+
+### 2b. Session id — KEEP the UNSET call
+Do NOT remove `player.setAudioSessionId(C.AUDIO_SESSION_ID_UNSET)` (bytecode-verified correct; the sink won't get the session id otherwise). Keep the eager build. Additionally re-apply effects on `onMediaItemTransition` / `onIsPlayingChanged(true)` as belt-and-suspenders for AudioTrack recreation — do not rely on it as the primary path.
 
 ### 3. Reverb (aux-routed)
 ```kotlin
