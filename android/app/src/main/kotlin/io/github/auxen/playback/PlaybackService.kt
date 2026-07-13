@@ -11,6 +11,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
+import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
@@ -48,6 +49,7 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -390,6 +392,32 @@ private class AuxenLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
     }
 }
 
+/**
+ * Builds the six-stage DSP processor array in chain order. Extracted out of
+ * [EqRenderersFactory.buildAudioSink] so a production regression test
+ * ([io.github.auxen.playback.ProcessorChainOrderTest]) can call the exact
+ * function the real audio sink uses, instead of asserting against a
+ * hand-rolled list that could silently drift out of sync if this order ever
+ * changed here without the test noticing (fix round, review of commit
+ * dd1bd55, Important #2). Order is LAW -- see [ParametricEqProcessor]'s KDoc.
+ */
+@UnstableApi
+internal fun buildDspProcessorChain(
+    replayGainProcessor: ReplayGainProcessor,
+    eqProcessor: ParametricEqProcessor,
+    bassBoostProcessor: BassBoostProcessor,
+    balanceProcessor: BalanceProcessor,
+    limiterProcessor: LimiterProcessor,
+    encodingRestorerProcessor: EncodingRestorerProcessor,
+): Array<AudioProcessor> = arrayOf(
+    replayGainProcessor,
+    eqProcessor,
+    bassBoostProcessor,
+    balanceProcessor,
+    limiterProcessor,
+    encodingRestorerProcessor,
+)
+
 /** Renderers factory that injects the full DSP chain into a float-output audio sink. */
 @UnstableApi
 private class EqRenderersFactory(
@@ -418,7 +446,7 @@ private class EqRenderersFactory(
         .setEnableFloatOutput(true)
         .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
         .setAudioProcessors(
-            arrayOf(
+            buildDspProcessorChain(
                 replayGainProcessor,
                 eqProcessor,
                 bassBoostProcessor,
@@ -444,6 +472,19 @@ private class EqRenderersFactory(
  * `setTrackGains(null, null)`, which [ReplayGainProcessor] treats as "use
  * the state's fallbackDb" — never a crash, never stale gains left over from
  * the previous track.
+ *
+ * ### Cancellation, not just failure
+ * `runCatching` also catches `CancellationException` like any other
+ * `Throwable` -- without the `isActive` check below, a job cancelled
+ * mid-suspend (a fast skip past a slow-resolving Tidal track, say) would
+ * "complete" with the failure `Result` anyway and race the replacement
+ * job's `setTrackGains` call with no ordering guarantee, silently resetting
+ * the still-playing track to fallback loudness (fix round, review of commit
+ * dd1bd55, Important #1). Checking `isActive` immediately after
+ * `runCatching` -- before applying its result -- closes that window:
+ * cancellation is tracked on the coroutine's `Job` independently of the
+ * caught exception, so this check still reflects the real cancellation
+ * state even though the exception itself was swallowed.
  */
 @UnstableApi
 private class RgGainRouter(
@@ -460,7 +501,7 @@ private class RgGainRouter(
             return
         }
         job = scope.launch {
-            val (trackGainDb, albumGainDb) = runCatching {
+            val result = runCatching {
                 when {
                     mediaId.startsWith("LOCAL:") -> {
                         val info = Graph.local.replayGainFor(sourceId)
@@ -472,7 +513,9 @@ private class RgGainRouter(
                     }
                     else -> null to null
                 }
-            }.getOrDefault(null to null)
+            }
+            if (!isActive) return@launch
+            val (trackGainDb, albumGainDb) = result.getOrDefault(null to null)
             processor.setTrackGains(trackGainDb, albumGainDb)
         }
     }
