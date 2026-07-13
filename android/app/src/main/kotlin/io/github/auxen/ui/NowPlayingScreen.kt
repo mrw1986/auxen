@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -83,7 +84,7 @@ import kotlinx.coroutines.delay
 @OptIn(ExperimentalFoundationApi::class)
 @UnstableApi
 @Composable
-fun NowPlayingScreen(viewModel: PlayerViewModel, onBack: () -> Unit) {
+fun NowPlayingScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onOpenQueue: () -> Unit) {
     val metadata = viewModel.nowPlaying
     val track = viewModel.currentTrack
     val positionMs by viewModel.positionMs.collectAsState()
@@ -105,6 +106,13 @@ fun NowPlayingScreen(viewModel: PlayerViewModel, onBack: () -> Unit) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Spacer(Modifier.weight(1f))
+            // Queue (Desktop-Parity Screens, sub-batch A, Task 2): lives here
+            // rather than on MiniPlayerBar, which is already an "ultra-narrow
+            // tier" per its own KDoc with no spare room for a third icon
+            // alongside play/next.
+            IconButton(onClick = onOpenQueue) {
+                Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = stringResource(R.string.queue_title))
+            }
             // Moved here from the transport row below (final review round,
             // Important #5): a 6th icon in that row's SpaceEvenly
             // arrangement pushed Play/Pause off-center. Top bar is the

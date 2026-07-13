@@ -69,6 +69,7 @@ import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
 import io.github.auxen.ui.AutoEqPickerResults
 import io.github.auxen.ui.BandSlider
+import io.github.auxen.ui.QueueContent
 import io.github.auxen.ui.SettingsContent
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.AuxenTrackRow
@@ -981,6 +982,65 @@ class ComponentScreenshotTest {
             onThemeModeChange = {},
             sourcePriority = SourcePriority.PREFER_TIDAL,
             onSourcePriorityChange = {},
+        )
+    }
+
+    // --- Queue screen (Desktop-Parity Screens, sub-batch A, Task 2) ---
+    // Captures QueueContent, the stateless body QueueScreen delegates to
+    // (same split as SettingsContent/AutoEqPickerResults) -- plain
+    // queue/playingIndex/favoriteKeys params, no live PlayerViewModel or
+    // MediaController needed. Populated pins the pinned now-playing row
+    // (index 1, not 0, so a regression that silently used the first track
+    // instead would be visible), the up-next rows below it, and one
+    // favorited row's filled heart. Empty pins the empty-state copy.
+
+    private val queueTracks = listOf(
+        Track(title = "Silhouette", artist = "Rewired", source = Source.LOCAL, sourceId = "q1"),
+        Track(title = "Nightcall", artist = "Kavinsky", source = Source.TIDAL, sourceId = "q2"),
+        Track(title = "Everlong", artist = "Foo Fighters", source = Source.LOCAL, sourceId = "q3"),
+    )
+
+    @Test
+    fun queueScreenPopulated_light() = captureComponent("queue-screen-populated-light", darkTheme = false) {
+        QueuePopulatedPreview()
+    }
+
+    @Test
+    fun queueScreenPopulated_dark() = captureComponent("queue-screen-populated-dark", darkTheme = true) {
+        QueuePopulatedPreview()
+    }
+
+    @Composable
+    private fun QueuePopulatedPreview() {
+        QueueContent(
+            queue = queueTracks,
+            playingIndex = 1,
+            favoriteKeys = setOf("TIDAL:q2"),
+            onJumpTo = {},
+            onRemove = {},
+            onMove = { _, _ -> },
+            onToggleFavorite = {},
+            onClear = {},
+        )
+    }
+
+    @Test
+    fun queueScreenEmpty_light() = captureComponent("queue-screen-empty-light", darkTheme = false) { QueueEmptyPreview() }
+
+    @Test
+    fun queueScreenEmpty_dark() = captureComponent("queue-screen-empty-dark", darkTheme = true) { QueueEmptyPreview() }
+
+    @Composable
+    private fun QueueEmptyPreview() {
+        QueueContent(
+            queue = emptyList(),
+            playingIndex = -1,
+            favoriteKeys = emptySet(),
+            onJumpTo = {},
+            onRemove = {},
+            onMove = { _, _ -> },
+            onToggleFavorite = {},
+            onClear = {},
         )
     }
 }

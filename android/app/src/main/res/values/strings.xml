@@ -101,4 +101,14 @@
     <string name="settings_about_title">About</string>
     <string name="settings_about_version">Version %1$s</string>
     <string name="settings_about_blurb">A premium music player for Tidal streaming and local media.</string>
+
+    <!-- Desktop-Parity Screens, sub-batch A, Task 2: Queue screen. -->
+    <string name="queue_title">Queue</string>
+    <string name="queue_track_count">%1$d tracks</string>
+    <string name="queue_clear">Clear queue</string>
+    <string name="queue_empty_title">Nothing queued</string>
+    <string name="queue_empty_message">Play something to start a queue.</string>
+    <string name="queue_now_playing_label">Now playing</string>
+    <string name="queue_remove_a11y">Remove %1$s from queue</string>
+    <string name="queue_drag_handle_a11y">Reorder %1$s</string>
 </resources>

@@ -55,7 +55,7 @@ import io.github.auxen.ui.theme.resolveDarkTheme
 private data class Destination(val route: String, val label: String, val icon: @Composable () -> Unit)
 
 /** Global overlay routes pushed from the top bar, outside the tab back stacks. */
-private val OVERLAY_ROUTES = setOf("equalizer", "account", "settings")
+private val OVERLAY_ROUTES = setOf("equalizer", "account", "settings", "queue")
 
 @UnstableApi
 class MainActivity : ComponentActivity() {
@@ -233,8 +233,15 @@ private fun MainScreen(viewModel: PlayerViewModel) {
             }
             composable("equalizer") { EqualizerScreen() }
             composable("settings") { SettingsScreen(viewModel) }
+            composable("queue") { QueueScreen(viewModel) }
             composable("account") { AccountScreen(viewModel) }
-            composable("nowplaying") { NowPlayingScreen(viewModel, onBack = { navController.popBackStack() }) }
+            composable("nowplaying") {
+                NowPlayingScreen(
+                    viewModel,
+                    onBack = { navController.popBackStack() },
+                    onOpenQueue = { navController.navigate("queue") { launchSingleTop = true } },
+                )
+            }
         }
     }
 }

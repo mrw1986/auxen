@@ -8,9 +8,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -115,6 +117,46 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Sort direction for the current Library tab; true = ascending. */
     val librarySortAscending = MutableStateFlow(true)
+
+    /**
+     * Live queue snapshot (Queue screen) -- the MediaController's own media
+     * items, NOT the debounced `QueueStateStore` restore-on-relaunch copy
+     * (`PlaybackService.scheduleQueueSave`, unaffected by this: mutations
+     * below go through the controller, which is what that debounced save
+     * already observes). Refreshed from [refreshQueue] on `onTimelineChanged`/
+     * `onMediaItemTransition`, never mutated locally/optimistically -- the
+     * controller reindexes asynchronously, so a local splice could disagree
+     * with the eventual real state.
+     */
+    val queue = MutableStateFlow<List<Track>>(emptyList())
+
+    /** Index of the currently-playing item within [queue]; -1 if none. */
+    val queueIndex = MutableStateFlow(-1)
+
+    private fun refreshQueue(c: Player) {
+        queue.value = Graph.tracksFrom(c)
+        queueIndex.value = c.currentMediaItemIndex
+    }
+
+    /** Jump playback directly to [index] in the queue (Queue screen tap-to-jump). */
+    fun jumpTo(index: Int) {
+        controller?.seekTo(index, 0)
+    }
+
+    /** Remove the item at [index] from the live queue. */
+    fun removeFromQueue(index: Int) {
+        controller?.removeMediaItem(index)
+    }
+
+    /** Move the item at [from] to [to] in the live queue (drag-reorder commit). */
+    fun moveInQueue(from: Int, to: Int) {
+        controller?.moveMediaItem(from, to)
+    }
+
+    /** Empty the live queue entirely ("Clear queue"). */
+    fun clearQueue() {
+        controller?.clearMediaItems()
+    }
 
     /** Appearance choice, persisted under `color_scheme` (Settings screen). */
     val themeMode = MutableStateFlow(ThemeMode.SYSTEM)
@@ -256,16 +298,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             if (c.mediaItemCount > 0) {
                 val metadata = c.mediaMetadata
                 nowPlaying = metadata
-                currentTrack = metadata.extras
-                    ?.getString(Graph.TRACK_EXTRA_KEY)
-                    ?.let { encoded -> runCatching { Graph.json.decodeFromString<Track>(encoded) }.getOrNull() }
+                currentTrack = Graph.trackFor(metadata)
             }
+            refreshQueue(c)
             c.addListener(object : Player.Listener {
                 override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
                     nowPlaying = mediaMetadata
-                    currentTrack = mediaMetadata.extras
-                        ?.getString(Graph.TRACK_EXTRA_KEY)
-                        ?.let { encoded -> runCatching { Graph.json.decodeFromString<Track>(encoded) }.getOrNull() }
+                    currentTrack = Graph.trackFor(mediaMetadata)
                 }
 
                 override fun onIsPlayingChanged(playing: Boolean) {
@@ -278,6 +317,19 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
                 override fun onRepeatModeChanged(mode: Int) {
                     repeatMode = mode
+                }
+
+                // The queue's actual contents (add/remove/reorder) surface here,
+                // not onMediaMetadataChanged -- that one only fires for the
+                // CURRENT item. onMediaItemTransition also covers plain
+                // track-advance, where the timeline itself doesn't change but
+                // the playing index does.
+                override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                    refreshQueue(c)
+                }
+
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    refreshQueue(c)
                 }
 
                 override fun onPlayerError(error: PlaybackException) {

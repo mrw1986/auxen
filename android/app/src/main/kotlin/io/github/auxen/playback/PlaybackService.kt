@@ -497,12 +497,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     /** Snapshot the queue's Tracks from each item's metadata extras. */
-    private fun currentTracks(player: Player): List<Track> =
-        (0 until player.mediaItemCount).mapNotNull { i ->
-            player.getMediaItemAt(i).mediaMetadata.extras
-                ?.getString(Graph.TRACK_EXTRA_KEY)
-                ?.let { encoded -> runCatching { Graph.json.decodeFromString<Track>(encoded) }.getOrNull() }
-        }
+    private fun currentTracks(player: Player): List<Track> = Graph.tracksFrom(player)
 
     /** Debounced queue persist; snapshots on the main thread, writes on IO. */
     private fun scheduleQueueSave(player: Player) {

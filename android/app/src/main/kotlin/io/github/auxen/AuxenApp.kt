@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.provider.MediaStore
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import io.github.auxen.data.LibraryRepository
 import io.github.auxen.db.AuxenDatabase
@@ -26,6 +27,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -192,4 +194,23 @@ object Graph {
             .setMediaMetadata(metadata)
             .build()
     }
+
+    /**
+     * The inverse of [mediaItemFor]: decodes the [Track] embedded in
+     * [metadata]'s extras by that function, or null if [metadata] wasn't
+     * built by it (missing/corrupt extras). Shared by every call site that
+     * needs to go from a live `Player`'s state back to a [Track] --
+     * `PlaybackService.currentTracks` and [io.github.auxen.ui.PlayerViewModel]'s
+     * `nowPlaying`/`currentTrack`/`queue` all used to duplicate this same
+     * extras-decode snippet (Desktop-Parity Screens, sub-batch A, Task 2).
+     */
+    fun trackFor(metadata: MediaMetadata): Track? =
+        metadata.extras?.getString(TRACK_EXTRA_KEY)
+            ?.let { encoded -> runCatching { json.decodeFromString<Track>(encoded) }.getOrNull() }
+
+    fun trackFor(mediaItem: MediaItem): Track? = trackFor(mediaItem.mediaMetadata)
+
+    /** Snapshot every track in [player]'s current queue, in order. */
+    fun tracksFrom(player: Player): List<Track> =
+        (0 until player.mediaItemCount).mapNotNull { i -> trackFor(player.getMediaItemAt(i)) }
 }
