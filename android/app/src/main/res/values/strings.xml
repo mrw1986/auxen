@@ -68,4 +68,37 @@
          section, independent of the graphic Equalizer section below it. -->
     <string name="autoeq_section_title">Tune for your headphones</string>
     <string name="autoeq_section_subtitle">Headphone correction curve, applied before your manual EQ.</string>
+
+    <!-- Desktop-Parity Screens, sub-batch A, Task 1: Settings screen. -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_gear_a11y">Settings</string>
+
+    <string name="settings_appearance_title">Appearance</string>
+    <string name="settings_theme_mode_label">Theme</string>
+    <string name="settings_theme_mode_subtitle">Choose light, dark, or follow system</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_theme_light">Light</string>
+
+    <string name="settings_playback_title">Playback</string>
+    <string name="settings_source_priority_label">Source priority</string>
+    <string name="settings_source_priority_subtitle">Choose which source to prefer when a track is available from both</string>
+    <string name="settings_source_priority_prefer_local">Prefer local</string>
+    <string name="settings_source_priority_prefer_local_desc">Play the local copy when the same track is also on Tidal</string>
+    <string name="settings_source_priority_prefer_tidal">Prefer Tidal</string>
+    <string name="settings_source_priority_prefer_tidal_desc">Stream from Tidal when the same track is also local</string>
+    <string name="settings_source_priority_prefer_quality">Prefer higher quality</string>
+    <string name="settings_source_priority_prefer_quality_desc">Automatically pick whichever version sounds best</string>
+    <string name="settings_source_priority_always_ask">Always ask</string>
+    <!-- Honest about current behavior: pickPreferredTrack(Matching.kt) returns
+         the local track as ALWAYS_ASK's default and documents that the
+         caller is responsible for prompting; PlayerViewModel.search()
+         doesn't do that yet, so this option is not yet different from
+         "Prefer local" in practice. Flagged to team-lead in the task report
+         rather than writing copy that promises unimplemented behavior. -->
+    <string name="settings_source_priority_always_ask_desc">Reserved for a future per-track prompt — currently behaves like Prefer local</string>
+
+    <string name="settings_about_title">About</string>
+    <string name="settings_about_version">Version %1$s</string>
+    <string name="settings_about_blurb">A premium music player for Tidal streaming and local media.</string>
 </resources>

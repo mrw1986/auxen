@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -35,6 +37,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.media3.common.util.UnstableApi
@@ -43,14 +46,16 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import io.github.auxen.R
 import io.github.auxen.ui.components.BrandBlock
 import io.github.auxen.ui.components.MiniPlayerBar
+import io.github.auxen.ui.theme.resolveDarkTheme
 
 /** A bottom-nav tab: its route, label, and icon. */
 private data class Destination(val route: String, val label: String, val icon: @Composable () -> Unit)
 
 /** Global overlay routes pushed from the top bar, outside the tab back stacks. */
-private val OVERLAY_ROUTES = setOf("equalizer", "account")
+private val OVERLAY_ROUTES = setOf("equalizer", "account", "settings")
 
 @UnstableApi
 class MainActivity : ComponentActivity() {
@@ -68,7 +73,9 @@ class MainActivity : ComponentActivity() {
         permissionLauncher.launch(requiredPermissions())
 
         setContent {
-            io.github.auxen.ui.theme.AuxenTheme {
+            val themeMode by viewModel.themeMode.collectAsState()
+            val darkTheme = resolveDarkTheme(themeMode, systemDark = isSystemInDarkTheme())
+            io.github.auxen.ui.theme.AuxenTheme(darkTheme = darkTheme) {
                 MainScreen(viewModel)
             }
         }
@@ -110,6 +117,9 @@ private fun MainScreen(viewModel: PlayerViewModel) {
                     actions = {
                         IconButton(onClick = { navController.navigate("equalizer") { launchSingleTop = true } }) {
                             Icon(Icons.Filled.Equalizer, contentDescription = "Equalizer")
+                        }
+                        IconButton(onClick = { navController.navigate("settings") { launchSingleTop = true } }) {
+                            Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings_gear_a11y))
                         }
                         IconButton(onClick = { navController.navigate("account") { launchSingleTop = true } }) {
                             Icon(Icons.Filled.Person, contentDescription = "Account")
@@ -222,6 +232,7 @@ private fun MainScreen(viewModel: PlayerViewModel) {
                 )
             }
             composable("equalizer") { EqualizerScreen() }
+            composable("settings") { SettingsScreen(viewModel) }
             composable("account") { AccountScreen(viewModel) }
             composable("nowplaying") { NowPlayingScreen(viewModel, onBack = { navController.popBackStack() }) }
         }

@@ -91,3 +91,42 @@ fun AuxenTheme(
         content = content,
     )
 }
+
+/**
+ * The Settings screen's appearance choice, persisted via
+ * `LibraryRepository.getSetting/setSetting` under the `color_scheme` key
+ * (Desktop-Parity Screens, sub-batch A, Task 1 -- mirrors the desktop
+ * settings dialog's Theme combo row). [SYSTEM] follows the device's
+ * day/night setting; [DARK]/[LIGHT] pin one regardless of it.
+ */
+enum class ThemeMode {
+    SYSTEM,
+    DARK,
+    LIGHT,
+    ;
+
+    /** The `color_scheme` setting value this mode persists as. */
+    val settingValue: String get() = name.lowercase()
+
+    companion object {
+        /**
+         * Parses a stored `color_scheme` value back into a [ThemeMode].
+         * Defaults to [SYSTEM] for null/blank/unrecognized input -- covers
+         * "never set" (fresh install) and a corrupt/pre-parity value the
+         * same way, rather than crashing or silently picking a fixed theme.
+         */
+        fun fromSetting(value: String?): ThemeMode = entries.firstOrNull { it.settingValue == value } ?: SYSTEM
+    }
+}
+
+/**
+ * Resolves a [ThemeMode] to the concrete `darkTheme` boolean [AuxenTheme]
+ * needs, given the device's current day/night setting ([systemDark] --
+ * typically `isSystemInDarkTheme()`, resolved by the caller so this stays a
+ * pure function). Only [ThemeMode.SYSTEM] actually consults it.
+ */
+fun resolveDarkTheme(mode: ThemeMode, systemDark: Boolean): Boolean = when (mode) {
+    ThemeMode.SYSTEM -> systemDark
+    ThemeMode.DARK -> true
+    ThemeMode.LIGHT -> false
+}

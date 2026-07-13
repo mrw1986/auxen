@@ -65,9 +65,11 @@ import io.github.auxen.dsp.ReplayGainState
 import io.github.auxen.dsp.ReverbState
 import io.github.auxen.dsp.VirtualizerState
 import io.github.auxen.model.Source
+import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
 import io.github.auxen.ui.AutoEqPickerResults
 import io.github.auxen.ui.BandSlider
+import io.github.auxen.ui.SettingsContent
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.BalanceSection
@@ -81,6 +83,7 @@ import io.github.auxen.ui.components.SectionHeader
 import io.github.auxen.ui.components.SourceBadge
 import io.github.auxen.ui.components.TrackActionSheetContent
 import io.github.auxen.ui.components.VirtualizerSection
+import io.github.auxen.ui.theme.ThemeMode
 import io.github.auxen.ui.components.VolumeNormalizationSection
 import io.github.auxen.ui.components.formatDuration
 import io.github.auxen.ui.testutil.TEST_DEVICE
@@ -955,5 +958,29 @@ class ComponentScreenshotTest {
             VirtualizerSection(state = VirtualizerState(), onStateChange = {}, expanded = false, onExpandedChange = {})
             VolumeNormalizationSection(state = ReplayGainState(), onStateChange = {}, expanded = false, onExpandedChange = {})
         }
+    }
+
+    // --- Settings screen (Desktop-Parity Screens, sub-batch A, Task 1) ---
+    // Captures SettingsContent, the stateless body SettingsScreen delegates
+    // to (same split as AutoEqPickerResults/TrackActionSheetContent) --
+    // takes plain themeMode/sourcePriority params, no live PlayerViewModel
+    // needed. Dark selected, Prefer Tidal selected -- neither is either
+    // enum's first entry, so a regression that silently fell back to the
+    // first option would be visible in the pixel diff.
+
+    @Test
+    fun settingsScreen_light() = captureComponent("settings-screen-light", darkTheme = false) { SettingsPreview() }
+
+    @Test
+    fun settingsScreen_dark() = captureComponent("settings-screen-dark", darkTheme = true) { SettingsPreview() }
+
+    @Composable
+    private fun SettingsPreview() {
+        SettingsContent(
+            themeMode = ThemeMode.DARK,
+            onThemeModeChange = {},
+            sourcePriority = SourcePriority.PREFER_TIDAL,
+            onSourcePriorityChange = {},
+        )
     }
 }

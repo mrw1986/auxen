@@ -22,6 +22,7 @@ import io.github.auxen.matching.DuplicateResolver
 import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
 import io.github.auxen.playback.PlaybackService
+import io.github.auxen.ui.theme.ThemeMode
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -115,6 +116,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     /** Sort direction for the current Library tab; true = ascending. */
     val librarySortAscending = MutableStateFlow(true)
 
+    /** Appearance choice, persisted under `color_scheme` (Settings screen). */
+    val themeMode = MutableStateFlow(ThemeMode.SYSTEM)
+
+    /** Source-priority tie-break for search-result merging (Settings screen; consumed by [search]). */
+    val sourcePriority = MutableStateFlow(SourcePriority.PREFER_QUALITY)
+
     private fun libraryTabName(index: Int) = when (index) {
         0 -> "albums"
         1 -> "artists"
@@ -128,6 +135,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 restoreLibrarySortFor(libraryTab.value)
                 homeFilter.value = Graph.library.getSetting("home_filter") ?: "all"
                 collectionFilter.value = Graph.library.getSetting("collection_filter") ?: "all"
+                themeMode.value = ThemeMode.fromSetting(Graph.library.getSetting("color_scheme"))
+                sourcePriority.value = Graph.library.sourcePriority()
             }
         }
     }
@@ -202,6 +211,16 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun setCollectionFilter(value: String) {
         collectionFilter.value = value
         viewModelScope.launch { runCatching { Graph.library.setSetting("collection_filter", value) } }
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        themeMode.value = mode
+        viewModelScope.launch { runCatching { Graph.library.setSetting("color_scheme", mode.settingValue) } }
+    }
+
+    fun setSourcePriority(priority: SourcePriority) {
+        sourcePriority.value = priority
+        viewModelScope.launch { runCatching { Graph.library.setSourcePriority(priority) } }
     }
 
     /** Refresh Home data: recently added (MediaStore) + recently played (DB). */
