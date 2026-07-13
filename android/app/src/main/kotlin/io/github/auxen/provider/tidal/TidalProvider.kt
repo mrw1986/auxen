@@ -73,6 +73,8 @@ class TidalProvider(
         val audioQuality: String? = null,
         val sampleRate: Int? = null,
         val bitDepth: Int? = null,
+        val trackReplayGain: Double? = null,
+        val albumReplayGain: Double? = null,
     )
 
     /** The JSON inside a `application/vnd.tidal.bts` manifest. */
@@ -148,6 +150,8 @@ class TidalProvider(
                     mimeType = bts.mimeType,
                     sampleRateHz = info.sampleRate,
                     bitDepth = info.bitDepth,
+                    trackGainDb = info.trackReplayGain,
+                    albumGainDb = info.albumReplayGain,
                 )
             }
             info.manifestMimeType.contains("dash+xml") -> StreamInfo(
@@ -155,6 +159,8 @@ class TidalProvider(
                 mimeType = "application/dash+xml",
                 sampleRateHz = info.sampleRate,
                 bitDepth = info.bitDepth,
+                trackGainDb = info.trackReplayGain,
+                albumGainDb = info.albumReplayGain,
             )
             else -> error("Unsupported Tidal manifest type: ${info.manifestMimeType}")
         }

@@ -3,12 +3,14 @@ package io.github.auxen.provider.local
 import android.content.ContentUris
 import android.content.Context
 import android.provider.MediaStore
+import io.github.auxen.dsp.ReplayGainTags
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.provider.MusicProvider
 import io.github.auxen.provider.StreamInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.InputStream
 
 /**
  * Local music source backed by Android's MediaStore.
@@ -52,12 +54,29 @@ class LocalProvider(private val context: Context) : MusicProvider {
             sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC",
         )
 
-    override suspend fun getStreamInfo(track: Track): StreamInfo {
+    override suspend fun getStreamInfo(track: Track): StreamInfo = withContext(Dispatchers.IO) {
         val uri = ContentUris.withAppendedId(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             track.sourceId.toLong(),
         )
-        return StreamInfo(uri = uri.toString(), sampleRateHz = track.sampleRateHz, bitDepth = track.bitDepth)
+        // ReplayGain tags live at the front of a FLAC/MP3 file's own metadata
+        // blocks, not scattered through it -- a 512KB budget is generous for
+        // that and avoids pulling a whole (possibly 100+MB Hi-Res) file into
+        // memory just to check for two optional comments. runCatching: a
+        // missing/unreadable/malformed file must never fail playback, it
+        // just means no ReplayGain data for this track.
+        val gains = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                ReplayGainTags.parse(BoundedInputStream(stream, REPLAY_GAIN_READ_BUDGET_BYTES))
+            }
+        }.getOrNull()
+        StreamInfo(
+            uri = uri.toString(),
+            sampleRateHz = track.sampleRateHz,
+            bitDepth = track.bitDepth,
+            trackGainDb = gains?.trackGainDb,
+            albumGainDb = gains?.albumGainDb,
+        )
     }
 
     private suspend fun queryTracks(
@@ -134,5 +153,33 @@ class LocalProvider(private val context: Context) : MusicProvider {
 
     private companion object {
         val ALBUM_ART_URI = android.net.Uri.parse("content://media/external/audio/albumart")
+        const val REPLAY_GAIN_READ_BUDGET_BYTES = 512L * 1024L
+    }
+}
+
+/**
+ * Wraps [delegate], reporting EOF once [limit] bytes have been read.
+ *
+ * [ReplayGainTags.parse] reads its input to EOF (`InputStream.readBytes()`)
+ * to work byte-array-style over small, fully-buffered tag fixtures in tests;
+ * without this wrapper, handing it a real audio file's stream directly would
+ * pull the entire file into memory just to find a leading tag block.
+ */
+private class BoundedInputStream(private val delegate: InputStream, private val limit: Long) : InputStream() {
+    private var remaining = limit
+
+    override fun read(): Int {
+        if (remaining <= 0) return -1
+        val b = delegate.read()
+        if (b >= 0) remaining--
+        return b
+    }
+
+    override fun read(b: ByteArray, off: Int, len: Int): Int {
+        if (remaining <= 0) return -1
+        val toRead = minOf(len.toLong(), remaining).toInt()
+        val read = delegate.read(b, off, toRead)
+        if (read > 0) remaining -= read
+        return read
     }
 }

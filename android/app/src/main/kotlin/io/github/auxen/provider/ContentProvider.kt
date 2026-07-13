@@ -26,4 +26,7 @@ data class StreamInfo(
     val mimeType: String? = null,
     val sampleRateHz: Int? = null,
     val bitDepth: Int? = null,
+    /** ReplayGain tag values in dB, when the source could supply them (DSP-a Task 5). */
+    val trackGainDb: Double? = null,
+    val albumGainDb: Double? = null,
 )
