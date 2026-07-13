@@ -63,4 +63,9 @@
     <string name="sleep_timer_pausing_in_will_finish">Pausing in %1$s — will finish the playing track</string>
     <string name="sleep_timer_pausing_after_track">Pausing after this track</string>
     <string name="sleep_timer_cancel">Cancel timer</string>
+
+    <!-- AutoEq split, Task 2: "Tune for your headphones" is now its own
+         section, independent of the graphic Equalizer section below it. -->
+    <string name="autoeq_section_title">Tune for your headphones</string>
+    <string name="autoeq_section_subtitle">Headphone correction curve, applied before your manual EQ.</string>
 </resources>

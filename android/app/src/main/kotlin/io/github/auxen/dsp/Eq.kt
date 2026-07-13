@@ -139,10 +139,11 @@ object AutoEqParser {
             // coefficients that persist across restarts as a "successful"
             // import (see ParametricEqProcessor's rebuildFiltersIfNeeded);
             // Fc=0 builds a degenerate filter. Throwing here means
-            // EqController.importAutoEq's runCatching wrapper turns the
+            // AutoEqController.importAutoEq's runCatching wrapper turns the
             // whole import into a failed Result before setState/persist is
             // ever reached -- the bad profile never touches DataStore, not
-            // even partially (final-review fix round, Important #1).
+            // even partially (final-review fix round, Important #1; moved
+            // to AutoEqController by the AutoEq split, Task 1).
             require(freq > 0.0) { "Filter frequency must be positive, got $freq Hz" }
             require(q > 0.0) { "Filter Q must be positive, got $q" }
             filters += FilterSpec(type, freq, q, gain)

@@ -1,6 +1,7 @@
 package io.github.auxen.ui.screenshots
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Equalizer
@@ -30,6 +32,7 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SegmentedButton
@@ -56,6 +59,7 @@ import io.github.auxen.db.PlaylistEntity
 import io.github.auxen.dsp.AutoEqProfile
 import io.github.auxen.dsp.BalanceState
 import io.github.auxen.dsp.BassBoostState
+import io.github.auxen.dsp.EqState
 import io.github.auxen.dsp.LimiterState
 import io.github.auxen.dsp.ReplayGainState
 import io.github.auxen.dsp.ReverbState
@@ -63,6 +67,7 @@ import io.github.auxen.dsp.VirtualizerState
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.ui.AutoEqPickerResults
+import io.github.auxen.ui.BandSlider
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.BalanceSection
@@ -127,6 +132,14 @@ import org.robolectric.annotation.GraphicsMode
  * repository / `Graph` singleton). It is rendered with a hardcoded 3-entry
  * fake result list rather than a real search over the bundled AutoEq
  * database, so the golden can never drift when the database asset changes.
+ * `autoeq-section-*` (AutoEq split, Task 2) wraps that same picker in the
+ * real `FxSectionCard` chrome it now lives inside as its own "Tune for your
+ * headphones" section, with a search field and the import button/credit
+ * line reproduced alongside it — same "reproduce the widgets with
+ * placeholder state" pattern as `mini-player-controls-*`/`search-field-*`
+ * below, since this section (like those) has no further stateless
+ * extraction beyond the picker itself (it owns an `ActivityResultLauncher`
+ * and `Graph.autoEq`/`Graph.library` I/O).
  *
  * ## Top-bar-brand surface — composed context, not BrandBlock in isolation
  * The `top-bar-brand-*` goldens capture [BrandBlock] the way `MainActivity`
@@ -198,35 +211,49 @@ import org.robolectric.annotation.GraphicsMode
  * every section's header chrome — title, subtitle, switch, chevron — comes
  * from that one component.
  *
- * **Action-sheet drift trap, checked:** none of these eighteen new surfaces
+ * `fx-equalizer-*` (AutoEq split, Task 2) is the graphic EQ's first-ever
+ * standalone golden — before the split it was always captured collapsed
+ * only, as part of `equalizer-all-sections-collapsed-*` below, since its
+ * content (10-band sliders + AutoEq picker together) lived directly inside
+ * `EqualizerScreen` with no extraction. Splitting the picker out into its
+ * own section left the graphic EQ's remaining content — preset button + the
+ * 10 `BandSlider`s — genuinely stateless, so `BandSlider` was made
+ * `internal` (same reasoning as [AutoEqPickerResults]) and this golden
+ * reproduces the section with an asymmetric, non-flat gain curve (same
+ * "distinguishable slider positions" reasoning as `fx-balance-*`'s
+ * panned-right state).
+ *
+ * **Action-sheet drift trap, checked:** none of these twenty new surfaces
  * render a `ModalBottomSheet`, an open `DropdownMenu`, or any other
  * animated-entrance overlay that could fail to settle under Robolectric (see
  * the action-sheet surface note above). `FxSectionCard`'s expand/collapse is
  * a plain `if (expanded) { … }` conditional — no `AnimatedVisibility`, no
- * transition to wait out — and `fx-reverb-*` captures the preset dropdown in
- * its default CLOSED state (just the trigger button), never opened. All
- * eighteen render fully synchronously on first composition, same as every
- * other non-action-sheet surface in this file.
+ * transition to wait out — and `fx-reverb-*`/`fx-equalizer-*` capture their
+ * preset dropdown/menu in its default CLOSED state (just the trigger
+ * button), never opened. All twenty render fully synchronously on first
+ * composition, same as every other non-action-sheet surface in this file.
  *
- * ## "All sections collapsed" EqualizerScreen composition (DSP-b Task 4)
+ * ## "All sections collapsed" EqualizerScreen composition (DSP-b Task 4; AutoEq split, Task 2)
  * `equalizer-all-sections-collapsed-*` assembles the real per-section
  * composables (`BassBoostSection`, `BalanceSection`, etc., each with its own
- * default state, plus one manual [FxSectionCard] call for the Equalizer
- * entry, which has no extracted content composable of its own — the 10-band
- * EQ + AutoEq picker content lives inline in `EqualizerScreen`) with
- * `expanded = false` for all seven. This is fully faithful to what
- * `EqualizerScreen` itself renders collapsed: a collapsed `FxSectionCard`
- * never composes its `content` lambda regardless of what's inside it, so an
- * empty lambda for the manual Equalizer entry is exactly as faithful here as
- * the real inline EQ content would be. The full live `EqualizerScreen()`
- * composable itself is deliberately NOT captured — it depends on
- * process-wide singletons (`EqController.state`, `Graph.autoEq`,
- * `Graph.library`) and an `ActivityResultLauncher` for file import, none of
- * which have a stateless extraction the way `AutoEqPickerResults`/
- * `TrackActionSheetContent` do. Wiring or faking all of that for one golden
- * would risk exactly the shared-JVM test-order pollution this file's own
- * typography-details section documents above, for a golden that — being
- * collapsed — wouldn't exercise any of that live state anyway.
+ * default state, plus two manual [FxSectionCard] calls for the "Tune for
+ * your headphones" and Equalizer entries, neither of which has an extracted
+ * whole-section content composable of its own — see the `autoeq-section-*`
+ * and `fx-equalizer-*` notes above for what each one's content actually
+ * looks like expanded) with `expanded = false` for all eight. This is fully
+ * faithful to what `EqualizerScreen` itself renders collapsed: a collapsed
+ * `FxSectionCard` never composes its `content` lambda regardless of what's
+ * inside it, so an empty lambda for the two manual entries is exactly as
+ * faithful here as their real inline content would be. The full live
+ * `EqualizerScreen()` composable itself is deliberately NOT captured — it
+ * depends on process-wide singletons (`EqController.state`,
+ * `AutoEqController.state`, `Graph.autoEq`, `Graph.library`) and an
+ * `ActivityResultLauncher` for file import, none of which have a stateless
+ * extraction the way `AutoEqPickerResults`/`TrackActionSheetContent` do.
+ * Wiring or faking all of that for one golden would risk exactly the
+ * shared-JVM test-order pollution this file's own typography-details
+ * section documents above, for a golden that — being collapsed — wouldn't
+ * exercise any of that live state anyway.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @RunWith(RobolectricTestRunner::class)
@@ -798,7 +825,94 @@ class ComponentScreenshotTest {
         )
     }
 
-    // --- Equalizer screen, all seven sections collapsed (see class KDoc) ---
+    // --- AutoEq section, expanded (AutoEq split, Task 2 — see class KDoc) ---
+
+    @Test
+    fun autoEqSection_light() = captureComponent("autoeq-section-light", darkTheme = false) { AutoEqSectionPreview() }
+
+    @Test
+    fun autoEqSection_dark() = captureComponent("autoeq-section-dark", darkTheme = true) { AutoEqSectionPreview() }
+
+    @Composable
+    private fun AutoEqSectionPreview() {
+        FxSectionCard(
+            title = stringResource(R.string.autoeq_section_title),
+            subtitle = stringResource(R.string.autoeq_section_subtitle),
+            enabled = true,
+            onEnabledChange = {},
+            expanded = true,
+            onExpandedChange = {},
+        ) {
+            Text(
+                "Corrections for 8,850 headphones, tuned to a neutral reference.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = "",
+                onValueChange = {},
+                label = { Text("Find your headphone model") },
+                singleLine = true,
+            )
+            AutoEqPickerResults(
+                activeProfile = "Sennheiser HD 650",
+                results = autoEqResults,
+                noMatches = false,
+                onSelectProfile = {},
+                onClearActive = {},
+            )
+            Button(onClick = {}) { Text("Import custom profile…") }
+            Text(
+                "Powered by AutoEq (MIT) — github.com/jaakkopasanen/AutoEq",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    // --- Equalizer section, expanded (graphic EQ only, picker moved out to
+    // its own "Tune for your headphones" section above — AutoEq split, Task
+    // 2). No golden existed for this section pre-split (it was always
+    // captured collapsed, as part of equalizer-all-sections-collapsed-* below)
+    // — this is the first standalone golden for it. ---
+
+    @Test
+    fun fxEqualizer_light() = captureComponent("fx-equalizer-light", darkTheme = false) { EqualizerPreview() }
+
+    @Test
+    fun fxEqualizer_dark() = captureComponent("fx-equalizer-dark", darkTheme = true) { EqualizerPreview() }
+
+    @Composable
+    private fun EqualizerPreview() {
+        // A non-flat, asymmetric curve (same reasoning as BalancePreview's
+        // panned-right state) so the ten independent slider positions are
+        // pixel-distinguishable rather than all sitting at the same height.
+        val gains = listOf(6.0, 4.0, 2.0, 0.0, -2.0, -4.0, -2.0, 0.0, 3.0, 6.0)
+        FxSectionCard(
+            title = stringResource(R.string.fx_equalizer_title),
+            subtitle = null,
+            enabled = true,
+            onEnabledChange = {},
+            expanded = true,
+            onExpandedChange = {},
+        ) {
+            Text("Active profile: Rock", style = MaterialTheme.typography.bodyMedium)
+            Text("Preamp: -6.0 dB", style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = {}) { Text("Presets") }
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                gains.forEachIndexed { index, gain ->
+                    BandSlider(label = EqState.BAND_LABELS[index], gainDb = gain, onChange = {})
+                }
+            }
+        }
+    }
+
+    // --- Equalizer screen, all eight sections collapsed (see class KDoc) ---
+    // Eight, not seven: AutoEq split, Task 2 added a standalone "Tune for
+    // your headphones" FxSectionCard alongside the pre-existing Equalizer one.
 
     @Test
     fun equalizerAllSectionsCollapsed_light() = captureComponent(
@@ -818,6 +932,14 @@ class ComponentScreenshotTest {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            FxSectionCard(
+                title = stringResource(R.string.autoeq_section_title),
+                subtitle = stringResource(R.string.autoeq_section_subtitle),
+                enabled = false,
+                onEnabledChange = {},
+                expanded = false,
+                onExpandedChange = {},
+            ) {}
             FxSectionCard(
                 title = stringResource(R.string.fx_equalizer_title),
                 subtitle = null,

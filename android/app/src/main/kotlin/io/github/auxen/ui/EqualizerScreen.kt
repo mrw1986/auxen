@@ -27,7 +27,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -71,7 +70,7 @@ import io.github.auxen.ui.components.VirtualizerSection
 import io.github.auxen.ui.components.VolumeNormalizationSection
 import kotlinx.coroutines.launch
 
-/** Settings key holding the active AutoEq profile name (or `custom:<name>`). */
+/** Settings key holding the active AutoEq profile name (or `custom:<name>`) -- cold-start restore only, see [io.github.auxen.AuxenApp]. */
 private const val KEY_AUTOEQ_PROFILE = "autoeq_profile"
 
 /** Settings key holding the raw text of an imported custom profile. */
@@ -80,13 +79,20 @@ private const val KEY_AUTOEQ_CUSTOM_TEXT = "autoeq_custom_text"
 /**
  * Equalizer screen: the DSP suite's home, one expandable [FxSectionCard] per
  * effect, each independently toggleable and expandable (DSP-b Task 3, "no
- * master coupling"). The first section is the desktop app's 10-band graphic
- * EQ with its presets and a Wavelet-style AutoEq profile picker (search the
- * bundled 8,850-headphone database, plus a file-import path for custom
- * profiles) -- its content is inline here rather than an extracted
- * composable, since it's the one section with no reusable shape shared by
- * anything else. The remaining six sections (bass boost, balance, limiter,
- * reverb, virtualizer, volume normalization) are rendered from
+ * master coupling"). FIRST is "Tune for your headphones" -- the AutoEq
+ * profile picker (search the bundled 8,850-headphone database, plus a
+ * file-import path for custom profiles), wired to
+ * [io.github.auxen.dsp.AutoEqController]. SECOND is "Equalizer" -- the
+ * desktop app's 10-band graphic EQ with its presets, wired to
+ * [EqController] (AutoEq split, Task 2: these were one combined section
+ * until DSP-a/b; splitting them means importing a headphone profile no
+ * longer wipes manual graphic EQ edits, and each has its own switch). Both
+ * stay inline here rather than extracted composables, since -- unlike the
+ * six sections below -- each carries context-dependent complexity
+ * (`rememberLauncherForActivityResult`, `Graph.autoEq`, IME/
+ * BringIntoViewRequester wiring for AutoEq; nothing reusable for either).
+ * The remaining six sections (bass boost, balance, limiter, reverb,
+ * virtualizer, volume normalization) are rendered from
  * `io.github.auxen.ui.components.FxSections`, each wired to its own
  * independent [io.github.auxen.dsp.AudioFxController] state flow.
  */
@@ -94,7 +100,8 @@ private const val KEY_AUTOEQ_CUSTOM_TEXT = "autoeq_custom_text"
 @UnstableApi
 @Composable
 fun EqualizerScreen(modifier: Modifier = Modifier) {
-    val state by EqController.state.collectAsState()
+    val eqState by EqController.state.collectAsState()
+    val autoEqState by AutoEqController.state.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repo = Graph.autoEq
@@ -104,12 +111,13 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
 
     // Per-effect section expand/collapse -- independent of each section's OWN
     // enable switch (docs/plans/2026-07-13-android-dsp-b-ui.md, Task 3: "no
-    // master coupling"). Equalizer starts expanded since it's the primary
-    // feature on this screen; the newer effects start collapsed.
+    // master coupling"). AutoEq and Equalizer both start expanded (the two
+    // primary EQ stages); the newer effects start collapsed.
     // rememberSaveable (not plain remember): survives navigating away from
     // this screen and back, not just recomposition -- a user who expanded
     // Limiter to check a setting shouldn't have it collapse again just from
     // switching tabs (final review round, Minor #11).
+    var autoEqExpanded by rememberSaveable { mutableStateOf(true) }
     var eqExpanded by rememberSaveable { mutableStateOf(true) }
     var bassBoostExpanded by rememberSaveable { mutableStateOf(false) }
     var balanceExpanded by rememberSaveable { mutableStateOf(false) }
@@ -125,27 +133,23 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
     val virtualizerState by AudioFxController.virtualizerState.collectAsState()
     val replayGainState by AudioFxController.replayGainState.collectAsState()
 
-    // AutoEq picker state.
+    // AutoEq picker search state. The active-profile display no longer needs
+    // its own tracked/synchronized local state (autoEqState.presetName from
+    // AutoEqController IS the active profile, always -- unlike before the
+    // split, where the same eq_state also held the GRAPHIC preset, so the UI
+    // had to track a separate marker and explicitly clear it whenever a
+    // graphic action might have clobbered it). Graphic actions (band drags,
+    // presets) don't touch AutoEqController at all now, so that
+    // synchronization -- and its per-drag-frame spam guard -- is gone.
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<AutoEqProfile>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
-    var activeProfile by remember { mutableStateOf<String?>(null) }
     // Keeps the search field + its results scrolled above the IME — see the
     // bringIntoViewRequester() usage on the picker section below.
     val searchSectionBringIntoView = remember { BringIntoViewRequester() }
     var searchFieldFocused by remember { mutableStateOf(false) }
-    // Spam-guard for clearActiveProfileMarker: a slider drag fires onChange
-    // per-frame, so the first clear of a session persists once and the rest
-    // no-op. Re-armed (set false) whenever a new profile is applied below.
-    var markerCleared by remember { mutableStateOf(false) }
 
-    // Hydrate the "Active: <name>" label FIRST from the persisted marker — a
-    // fast DB read that needs no index — so a band-drag in the first seconds
-    // has a marker to clear. ensureLoaded() (its ~3s cold path only gates
-    // search readiness) then runs; it must not block composition, so it
-    // suspends onto the IO dispatcher inside the repository.
     LaunchedEffect(Unit) {
-        activeProfile = Graph.library.getSetting(KEY_AUTOEQ_PROFILE).toActiveProfileName()
         repo.ensureLoaded()
         loaded = true
     }
@@ -166,22 +170,6 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    // Switching to graphic mode (touching a band or applying a preset)
-    // abandons the AutoEq correction, so the marker must go too — otherwise
-    // "Active: <name>" lingers next to the graphic preset label and, worse,
-    // restore-on-start re-applies the old profile over the user's graphic
-    // edits at next launch. autoeq_custom_text is deliberately kept: a stored
-    // custom profile stays re-importable. The guard keys off `markerCleared`
-    // (not `activeProfile == null`) so the clear still persists during the
-    // cold-load window before the label has hydrated — otherwise an early
-    // band-drag would silently leave the stale marker on disk.
-    fun clearActiveProfileMarker() {
-        if (markerCleared) return
-        markerCleared = true
-        activeProfile = null
-        scope.launch { Graph.library.setSetting(KEY_AUTOEQ_PROFILE, "") }
-    }
-
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -197,9 +185,9 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
             AutoEqController.importAutoEq(text, displayName)
                 .onSuccess {
                     importError = null
-                    activeProfile = displayName
-                    // Re-arm the clear guard for the newly-imported marker.
-                    markerCleared = false
+                    // Cold-start restore marker only (io.github.auxen.AuxenApp) --
+                    // the live "Active: X" display reads autoEqState.presetName
+                    // directly, always in sync, no marker needed for that.
                     scope.launch {
                         Graph.library.setSetting(KEY_AUTOEQ_CUSTOM_TEXT, text)
                         Graph.library.setSetting(KEY_AUTOEQ_PROFILE, "custom:$displayName")
@@ -217,72 +205,18 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        // "Equalizer" section: the screen's pre-existing 10-band EQ + presets +
-        // AutoEq picker, now wrapped as the first FxSectionCard. Its master
-        // toggle becomes this card's switch (docs/plans/2026-07-13-android-dsp-b-ui.md,
-        // Task 3, item 1) -- the AutoEq flow itself is unchanged.
+        // "Tune for your headphones" section: the AutoEq picker, wired to its
+        // own controller and switch (AutoEq split, Task 2, item 1). FIRST in
+        // the list -- correction is meant to be applied before the graphic EQ
+        // below it (both stringResource entries added alongside this split).
         FxSectionCard(
-            title = stringResource(R.string.fx_equalizer_title),
-            subtitle = null,
-            enabled = state.enabled,
-            onEnabledChange = { EqController.setEnabled(it) },
-            expanded = eqExpanded,
-            onExpandedChange = { eqExpanded = it },
+            title = stringResource(R.string.autoeq_section_title),
+            subtitle = stringResource(R.string.autoeq_section_subtitle),
+            enabled = autoEqState.enabled,
+            onEnabledChange = { AutoEqController.setEnabled(it) },
+            expanded = autoEqExpanded,
+            onExpandedChange = { autoEqExpanded = it },
         ) {
-            // Only the graphic EQ names a preset here; the active AutoEq profile
-            // (parametric, bands == null) is shown by its own row below.
-            if (state.bands != null) {
-                state.presetName?.let {
-                    Text("Active profile: $it", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-            Text(
-                "Preamp: %.1f dB".format(state.preampDb),
-                style = MaterialTheme.typography.bodySmall,
-            )
-
-            Row {
-                Column {
-                    OutlinedButton(onClick = { presetMenuOpen = true }) { Text("Presets") }
-                    DropdownMenu(expanded = presetMenuOpen, onDismissRequest = { presetMenuOpen = false }) {
-                        EqState.PRESETS.keys.forEach { name ->
-                            DropdownMenuItem(
-                                text = { Text(name) },
-                                onClick = {
-                                    EqController.applyPreset(name)
-                                    clearActiveProfileMarker()
-                                    presetMenuOpen = false
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 10-band graphic EQ. When a parametric AutoEq profile is active the
-            // bands list is null and the sliders show flat until touched (which
-            // switches back to graphic mode).
-            val bands = state.bands ?: List(EqState.NUM_BANDS) { 0.0 }
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                bands.forEachIndexed { index, gain ->
-                    BandSlider(
-                        label = EqState.BAND_LABELS[index],
-                        gainDb = gain,
-                        onChange = {
-                            EqController.setBand(index, it)
-                            clearActiveProfileMarker()
-                        },
-                    )
-                }
-            }
-
-            HorizontalDivider()
-
-            // ---- AutoEq headphone-correction picker (Wavelet-style) ----
-            Text("Tune for your headphones", style = MaterialTheme.typography.titleMedium)
             Text(
                 "Corrections for 8,850 headphones, tuned to a neutral reference.",
                 style = MaterialTheme.typography.bodySmall,
@@ -317,21 +251,16 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
                 )
 
                 AutoEqPickerResults(
-                    activeProfile = activeProfile,
+                    activeProfile = autoEqState.presetName,
                     results = results,
                     noMatches = query.isNotBlank() && loaded && results.isEmpty(),
                     onSelectProfile = { profile ->
-                        applyAutoEq(scope, repo, profile) {
-                            activeProfile = it
-                            // Re-arm the clear guard: a later band-drag must be able to
-                            // clear this freshly-applied marker.
-                            markerCleared = false
-                        }
+                        applyAutoEq(scope, repo, profile)
                         query = ""
                     },
                     onClearActive = {
-                        EqController.applyPreset("Flat")
-                        clearActiveProfileMarker()
+                        AutoEqController.clear()
+                        scope.launch { Graph.library.setSetting(KEY_AUTOEQ_PROFILE, "") }
                     },
                 )
             }
@@ -349,6 +278,58 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+
+        // "Equalizer" section: the 10-band graphic EQ + presets, wired to its
+        // own controller and switch. No picker content -- AutoEq split, Task
+        // 2, item 2.
+        FxSectionCard(
+            title = stringResource(R.string.fx_equalizer_title),
+            subtitle = null,
+            enabled = eqState.enabled,
+            onEnabledChange = { EqController.setEnabled(it) },
+            expanded = eqExpanded,
+            onExpandedChange = { eqExpanded = it },
+        ) {
+            eqState.presetName?.let {
+                Text("Active profile: $it", style = MaterialTheme.typography.bodyMedium)
+            }
+            Text(
+                "Preamp: %.1f dB".format(eqState.preampDb),
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Row {
+                Column {
+                    OutlinedButton(onClick = { presetMenuOpen = true }) { Text("Presets") }
+                    DropdownMenu(expanded = presetMenuOpen, onDismissRequest = { presetMenuOpen = false }) {
+                        EqState.PRESETS.keys.forEach { name ->
+                            DropdownMenuItem(
+                                text = { Text(name) },
+                                onClick = {
+                                    EqController.applyPreset(name)
+                                    presetMenuOpen = false
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 10-band graphic EQ.
+            val bands = eqState.bands ?: List(EqState.NUM_BANDS) { 0.0 }
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                bands.forEachIndexed { index, gain ->
+                    BandSlider(
+                        label = EqState.BAND_LABELS[index],
+                        gainDb = gain,
+                        onChange = { EqController.setBand(index, it) },
+                    )
+                }
+            }
         }
 
         BassBoostSection(
@@ -395,16 +376,11 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
     }
 }
 
-/** Turns a stored `autoeq_profile` value into its display name (drops `custom:`). */
-private fun String?.toActiveProfileName(): String? = when {
-    isNullOrBlank() -> null
-    startsWith("custom:") -> removePrefix("custom:")
-    else -> this
-}
-
 /**
  * Apply a bundled AutoEq profile: read its ParametricEq body (IO), feed it
- * through [AutoEqController.importAutoEq], and persist the name for restore-on-start.
+ * through [AutoEqController.importAutoEq], and persist the name for restore-on-start
+ * (cold-start marker only -- the live "Active: X" display reads
+ * `AutoEqController.state.value.presetName` directly, always in sync).
  * runCatching keeps a corrupt/missing zip entry (profileText throws) from
  * crashing the composition scope — matching the import/restore paths.
  */
@@ -413,14 +389,12 @@ private fun applyAutoEq(
     scope: kotlinx.coroutines.CoroutineScope,
     repo: io.github.auxen.dsp.AutoEqRepository,
     profile: AutoEqProfile,
-    onApplied: (String) -> Unit,
 ) {
     scope.launch {
         runCatching {
             val text = repo.profileText(profile)
             AutoEqController.importAutoEq(text, profile.name).onSuccess {
                 Graph.library.setSetting(KEY_AUTOEQ_PROFILE, profile.name)
-                onApplied(profile.name)
             }
         }
     }
@@ -508,8 +482,14 @@ private fun ProfileRow(profile: AutoEqProfile, onClick: () -> Unit) {
     }
 }
 
+/**
+ * One vertical gain slider for the graphic EQ's 10-band row. `internal` (not
+ * `private`) so `ComponentScreenshotTest` can golden the "Equalizer" section
+ * with its real band sliders rather than a hand-drawn approximation — same
+ * reasoning as [AutoEqPickerResults]'s extraction.
+ */
 @Composable
-private fun BandSlider(label: String, gainDb: Double, onChange: (Double) -> Unit) {
+internal fun BandSlider(label: String, gainDb: Double, onChange: (Double) -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text("%.0f".format(gainDb), style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
         VerticalSlider(
