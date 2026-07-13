@@ -179,19 +179,6 @@ class PlaybackService : MediaSessionService() {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
 
-        // ExoPlayer assigns its audio session id synchronously in its own
-        // constructor (verified against the real 1.5.1 source:
-        // ExoPlayerImpl's constructor calls Util.generateAudioSessionIdV21
-        // and pushes it to the renderer directly, with NO Player.Listener
-        // dispatch at that point -- onAudioSessionIdChanged only fires from
-        // the explicit setAudioSessionId(int) setter, which this app never
-        // calls). So the id is already valid right here and platform
-        // effects can be built immediately, rather than waiting on a
-        // listener callback that would never fire in this app's flow. The
-        // onAudioSessionIdChanged handler below still covers any LATER
-        // legitimate change.
-        rebuildSessionEffects(player.audioSessionId)
-
         // Sleep timer: collectLatest re-launches (cancelling any in-flight
         // delay) every time SleepTimerController's state changes, so a
         // re-arm or cancel() naturally supersedes whatever this coroutine
@@ -294,6 +281,48 @@ class PlaybackService : MediaSessionService() {
             }
         })
 
+        // Fix round (review of commit 6426194), Critical: do NOT read
+        // player.audioSessionId and build platform effects against it
+        // directly -- that id is generated in ExoPlayerImpl's own
+        // constructor and pushed toward the renderers via an internal
+        // PlayerMessage, but delivery to the audio renderer/DefaultAudioSink
+        // is NOT guaranteed to have completed by the time the constructor
+        // returns (PlayerMessage.send() queues onto the internal playback
+        // thread's own message loop, asynchronous to the caller). If the
+        // real DefaultAudioSink never actually adopts that id before it
+        // builds its AudioTrack (built lazily, once real playback starts),
+        // externalAudioSessionIdProvided stays false and the sink falls
+        // back to whatever session the platform's AudioTrack.create()
+        // auto-generates instead -- a DIFFERENT id than the one this
+        // service just attached PresetReverb/Virtualizer to. The effects
+        // would construct successfully (no crash) and simply process
+        // silence forever: invisible to both Robolectric (no real
+        // AudioTrack) and CI smoke (crash-gating only, not audio-content
+        // verification).
+        //
+        // Explicitly calling setAudioSessionId(UNSET) here, AFTER the
+        // listener above is registered, is the fix: verified directly
+        // against the real ExoPlayerImpl.setAudioSessionId(int) source --
+        // the id it holds right now (the constructor-generated value) is
+        // never UNSET, so the method's `if (this.audioSessionId ==
+        // audioSessionId) return` guard does NOT short-circuit; it takes
+        // the `audioSessionId == C.AUDIO_SESSION_ID_UNSET` branch, mints a
+        // FRESH id via the same Util.generateAudioSessionIdV21 the
+        // constructor used, assigns it to its own field, sends the renderer
+        // message again, and -- critically, and unconditionally, as part of
+        // this same synchronous call, not gated on that message's async
+        // delivery -- fires onAudioSessionIdChanged(id) with that fresh,
+        // non-UNSET id to every currently-registered Player.Listener. Our
+        // listener (registered above) receives it and calls
+        // rebuildSessionEffects with a value we now KNOW this call pushed
+        // toward the sink moments ago, on the same call stack that
+        // generated it -- not a value merely read from a field that may or
+        // may not have made it to the sink yet.
+        //
+        // Do not "simplify" this back to reading player.audioSessionId
+        // directly: that was the original bug.
+        player.setAudioSessionId(C.AUDIO_SESSION_ID_UNSET)
+
         val sessionActivity = PendingIntent.getActivity(
             this,
             0,
@@ -359,11 +388,12 @@ class PlaybackService : MediaSessionService() {
     }
 
     /**
-     * Tears down and rebuilds [reverb]/[virtualizer] for [sessionId]. Called
-     * once right after the player is built (its session id is already valid
-     * at that point -- see [onCreate]'s comment) and again from
-     * [Player.Listener.onAudioSessionIdChanged] for any later legitimate
-     * change.
+     * Tears down and rebuilds [reverb]/[virtualizer] for [sessionId]. Only
+     * ever called from [Player.Listener.onAudioSessionIdChanged] -- once for
+     * the `setAudioSessionId(UNSET)` call [onCreate] makes right after
+     * registering that listener (see the long comment at that call site for
+     * why a direct call with `player.audioSessionId` is wrong), and again
+     * for any later legitimate session change.
      *
      * `runCatching` around construction: emulators and some devices lack
      * effect implementations entirely (`PresetReverb`/`Virtualizer`'s
@@ -388,7 +418,7 @@ class PlaybackService : MediaSessionService() {
         val r = reverb ?: return
         runCatching {
             r.enabled = state.enabled
-            r.preset = state.preset.toShort()
+            r.preset = clampReverbPreset(state.preset)
         }
     }
 
@@ -397,7 +427,7 @@ class PlaybackService : MediaSessionService() {
         val v = virtualizer ?: return
         runCatching {
             v.enabled = state.enabled
-            v.setStrength(state.strength.toShort())
+            v.setStrength(clampVirtualizerStrength(state.strength))
         }
     }
 
@@ -515,6 +545,21 @@ class PlaybackService : MediaSessionService() {
 }
 
 private const val RETRY_COOLDOWN_MILLIS = 60_000L
+
+/**
+ * Clamps to `PresetReverb`'s valid `PRESET_*` range (0..6) -- apply-site
+ * validation, since a persisted [ReverbState] could hold anything (fix
+ * round, review of commit 6426194, Minor). Extracted as a top-level
+ * `internal` function so it's directly unit-testable without touching
+ * [PlaybackService] or any real platform-effect object.
+ */
+internal fun clampReverbPreset(preset: Int): Short = preset.coerceIn(0, 6).toShort()
+
+/**
+ * Clamps to `Virtualizer`'s valid strength range (0..1000) -- same
+ * apply-site-validation reasoning as [clampReverbPreset].
+ */
+internal fun clampVirtualizerStrength(strength: Int): Short = strength.coerceIn(0, 1000).toShort()
 
 private inline fun <reified T : Throwable> findCause(error: Throwable): T? {
     var cause: Throwable? = error
