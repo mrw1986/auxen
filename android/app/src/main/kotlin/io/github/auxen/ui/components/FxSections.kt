@@ -31,6 +31,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -88,7 +90,14 @@ fun FxSectionCard(
                         )
                     }
                 }
-                Switch(checked = enabled, onCheckedChange = onEnabledChange)
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onEnabledChange,
+                    // No visible Text of its own for TalkBack to merge (unlike a
+                    // Button) -- with up to seven of these on one screen, an
+                    // unlabeled switch is indistinguishable from any other.
+                    modifier = Modifier.semantics { contentDescription = title },
+                )
                 IconButton(onClick = { onExpandedChange(!expanded) }) {
                     Icon(
                         if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
@@ -166,7 +175,12 @@ private fun LabeledSlider(
                 fontFamily = FontFamily.Monospace,
             )
         }
-        Slider(value = slider.value, onValueChange = slider.onDrag, valueRange = valueRange)
+        Slider(
+            value = slider.value,
+            onValueChange = slider.onDrag,
+            valueRange = valueRange,
+            modifier = Modifier.semantics { contentDescription = label },
+        )
     }
 }
 
@@ -374,12 +388,17 @@ fun BalanceSection(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // Distinct from the section's own title/switch label (both are
+            // separate accessible nodes on the same screen -- reusing "Balance"
+            // for both made onNodeWithContentDescription("Balance") ambiguous,
+            // caught by FxSectionsAccessibilityTest).
+            val sliderA11yLabel = stringResource(R.string.fx_balance_slider_a11y_label)
             Text(stringResource(R.string.fx_balance_left), style = MaterialTheme.typography.labelMedium)
             Slider(
                 value = slider.value,
                 onValueChange = { slider.onDrag(snapBalanceToCenter(it)) },
                 valueRange = -1f..1f,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).semantics { contentDescription = sliderA11yLabel },
             )
             Text(stringResource(R.string.fx_balance_right), style = MaterialTheme.typography.labelMedium)
         }

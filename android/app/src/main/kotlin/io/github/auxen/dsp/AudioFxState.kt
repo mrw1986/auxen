@@ -14,7 +14,7 @@ import kotlinx.serialization.Serializable
 /**
  * Bass boost: a low-shelf lift centred at [freqHz] with [gainDb] of gain.
  *
- * The UI exposes [freqHz] over 40..200 Hz and [gainDb] over 0..12 dB.
+ * The UI exposes [freqHz] over 40..160 Hz and [gainDb] over 0..12 dB.
  */
 @Serializable
 data class BassBoostState(

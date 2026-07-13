@@ -42,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.text.font.FontFamily
@@ -50,18 +51,32 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.github.takahirom.roborazzi.captureRoboImage
+import io.github.auxen.R
 import io.github.auxen.db.PlaylistEntity
 import io.github.auxen.dsp.AutoEqProfile
+import io.github.auxen.dsp.BalanceState
+import io.github.auxen.dsp.BassBoostState
+import io.github.auxen.dsp.LimiterState
+import io.github.auxen.dsp.ReplayGainState
+import io.github.auxen.dsp.ReverbState
+import io.github.auxen.dsp.VirtualizerState
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.ui.AutoEqPickerResults
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.AuxenTrackRow
+import io.github.auxen.ui.components.BalanceSection
+import io.github.auxen.ui.components.BassBoostSection
 import io.github.auxen.ui.components.BrandBlock
+import io.github.auxen.ui.components.FxSectionCard
+import io.github.auxen.ui.components.LimiterSection
 import io.github.auxen.ui.components.QualityBadge
+import io.github.auxen.ui.components.ReverbSection
 import io.github.auxen.ui.components.SectionHeader
 import io.github.auxen.ui.components.SourceBadge
 import io.github.auxen.ui.components.TrackActionSheetContent
+import io.github.auxen.ui.components.VirtualizerSection
+import io.github.auxen.ui.components.VolumeNormalizationSection
 import io.github.auxen.ui.components.formatDuration
 import io.github.auxen.ui.testutil.TEST_DEVICE
 import io.github.auxen.ui.testutil.auxenScreenshotName
@@ -169,6 +184,49 @@ import org.robolectric.annotation.GraphicsMode
  * Bold registration itself is correct (see that test's class KDoc for the
  * full investigation) — this golden just cannot reliably prove it under
  * Robolectric's shared-JVM execution model.
+ *
+ * ## Per-effect FX section surfaces (DSP-b Task 4)
+ * The `fx-section-card-*`, `fx-bass-boost-*`, `fx-balance-*`, `fx-limiter-*`,
+ * `fx-reverb-*`, `fx-virtualizer-*`, and `fx-volume-normalization-*` goldens
+ * capture the real production composables from `io.github.auxen.ui.components`
+ * (`FxSections.kt`) directly — these already ARE stateless content
+ * composables taking state/callbacks as explicit parameters, same shape as
+ * [AutoEqPickerResults]/[TrackActionSheetContent], so unlike those two
+ * surfaces no extraction was needed to make them goldenable. `fx-section-card-*`
+ * pins the shared expandable-card primitive itself (collapsed + expanded,
+ * placeholder title/subtitle/content) rather than any one effect, since
+ * every section's header chrome — title, subtitle, switch, chevron — comes
+ * from that one component.
+ *
+ * **Action-sheet drift trap, checked:** none of these eighteen new surfaces
+ * render a `ModalBottomSheet`, an open `DropdownMenu`, or any other
+ * animated-entrance overlay that could fail to settle under Robolectric (see
+ * the action-sheet surface note above). `FxSectionCard`'s expand/collapse is
+ * a plain `if (expanded) { … }` conditional — no `AnimatedVisibility`, no
+ * transition to wait out — and `fx-reverb-*` captures the preset dropdown in
+ * its default CLOSED state (just the trigger button), never opened. All
+ * eighteen render fully synchronously on first composition, same as every
+ * other non-action-sheet surface in this file.
+ *
+ * ## "All sections collapsed" EqualizerScreen composition (DSP-b Task 4)
+ * `equalizer-all-sections-collapsed-*` assembles the real per-section
+ * composables (`BassBoostSection`, `BalanceSection`, etc., each with its own
+ * default state, plus one manual [FxSectionCard] call for the Equalizer
+ * entry, which has no extracted content composable of its own — the 10-band
+ * EQ + AutoEq picker content lives inline in `EqualizerScreen`) with
+ * `expanded = false` for all seven. This is fully faithful to what
+ * `EqualizerScreen` itself renders collapsed: a collapsed `FxSectionCard`
+ * never composes its `content` lambda regardless of what's inside it, so an
+ * empty lambda for the manual Equalizer entry is exactly as faithful here as
+ * the real inline EQ content would be. The full live `EqualizerScreen()`
+ * composable itself is deliberately NOT captured — it depends on
+ * process-wide singletons (`EqController.state`, `Graph.autoEq`,
+ * `Graph.library`) and an `ActivityResultLauncher` for file import, none of
+ * which have a stateless extraction the way `AutoEqPickerResults`/
+ * `TrackActionSheetContent` do. Wiring or faking all of that for one golden
+ * would risk exactly the shared-JVM test-order pollution this file's own
+ * typography-details section documents above, for a golden that — being
+ * collapsed — wouldn't exercise any of that live state anyway.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @RunWith(RobolectricTestRunner::class)
@@ -589,6 +647,191 @@ class ComponentScreenshotTest {
             Text("Fraunces SemiBold", fontFamily = Fraunces, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
             Text("Fraunces Bold", fontFamily = Fraunces, fontWeight = FontWeight.Bold, fontSize = 20.sp)
             Text(formatDuration(258.0), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+        }
+    }
+
+    // --- FxSectionCard primitive (collapsed + expanded — see class KDoc) ---
+
+    @Test
+    fun fxSectionCardCollapsed_light() = captureComponent("fx-section-card-collapsed-light", darkTheme = false) {
+        FxSectionCardPreview(expanded = false)
+    }
+
+    @Test
+    fun fxSectionCardCollapsed_dark() = captureComponent("fx-section-card-collapsed-dark", darkTheme = true) {
+        FxSectionCardPreview(expanded = false)
+    }
+
+    @Test
+    fun fxSectionCardExpanded_light() = captureComponent("fx-section-card-expanded-light", darkTheme = false) {
+        FxSectionCardPreview(expanded = true)
+    }
+
+    @Test
+    fun fxSectionCardExpanded_dark() = captureComponent("fx-section-card-expanded-dark", darkTheme = true) {
+        FxSectionCardPreview(expanded = true)
+    }
+
+    @Composable
+    private fun FxSectionCardPreview(expanded: Boolean) {
+        FxSectionCard(
+            title = "Sample section",
+            subtitle = "Placeholder description text.",
+            enabled = true,
+            onEnabledChange = {},
+            expanded = expanded,
+            onExpandedChange = {},
+        ) {
+            Text("Sample content", style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+
+    // --- Bass boost section ---
+
+    @Test
+    fun fxBassBoost_light() = captureComponent("fx-bass-boost-light", darkTheme = false) { BassBoostPreview() }
+
+    @Test
+    fun fxBassBoost_dark() = captureComponent("fx-bass-boost-dark", darkTheme = true) { BassBoostPreview() }
+
+    @Composable
+    private fun BassBoostPreview() {
+        BassBoostSection(
+            state = BassBoostState(enabled = true),
+            onStateChange = {},
+            expanded = true,
+            onExpandedChange = {},
+        )
+    }
+
+    // --- Balance section (panned right, so the L/R asymmetry is pixel-visible) ---
+
+    @Test
+    fun fxBalance_light() = captureComponent("fx-balance-light", darkTheme = false) { BalancePreview() }
+
+    @Test
+    fun fxBalance_dark() = captureComponent("fx-balance-dark", darkTheme = true) { BalancePreview() }
+
+    @Composable
+    private fun BalancePreview() {
+        BalanceSection(
+            state = BalanceState(enabled = true, balance = 0.3f),
+            onStateChange = {},
+            expanded = true,
+            onExpandedChange = {},
+        )
+    }
+
+    // --- Limiter section (defaults — pins the corrected subtitle copy) ---
+
+    @Test
+    fun fxLimiter_light() = captureComponent("fx-limiter-light", darkTheme = false) { LimiterPreview() }
+
+    @Test
+    fun fxLimiter_dark() = captureComponent("fx-limiter-dark", darkTheme = true) { LimiterPreview() }
+
+    @Composable
+    private fun LimiterPreview() {
+        LimiterSection(
+            state = LimiterState(),
+            onStateChange = {},
+            expanded = true,
+            onExpandedChange = {},
+        )
+    }
+
+    // --- Reverb section (non-None preset selected, dropdown closed) ---
+
+    @Test
+    fun fxReverb_light() = captureComponent("fx-reverb-light", darkTheme = false) { ReverbPreview() }
+
+    @Test
+    fun fxReverb_dark() = captureComponent("fx-reverb-dark", darkTheme = true) { ReverbPreview() }
+
+    @Composable
+    private fun ReverbPreview() {
+        ReverbSection(
+            state = ReverbState(enabled = true, preset = 4), // Medium hall
+            onStateChange = {},
+            expanded = true,
+            onExpandedChange = {},
+        )
+    }
+
+    // --- Virtualizer section ---
+
+    @Test
+    fun fxVirtualizer_light() = captureComponent("fx-virtualizer-light", darkTheme = false) { VirtualizerPreview() }
+
+    @Test
+    fun fxVirtualizer_dark() = captureComponent("fx-virtualizer-dark", darkTheme = true) { VirtualizerPreview() }
+
+    @Composable
+    private fun VirtualizerPreview() {
+        VirtualizerSection(
+            state = VirtualizerState(enabled = true),
+            onStateChange = {},
+            expanded = true,
+            onExpandedChange = {},
+        )
+    }
+
+    // --- Volume normalization section (Album mode, non-zero preamp/fallback) ---
+
+    @Test
+    fun fxVolumeNormalization_light() = captureComponent("fx-volume-normalization-light", darkTheme = false) {
+        VolumeNormalizationPreview()
+    }
+
+    @Test
+    fun fxVolumeNormalization_dark() = captureComponent("fx-volume-normalization-dark", darkTheme = true) {
+        VolumeNormalizationPreview()
+    }
+
+    @Composable
+    private fun VolumeNormalizationPreview() {
+        VolumeNormalizationSection(
+            state = ReplayGainState(enabled = true, albumMode = true, preampDb = 3.0, fallbackDb = -6.0),
+            onStateChange = {},
+            expanded = true,
+            onExpandedChange = {},
+        )
+    }
+
+    // --- Equalizer screen, all seven sections collapsed (see class KDoc) ---
+
+    @Test
+    fun equalizerAllSectionsCollapsed_light() = captureComponent(
+        "equalizer-all-sections-collapsed-light",
+        darkTheme = false,
+    ) { EqualizerAllSectionsCollapsedPreview() }
+
+    @Test
+    fun equalizerAllSectionsCollapsed_dark() = captureComponent(
+        "equalizer-all-sections-collapsed-dark",
+        darkTheme = true,
+    ) { EqualizerAllSectionsCollapsedPreview() }
+
+    @Composable
+    private fun EqualizerAllSectionsCollapsedPreview() {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            FxSectionCard(
+                title = stringResource(R.string.fx_equalizer_title),
+                subtitle = null,
+                enabled = false,
+                onEnabledChange = {},
+                expanded = false,
+                onExpandedChange = {},
+            ) {}
+            BassBoostSection(state = BassBoostState(), onStateChange = {}, expanded = false, onExpandedChange = {})
+            BalanceSection(state = BalanceState(), onStateChange = {}, expanded = false, onExpandedChange = {})
+            LimiterSection(state = LimiterState(), onStateChange = {}, expanded = false, onExpandedChange = {})
+            ReverbSection(state = ReverbState(), onStateChange = {}, expanded = false, onExpandedChange = {})
+            VirtualizerSection(state = VirtualizerState(), onStateChange = {}, expanded = false, onExpandedChange = {})
+            VolumeNormalizationSection(state = ReplayGainState(), onStateChange = {}, expanded = false, onExpandedChange = {})
         }
     }
 }

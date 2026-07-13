@@ -21,6 +21,10 @@
     <string name="fx_balance_center">Center</string>
     <string name="fx_balance_percent_left">L %1$d%%</string>
     <string name="fx_balance_percent_right">R %1$d%%</string>
+    <!-- Distinct from fx_balance_title: that's also the section switch's
+         contentDescription, and the two must not collide (they're separate
+         accessible nodes on the same screen). -->
+    <string name="fx_balance_slider_a11y_label">Balance amount</string>
 
     <string name="fx_limiter_title">Limiter</string>
     <string name="fx_limiter_subtitle">Soft-knee protection against clipping — on by default.</string>
