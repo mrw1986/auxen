@@ -63,12 +63,16 @@ sections UI on the Equalizer screen.)
   float32 for chain headroom; sink compatibility is the restorer's job.
   Hi-Res float sources still bypass the EQ chain at the sink (a tracked
   follow-up).
-- `dsp/Eq.kt` — two front-ends over the same engine:
+- `dsp/Eq.kt` — the filter engine behind two now-SEPARATE stages (split
+  2026-07-13, Wavelet-style — each its own independently-toggleable
+  `ParametricEqProcessor` in the chain, each auto-setting its own preamp):
   - the desktop app's 10-band graphic EQ (same ISO bands, same ten presets),
-    with automatic preamp = −(largest boost) to prevent clipping;
-  - `AutoEqParser` for AutoEq `ParametricEq.txt` exports (PK/LSC/HSC lines),
-    i.e. correction profiles for 8,850 headphone models — the Wavelet
-    feature, but in-app and in float.
+    driven by `EqController`;
+  - AutoEq headphone correction (`AutoEqParser` for `ParametricEq.txt`
+    exports — PK/LSC/HSC lines, 8,850 headphone models), driven by
+    `AutoEqController`. Importing a correction profile no longer touches the
+    manual graphic EQ. (A one-time crash-safe migration moves any pre-split
+    merged profile into `AutoEqController` on first launch after upgrade.)
 
 The Equalizer screen bundles that full 8,850-profile AutoEq database as an
 asset with an in-app search picker (Wavelet parity, no network round-trip),

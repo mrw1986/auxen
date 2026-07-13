@@ -1,5 +1,7 @@
 # Android — Split Headphone Correction (AutoEq) from the Graphic EQ
 
+> **STATUS: SHIPPED (Tasks 1–2 + migration crash-safety fixes; commits c6cb045, 41496b4, 94c32f1, 80209ba).** Retained as record. Notes: a whole-batch Opus final review killed the two-preamp over-attenuation concern (each stage's preamp only offsets its own boosts — series design sound) and caught a migration crash-safety bug (guard persisted before payloads) which was fixed, then refined to a destination→source→guard write order with zero data-loss window. The migration test can't reproduce the historical race timing on a fast idle machine (proven by a temporary delay(200) reintroduction); the safety is by construction, not test-enforced.
+
 **Motivation (user, 2026-07-13):** "should the headphone autoeq have its own toggle like Wavelet? I don't like mixing the eq and autoeq." Today they ARE the same thing: `EqController.importAutoEq` parses an AutoEq profile into the single `EqState` and overwrites the 10-band graphic EQ. Importing a headphone profile wipes your manual EQ, and there's one shared enable switch. Wavelet keeps headphone correction and the graphic EQ as independent, separately-toggleable stages.
 
 **Goal:** Two independent EQ stages, each with its own enable flag, its own persistence, and its own UI section:
