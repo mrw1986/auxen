@@ -36,7 +36,7 @@ internal val Context.autoEqDataStore by preferencesDataStore(name = "autoeq")
 @UnstableApi
 object AutoEqController {
     internal val KEY_STATE = stringPreferencesKey("autoeq_state")
-    private val KEY_MIGRATED = booleanPreferencesKey("autoeq_migrated")
+    internal val KEY_MIGRATED = booleanPreferencesKey("autoeq_migrated")
     private val json = Json { ignoreUnknownKeys = true }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -100,11 +100,27 @@ object AutoEqController {
         EqController.awaitInitialized()
         val legacy = EqController.state.value
         if (legacy.bands == null && legacy.filters.isNotEmpty()) {
-            setState(legacy, persist = true)
-            // The correction now lives here -- reset the legacy graphic
-            // stage to flat/disabled so it isn't double-applied once both
-            // stages exist side by side in the chain.
-            EqController.setState(EqState(), persist = true)
+            // Crash-safety: both payload writes must be DURABLE before
+            // KEY_MIGRATED is set, or a process kill in the gap permanently
+            // loses the profile (guard true, autoeq_state never written) or
+            // double-applies it (guard true, legacy eq_state never reset).
+            // setState(..., persist = true) is the wrong tool here -- it
+            // launches a fire-and-forget write on a separate coroutine that
+            // this function doesn't wait for, so it can (and, on a loaded
+            // device, will) race the marker write below. Instead: write the
+            // legacy reset directly and suspend until it lands, then fold
+            // the AutoEq payload and the marker into ONE DataStore#edit
+            // transaction, so the marker can never be committed without the
+            // payload it's meant to guard.
+            app.eqDataStore.edit { it[EqController.KEY_STATE] = json.encodeToString(EqState.serializer(), EqState()) }
+            EqController.setState(EqState(), persist = false) // disk already written above; sync in-memory only
+            _state.value = legacy
+            processor?.updateState(legacy)
+            app.autoEqDataStore.edit {
+                it[KEY_STATE] = json.encodeToString(EqState.serializer(), legacy)
+                it[KEY_MIGRATED] = true
+            }
+            return
         }
         // Graphic-shaped (bands != null) or genuinely empty legacy state:
         // nothing to migrate -- EqController is left exactly as it was.

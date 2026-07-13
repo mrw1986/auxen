@@ -5,6 +5,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -189,6 +191,53 @@ class AutoEqControllerTest {
             "the second initialize() must restore the ALREADY-migrated profile from AutoEqController's own DataStore, not re-migrate",
             "First Migration",
             AutoEqController.state.value.presetName,
+        )
+    }
+
+    @Test
+    fun `migration writes both payloads to disk before the guard is set, not just eventually`() = runBlocking {
+        // Crash-safety regression (final review, Important #1 successor):
+        // migrateFromLegacyIfNeeded used to setState(..., persist = true)
+        // for both payloads -- fire-and-forget launches racing the awaited
+        // KEY_MIGRATED write below them. A process kill after the guard
+        // landed but before those launches flushed would permanently lose
+        // the profile (guard true, autoeq_state absent) or double-apply it
+        // (guard true, legacy eq_state never reset). Reading the RAW
+        // DataStore values (not AutoEqController.state.value / EqController
+        // .state.value, which setState() updates in-memory synchronously
+        // regardless of whether the disk write has landed) is the only way
+        // to actually prove the durability ordering, not just the
+        // eventual in-memory outcome the other migration tests above check.
+        val legacyAutoEq = EqState(
+            enabled = true,
+            preampDb = -4.0,
+            filters = listOf(FilterSpec(FilterType.PEAKING, 1000.0, 0.7, -2.0)),
+            presetName = "Crash Safety Profile",
+            bands = null,
+        )
+        EqController.setState(legacyAutoEq, persist = false)
+
+        AutoEqController.initialize(context)
+        AutoEqController.awaitInitialized()
+
+        val json = Json { ignoreUnknownKeys = true }
+
+        val autoEqPrefs = context.autoEqDataStore.data.first()
+        assertTrue(
+            "expected the migration guard to already be set on disk",
+            autoEqPrefs[AutoEqController.KEY_MIGRATED] == true,
+        )
+
+        val storedAutoEq = autoEqPrefs[AutoEqController.KEY_STATE]
+        assertTrue("expected the AutoEq payload durable on disk by the time the guard is set", storedAutoEq != null)
+        assertEquals(legacyAutoEq, json.decodeFromString<EqState>(storedAutoEq!!))
+
+        val storedEq = context.eqDataStore.data.first()[EqController.KEY_STATE]
+        assertTrue("expected the legacy eq_state reset durable on disk by the time the guard is set", storedEq != null)
+        assertEquals(
+            "legacy eq_state must already be reset to flat/disabled on disk, not just in memory",
+            EqState(),
+            json.decodeFromString<EqState>(storedEq!!),
         )
     }
 }
