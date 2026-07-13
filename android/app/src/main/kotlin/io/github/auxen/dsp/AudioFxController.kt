@@ -38,7 +38,13 @@ internal val KEY_REPLAY_GAIN = stringPreferencesKey("fx_replay_gain")
  *  - `val xState: StateFlow<XState>` — the current state.
  *  - `fun updateX(state)` — sets it and persists that effect's key only.
  *  - `fun attachX(apply)` — replays the current state into `apply`
- *    immediately and forwards every subsequent update to it.
+ *    immediately and forwards every subsequent update to it. REPLACES any
+ *    previously attached applier for that effect (not additive): there is
+ *    exactly one production `attachX` call site per effect (in
+ *    `PlaybackService.onCreate`), and a service restart calling `attachX`
+ *    again with a fresh processor instance must not also keep driving the
+ *    old, now-orphaned one — mirrors [EqController.attachProcessor]'s own
+ *    single-processor-field design (final-review fix round, Important #3).
  *
  * [initialize] restores all four states independently: a malformed stored JSON
  * for one effect resolves to that effect's defaults and leaves the others
@@ -50,9 +56,9 @@ object AudioFxController {
 
     /**
      * Per-effect state holder: owns the [MutableStateFlow], its persistence
-     * key/serializer, and the list of listeners attached via `attachX`. Keeping
-     * the four effects behind one small type keeps persistence and listener
-     * fan-out identical (and independent) across effects.
+     * key/serializer, and the one applier attached via `attachX`. Keeping the
+     * four effects behind one small type keeps persistence and dispatch
+     * identical (and independent) across effects.
      */
     private class FxSlot<T>(
         val key: Preferences.Key<String>,
@@ -62,25 +68,35 @@ object AudioFxController {
         val flow = MutableStateFlow(default)
 
         /**
-         * Copy-on-write so an `attachX` on one thread (UI) can never race a
-         * concurrent [set]'s iteration on another (playback service / audio
-         * config) into a ConcurrentModificationException. Reads dominate —
-         * attaches are rare, one-time calls — so COW is the right trade-off.
+         * The one active listener attached via `attachX` -- see the class
+         * KDoc's "REPLACES" note. `@Volatile` alone is enough here: unlike
+         * the old list-based design, there is no collection to iterate,
+         * so a concurrent `attach` during `set`'s dispatch can never throw
+         * ConcurrentModificationException -- it's a single field write.
          */
-        private val listeners = java.util.concurrent.CopyOnWriteArrayList<(T) -> Unit>()
+        @Volatile
+        private var applier: ((T) -> Unit)? = null
 
         /** The in-flight DataStore write for THIS effect's key, if any. */
         @Volatile
         var persistJob: Job? = null
 
         fun attach(apply: (T) -> Unit) {
-            listeners += apply
-            apply(flow.value)
+            applier = apply
+            val snapshot = flow.value
+            apply(snapshot)
+            // Close the replay-vs-concurrent-set race: if flow.value changed
+            // between registering the applier and this replay call (a
+            // concurrent updateX() landed in that narrow window), re-apply
+            // with the fresher value so the new listener never misses it
+            // (final-review fix round, Minor #7).
+            val latest = flow.value
+            if (latest != snapshot) apply(latest)
         }
 
         fun set(value: T) {
             flow.value = value
-            listeners.forEach { it(value) }
+            applier?.invoke(value)
         }
 
         /** Decode [stored]; malformed JSON leaves the current value in place. */
@@ -92,7 +108,7 @@ object AudioFxController {
         fun reset() {
             persistJob?.cancel()
             persistJob = null
-            listeners.clear()
+            applier = null
             flow.value = default
         }
     }
@@ -125,8 +141,22 @@ object AudioFxController {
     private fun <T> update(slot: FxSlot<T>, state: T) {
         slot.set(state)
         val ctx = appContext ?: return
+        // Chain onto the previous in-flight write for THIS slot rather than
+        // launching independently: two independently-launched coroutines
+        // give no guarantee the DataStore edit that started SECOND also
+        // COMPLETES second, so a slow-then-fast pair of updates could
+        // persist the stale one last. Reading slot.flow.value fresh at
+        // execution time (not the `state` parameter captured at call time)
+        // rather than the value each launch captured means several updates
+        // queued up behind one slow write collapse into a single final
+        // write of whatever's current, instead of each earlier queued job
+        // stubbornly re-writing its own now-stale value (final-review fix
+        // round, Minor #6).
+        val previous = slot.persistJob
         slot.persistJob = scope.launch {
-            ctx.audioFxDataStore.edit { it[slot.key] = json.encodeToString(slot.serializer, state) }
+            previous?.join()
+            val current = slot.flow.value
+            ctx.audioFxDataStore.edit { it[slot.key] = json.encodeToString(slot.serializer, current) }
         }
     }
 

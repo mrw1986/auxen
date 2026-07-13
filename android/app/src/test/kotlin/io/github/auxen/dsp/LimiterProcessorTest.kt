@@ -54,7 +54,7 @@ class LimiterProcessorTest {
         // Amplitude 0.3 (~-10.5 dBFS) is well below the knee's bottom edge
         // (thresholdDb - kneeDb/2 = -1 - 3 = -4 dBFS), so desiredGain is
         // exactly 1.0 for every sample and gain (seeded 1.0) never moves --
-        // verified in Python (limiter_sim.py) before writing this. Widening
+        // verified in Python before writing this. Widening
         // float->double, multiplying by exactly 1.0, coerceIn as a no-op
         // (|sample| << 1), and narrowing back to float is an exact round trip
         // under IEEE 754, so the output must be bit-identical to the input.
@@ -187,5 +187,34 @@ class LimiterProcessorTest {
         val probe = 0.1f
         val out = feedFloats(processor, floatArrayOf(probe))
         assertEquals(probe, out[0], 1e-6f)
+    }
+
+    @Test
+    fun negativeReleaseMsCoercesToAFastReleaseInsteadOfDiverging() {
+        // A negative releaseMs flips the sign inside exp(-1/(releaseMs/1000*
+        // sampleRate)), producing releaseCoef > 1.0; (1 - releaseCoef) then
+        // goes negative, which makes the envelope move AWAY from
+        // desiredGain instead of toward it -- gain (never itself clamped,
+        // only the output sample is) diverges without bound over the life
+        // of the stream. Verified in Python: with releaseMs=-120, gain drops
+        // from 0.50 to 0.27 over 2000 samples and keeps falling, instead of
+        // recovering toward 1.0. Fixed via releaseMs.coerceAtLeast(1.0) at
+        // the point of use -- verified that coerces to the fastest legal
+        // release (1ms), recovering to ~0.999994 within 500 samples (final-
+        // review fix round, Minor #5).
+        val processor = LimiterProcessor()
+        val thresholdDb = -1.0
+        processor.updateState(LimiterState(enabled = true, thresholdDb = thresholdDb, kneeDb = 6.0, releaseMs = -120.0))
+        processor.configure(floatFormat())
+        processor.flush()
+
+        val peak = Math.pow(10.0, (thresholdDb + 6.0) / 20.0).toFloat()
+        feedFloats(processor, FloatArray(50) { peak })
+
+        val probeAmp = 0.1f
+        val out = feedFloats(processor, FloatArray(500) { probeAmp })
+        out.forEach { assertTrue("output sample $it left the valid [-1,1] range", it in -1f..1f) }
+        val finalGain = out.last() / probeAmp
+        assertTrue("expected fast, non-diverging recovery toward 1.0, got finalGain=$finalGain", finalGain > 0.999f)
     }
 }

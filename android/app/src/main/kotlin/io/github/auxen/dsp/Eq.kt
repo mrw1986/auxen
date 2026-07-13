@@ -135,6 +135,16 @@ object AutoEqParser {
             val freq = m.groupValues[3].toDouble()
             val gain = m.groupValues[4].toDouble()
             val q = m.groupValues[5].takeIf { it.isNotEmpty() }?.toDouble() ?: DEFAULT_SHELF_Q
+            // Reject rather than silently import: Q=0 produces NaN biquad
+            // coefficients that persist across restarts as a "successful"
+            // import (see ParametricEqProcessor's rebuildFiltersIfNeeded);
+            // Fc=0 builds a degenerate filter. Throwing here means
+            // EqController.importAutoEq's runCatching wrapper turns the
+            // whole import into a failed Result before setState/persist is
+            // ever reached -- the bad profile never touches DataStore, not
+            // even partially (final-review fix round, Important #1).
+            require(freq > 0.0) { "Filter frequency must be positive, got $freq Hz" }
+            require(q > 0.0) { "Filter Q must be positive, got $q" }
             filters += FilterSpec(type, freq, q, gain)
         }
 

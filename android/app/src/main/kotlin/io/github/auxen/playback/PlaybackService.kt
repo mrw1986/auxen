@@ -150,7 +150,7 @@ class PlaybackService : MediaSessionService() {
                 maybeRecordPendingPlay(player)
                 scheduleQueueSave(player)
                 preResolveUpcoming(player)
-                rgGainRouter.route(mediaItem?.mediaId)
+                rgGainRouter.route(mediaItem?.mediaId, player.playWhenReady)
             }
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
@@ -158,11 +158,24 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) maybeRecordPendingPlay(player) else scheduleQueueSave(player)
+                if (isPlaying) {
+                    maybeRecordPendingPlay(player)
+                    // Re-route: a Tidal track's RG resolve may have been
+                    // skipped in onMediaItemTransition while the queue was
+                    // still paused (see RgGainRouter's "Lazy resolution"
+                    // KDoc) -- this is the belt half of the belt-and-
+                    // suspenders pair with onPlayWhenReadyChanged below.
+                    rgGainRouter.route(player.currentMediaItem?.mediaId, player.playWhenReady)
+                } else {
+                    scheduleQueueSave(player)
+                }
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                if (playWhenReady) preResolveUpcoming(player)
+                if (playWhenReady) {
+                    preResolveUpcoming(player)
+                    rgGainRouter.route(player.currentMediaItem?.mediaId, playWhenReady)
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -485,6 +498,20 @@ private class EqRenderersFactory(
  * cancellation is tracked on the coroutine's `Job` independently of the
  * caught exception, so this check still reflects the real cancellation
  * state even though the exception itself was swallowed.
+ *
+ * ### Lazy resolution
+ * TIDAL resolution triggers a real network call (or, in the common case, a
+ * [TrackResolver] cache hit -- still not free). [PlaybackService.onCreate]'s
+ * queue-restore comment already establishes the contract: "no Tidal stream
+ * resolution happens until the user plays." [route] previously violated that
+ * for a paused, cold-start-restored Tidal queue -- `onMediaItemTransition`
+ * fires from `setMediaItems` alone, with no `prepare()`/`play()` involved.
+ * The `playWhenReady` parameter gates the TIDAL branch specifically: LOCAL
+ * tag reads are a cheap local file read with no such contract, so they
+ * always proceed. [PlaybackService.onCreate]'s `onPlayWhenReadyChanged`/
+ * `onIsPlayingChanged(true)` handlers re-call [route] once play is actually
+ * intended, so gains still land at or before first audio for a Tidal track
+ * that was skipped here (final-review fix round, Important #4).
  */
 @UnstableApi
 private class RgGainRouter(
@@ -493,11 +520,17 @@ private class RgGainRouter(
 ) {
     private var job: Job? = null
 
-    fun route(mediaId: String?) {
+    fun route(mediaId: String?, playWhenReady: Boolean) {
         job?.cancel()
         val sourceId = mediaId?.substringAfter(':', missingDelimiterValue = "")
         if (mediaId == null || sourceId.isNullOrEmpty()) {
             processor.setTrackGains(null, null)
+            return
+        }
+        if (mediaId.startsWith("TIDAL:") && !playWhenReady) {
+            // Skip the resolve entirely -- see "Lazy resolution" above. Once
+            // playback is actually intended, onPlayWhenReadyChanged/
+            // onIsPlayingChanged(true) re-call route() with playWhenReady=true.
             return
         }
         job = scope.launch {

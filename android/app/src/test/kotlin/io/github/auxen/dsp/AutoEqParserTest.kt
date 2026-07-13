@@ -43,4 +43,34 @@ class AutoEqParserTest {
             AutoEqParser.parse("this is not a profile")
         }
     }
+
+    @Test
+    fun `rejects a Q 0 line rather than silently importing a NaN filter`() {
+        // Final-review fix round, Important #1: Q=0 produces NaN biquad
+        // coefficients in ParametricEqProcessor (see ParametricEqProcessorTest);
+        // catching it here, at parse time, means importAutoEq's existing
+        // runCatching wrapper turns the whole import into a failed Result
+        // before EqController.setState/persist is ever called -- the bad
+        // profile never reaches DataStore, not even partially.
+        assertThrows(IllegalArgumentException::class.java) {
+            AutoEqParser.parse("Filter 1: ON PK Fc 105 Hz Gain -2.4 dB Q 0")
+        }
+    }
+
+    @Test
+    fun `rejects a Fc 0 line rather than silently importing a degenerate filter`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            AutoEqParser.parse("Filter 1: ON PK Fc 0 Hz Gain -2.4 dB Q 0.70")
+        }
+    }
+
+    @Test
+    fun `rejects a shelf line with an omitted Q that resolves to zero -- guards the default too`() {
+        // Sanity check that the validation runs AFTER the DEFAULT_SHELF_Q
+        // fallback is applied, not before -- an omitted Q always resolves to
+        // the (positive) shelf default today, so this profile is actually
+        // valid; asserts it parses cleanly rather than false-rejecting.
+        val state = AutoEqParser.parse("Filter 1: ON LSC Fc 105 Hz Gain 2.0 dB")
+        assertTrue(state.filters.single().q > 0.0)
+    }
 }

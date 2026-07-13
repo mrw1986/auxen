@@ -101,6 +101,37 @@ class BassBoostProcessorTest {
         assertTrue("expected ~0 dB change at 5 kHz, got $highBoostDb", kotlin.math.abs(highBoostDb) < 0.5)
     }
 
+    @Test
+    fun negativeFreqIsSkippedNotAppliedAsADegenerateFilter() {
+        // Unlike ParametricEqProcessor's Q=0 case, freqHz<=0 here does NOT
+        // itself produce NaN -- Q is a fixed constant (0.707), never
+        // user-supplied, so there's no divide-by-zero path. This is a
+        // defensive-consistency fix matching ParametricEqProcessor's
+        // predicate, not a proven NaN source here (final-review fix round,
+        // Important #1). Note freqHz=0 specifically is a poor test case for
+        // this: verified in Python that at freq=0 the low-shelf formula
+        // degenerates to an EXACT unity all-pass (b0=1,b1=-2,b2=1,a1=-2,a2=1,
+        // numerator identical to denominator) regardless of gainDb -- it
+        // would pass this assertion even without the fix, since "filter
+        // applied" and "no filter" are numerically indistinguishable there.
+        // A negative frequency does NOT degenerate to identity (verified:
+        // finite, different-from-input coefficients), so it actually
+        // discriminates the skip-vs-apply behavior this fix changes.
+        val processor = BassBoostProcessor()
+        processor.updateState(BassBoostState(enabled = true, freqHz = -100.0, gainDb = 6.0))
+        processor.configure(pcm16Format())
+        processor.flush()
+        val input = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder())
+        input.putShort(10_000).putShort(-10_000)
+        input.flip()
+        processor.queueInput(input)
+        val output = processor.output.order(ByteOrder.nativeOrder())
+        val a = output.float
+        val b = output.float
+        assertEquals(10_000 / 32768f, a, 1e-6f)
+        assertEquals(-10_000 / 32768f, b, 1e-6f)
+    }
+
     private companion object {
         const val SAMPLE_RATE = 44_100
     }

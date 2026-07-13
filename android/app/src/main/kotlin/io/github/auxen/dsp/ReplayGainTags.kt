@@ -20,10 +20,15 @@ data class ReplayGainInfo(val trackGainDb: Double?, val albumGainDb: Double?)
  *    encoding only (encoding bytes 0 and 3). ID3v2.3 frame sizes are plain
  *    big-endian per spec; ID3v2.4 frame sizes are syncsafe -- both are
  *    handled, keyed off the header's major version byte. The outer tag size
- *    is always syncsafe at every version.
- *  - **Explicitly out of scope**: unsynchronisation, compressed/encrypted
- *    frames, UTF-16 TXXX encodings (bytes 1/2). Frames using them are
- *    skipped, not crashed on.
+ *    is always syncsafe at every version. The extended-header size field
+ *    EXCLUDES itself in v2.3 but INCLUDES itself in v2.4 (both per spec) --
+ *    the skip width accounts for that difference.
+ *  - **Explicitly out of scope**: unsynchronisation (checked via the header
+ *    flags byte and bailed on -- `ReplayGainInfo(null, null)` -- rather than
+ *    attempted, since real unsynchronised data is byte-stuffed and would
+ *    otherwise be misread as literal frame content), compressed/encrypted
+ *    frames, UTF-16 TXXX encodings (bytes 1/2). Frames using the latter two
+ *    are skipped, not crashed on.
  *  - **Anything else** (unrecognized magic, truncated/malformed structure
  *    anywhere after a valid magic) -> `null`. A recognized container that
  *    parses successfully but has no RG comments/frames present ->
@@ -128,6 +133,13 @@ object ReplayGainTags {
         if (bytes.size < 10) return ReplayGainInfo(null, null)
         val majorVersion = bytes[3].toInt() and 0xFF
         val flags = bytes[5].toInt() and 0xFF
+        // Unsynchronisation is explicitly out of scope (class KDoc): bail
+        // before attempting to parse, rather than misreading byte-stuffed
+        // frame data as literal content (final-review fix round, item 11a --
+        // this flag was previously undocumented-but-unchecked, so a real
+        // unsynchronised file could silently produce a wrong gain instead of
+        // the honest "couldn't parse" null).
+        if ((flags and 0x80) != 0) return ReplayGainInfo(null, null)
         val hasExtendedHeader = (flags and 0x40) != 0
         val tagSize = syncsafeInt(bytes, 6) ?: return ReplayGainInfo(null, null)
         var offset = 10
@@ -137,14 +149,25 @@ object ReplayGainTags {
             // Extended header size is syncsafe in v2.4, plain big-endian in
             // v2.3; we don't need its content, just its width to skip past it.
             val extSize = if (majorVersion >= 4) syncsafeInt(bytes, offset) else beInt(bytes, offset)
-            // Subtraction-based bound (not `offset + extSize > tagEnd`): v2.3's
-            // plain big-endian extSize is a genuinely unbounded 32-bit field
-            // (v2.4's syncsafe form is capped at 28 bits and can't reach this),
-            // so a crafted value near Int.MAX_VALUE would overflow an
-            // addition-based check to a negative sum that wrongly passes it
-            // (fix round, review of commit 73bd755, Important #1).
-            if (extSize != null && extSize >= 0 && extSize <= tagEnd - offset) {
-                offset += extSize.coerceAtLeast(4)
+            if (majorVersion >= 4) {
+                // v2.4: the size field is self-inclusive (per spec, it covers
+                // the whole extended header including these 4 bytes), so
+                // extSize alone is the full width to skip.
+                if (extSize != null && extSize >= 0 && extSize <= tagEnd - offset) {
+                    offset += extSize.coerceAtLeast(4)
+                }
+            } else {
+                // v2.3: the size field EXCLUDES itself ("currently either six
+                // or ten bytes, excludes itself" -- ID3v2.3 spec), so the
+                // total width to skip is the 4-byte size field PLUS extSize.
+                // Previously this branch used the same `offset += extSize`
+                // as v2.4, landing 4 bytes short -- inside the extended
+                // header's own content, which the frame-scan loop then
+                // misread as end-of-tag padding (final-review fix round,
+                // Important #2).
+                if (extSize != null && extSize >= 0 && extSize <= tagEnd - offset - 4) {
+                    offset += 4 + extSize
+                }
             }
         }
 

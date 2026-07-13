@@ -133,7 +133,16 @@ class ParametricEqProcessor : BaseAudioProcessor() {
         preampGain = 10.0.pow(s.preampDb / 20.0).toFloat()
         // Skip filters at/above Nyquist — an AutoEq 10 kHz shelf is fine at
         // 44.1 kHz, but a 16 kHz graphic band is not representable at 24 kHz.
-        filters = s.filters.filter { it.freqHz < sampleRate / 2.0 }.map { spec ->
+        // Skip freqHz<=0 and q<=0 too: Q=0 makes Biquad.peaking's alpha
+        // divide by zero (sin(w0)/(2*0)), which cascades into an
+        // Infinity/Infinity division inside the coefficient formulas and
+        // yields NaN coefficients that corrupt every sample forever -- the
+        // biquad's z1/z2 state never recovers from a NaN once it's in
+        // (final-review fix round, Important #1). AutoEqParser now rejects
+        // these values at import time too (see its own validation), so this
+        // is belt-and-suspenders for any EqState built another way (the
+        // 10-band graphic UI, direct API use, ...), not just imports.
+        filters = s.filters.filter { it.freqHz > 0 && it.freqHz < sampleRate / 2.0 && it.q > 0 }.map { spec ->
             when (spec.type) {
                 FilterType.PEAKING -> Biquad.peaking(sampleRate, spec.freqHz, spec.q, spec.gainDb, channelCount)
                 FilterType.LOW_SHELF -> Biquad.lowShelf(sampleRate, spec.freqHz, spec.q, spec.gainDb, channelCount)

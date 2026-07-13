@@ -108,7 +108,15 @@ class LimiterProcessor : BaseAudioProcessor() {
             return
         }
 
-        val releaseCoef = exp(-1.0 / (s.releaseMs / 1000.0 * sampleRate))
+        // coerceAtLeast(1.0): a negative releaseMs would flip the sign
+        // inside exp(), producing releaseCoef > 1.0 -- (1 - releaseCoef)
+        // then goes negative, moving gain AWAY from desiredGain instead of
+        // toward it, diverging without bound over the life of the stream
+        // (gain itself is never clamped, only the output sample is).
+        // Coercing at the point of use treats any non-positive releaseMs as
+        // the fastest legal release (1ms) rather than diverging (final-
+        // review fix round, Minor #5).
+        val releaseCoef = exp(-1.0 / (s.releaseMs.coerceAtLeast(1.0) / 1000.0 * sampleRate))
         val frameCount = sampleCount / channelCount
         var f = 0
         while (f < frameCount) {

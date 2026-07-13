@@ -4,6 +4,7 @@ import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor.AudioFormat
 import androidx.media3.common.audio.AudioProcessor.UnhandledAudioFormatException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -120,5 +121,41 @@ class ParametricEqProcessorTest {
             "Expected at least one sample to exceed 1.0f (chain headroom, no mid-chain clamp): $samples",
             samples.any { it > 1.0f },
         )
+    }
+
+    @Test
+    fun filterWithNonPositiveQIsSkippedNotAppliedAsNaN() {
+        // Q=0 makes Biquad.peaking's alpha = sin(w0)/(2*0) divide by zero,
+        // producing Infinity; that then collides into an Infinity/Infinity
+        // division inside the coefficient formulas, yielding NaN
+        // coefficients that would corrupt every sample forever (the biquad's
+        // z1/z2 state never recovers from a NaN once it's in). Verified in
+        // Python that Q=0 alone (freq valid, nonzero gain) produces NaN
+        // b0/b2/a2 coefficients and a NaN first output sample, before writing
+        // this assertion (final-review fix round, Important #1). An imported
+        // AutoEq profile with a "Q 0" line would otherwise leave this NaN
+        // state persisted across restarts as a "successful" import.
+        val processor = ParametricEqProcessor()
+        processor.updateState(
+            EqState(
+                enabled = true,
+                filters = listOf(FilterSpec(FilterType.PEAKING, freqHz = 1_000.0, q = 0.0, gainDb = 6.0)),
+            ),
+        )
+        processor.configure(pcm16Format(channels = 1))
+        processor.flush()
+        val input = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder())
+        input.putShort(10_000).putShort(-10_000)
+        input.flip()
+        processor.queueInput(input)
+        val output = processor.output.order(ByteOrder.nativeOrder())
+        val a = output.float
+        val b = output.float
+        assertFalse("expected non-NaN output, got $a", a.isNaN())
+        assertFalse("expected non-NaN output, got $b", b.isNaN())
+        // The invalid filter is skipped entirely, not just "not NaN" --
+        // output equals the plain /32768f promotion, same as no filters at all.
+        assertEquals(10_000 / 32768f, a, 1e-6f)
+        assertEquals(-10_000 / 32768f, b, 1e-6f)
     }
 }

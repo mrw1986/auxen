@@ -94,8 +94,14 @@ class BassBoostProcessor : BaseAudioProcessor() {
         val generation = stateGeneration
         if (generation == builtGeneration || sampleRate <= 0) return
         val s = state
-        // Skip below Nyquist the same way ParametricEqProcessor does.
-        filter = if (s.freqHz < sampleRate / 2.0) {
+        // Skip below Nyquist the same way ParametricEqProcessor does. Also
+        // requires freqHz > 0 for defensive consistency with that same
+        // predicate (final-review fix round, Important #1) -- unlike
+        // ParametricEqProcessor's Q=0 case, freqHz<=0 does NOT itself
+        // produce NaN here (Q is a fixed constant, never user-supplied, so
+        // there's no divide-by-zero path), it just builds a degenerate
+        // shelf that should read as "no filter" instead.
+        filter = if (s.freqHz > 0 && s.freqHz < sampleRate / 2.0) {
             Biquad.lowShelf(sampleRate, s.freqHz, BASS_BOOST_Q, s.gainDb, channelCount)
         } else {
             null

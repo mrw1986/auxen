@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
-private val Context.eqDataStore by preferencesDataStore(name = "equalizer")
+internal val Context.eqDataStore by preferencesDataStore(name = "equalizer")
 
 /**
  * Single source of truth for EQ settings, shared by the UI and the playback
@@ -25,7 +25,7 @@ private val Context.eqDataStore by preferencesDataStore(name = "equalizer")
  */
 @UnstableApi
 object EqController {
-    private val KEY_STATE = stringPreferencesKey("eq_state")
+    internal val KEY_STATE = stringPreferencesKey("eq_state")
     private val json = Json { ignoreUnknownKeys = true }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
