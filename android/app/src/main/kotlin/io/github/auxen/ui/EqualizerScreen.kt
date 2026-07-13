@@ -43,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,9 +77,17 @@ private const val KEY_AUTOEQ_PROFILE = "autoeq_profile"
 private const val KEY_AUTOEQ_CUSTOM_TEXT = "autoeq_custom_text"
 
 /**
- * Equalizer screen: enable toggle, the desktop app's 10-band graphic EQ with
- * its presets, and a Wavelet-style AutoEq profile picker (search the bundled
- * 8,850-headphone database, plus a file-import path for custom profiles).
+ * Equalizer screen: the DSP suite's home, one expandable [FxSectionCard] per
+ * effect, each independently toggleable and expandable (DSP-b Task 3, "no
+ * master coupling"). The first section is the desktop app's 10-band graphic
+ * EQ with its presets and a Wavelet-style AutoEq profile picker (search the
+ * bundled 8,850-headphone database, plus a file-import path for custom
+ * profiles) -- its content is inline here rather than an extracted
+ * composable, since it's the one section with no reusable shape shared by
+ * anything else. The remaining six sections (bass boost, balance, limiter,
+ * reverb, virtualizer, volume normalization) are rendered from
+ * `io.github.auxen.ui.components.FxSections`, each wired to its own
+ * independent [io.github.auxen.dsp.AudioFxController] state flow.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @UnstableApi
@@ -96,13 +105,17 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
     // enable switch (docs/plans/2026-07-13-android-dsp-b-ui.md, Task 3: "no
     // master coupling"). Equalizer starts expanded since it's the primary
     // feature on this screen; the newer effects start collapsed.
-    var eqExpanded by remember { mutableStateOf(true) }
-    var bassBoostExpanded by remember { mutableStateOf(false) }
-    var balanceExpanded by remember { mutableStateOf(false) }
-    var limiterExpanded by remember { mutableStateOf(false) }
-    var reverbExpanded by remember { mutableStateOf(false) }
-    var virtualizerExpanded by remember { mutableStateOf(false) }
-    var volumeNormalizationExpanded by remember { mutableStateOf(false) }
+    // rememberSaveable (not plain remember): survives navigating away from
+    // this screen and back, not just recomposition -- a user who expanded
+    // Limiter to check a setting shouldn't have it collapse again just from
+    // switching tabs (final review round, Minor #11).
+    var eqExpanded by rememberSaveable { mutableStateOf(true) }
+    var bassBoostExpanded by rememberSaveable { mutableStateOf(false) }
+    var balanceExpanded by rememberSaveable { mutableStateOf(false) }
+    var limiterExpanded by rememberSaveable { mutableStateOf(false) }
+    var reverbExpanded by rememberSaveable { mutableStateOf(false) }
+    var virtualizerExpanded by rememberSaveable { mutableStateOf(false) }
+    var volumeNormalizationExpanded by rememberSaveable { mutableStateOf(false) }
 
     val bassBoostState by AudioFxController.bassBoostState.collectAsState()
     val balanceState by AudioFxController.balanceState.collectAsState()

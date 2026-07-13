@@ -116,7 +116,17 @@ class PlaybackService : MediaSessionService() {
     // processors above belong to (see ParametricEqProcessor's KDoc). Torn
     // down and rebuilt whenever the session id changes; see
     // rebuildSessionEffects.
+    //
+    // @Volatile: written from onAudioSessionIdChanged (main thread, via
+    // rebuildSessionEffects), but read inside applyReverb/applyVirtualizer --
+    // which AudioFxController's attachReverb/attachVirtualizer can invoke
+    // from ITS OWN IO-dispatched scope during DataStore hydration
+    // (FxSlot.restore(), called from initialize()), not just from the main
+    // thread. A hydration-time read racing a session rebuild without this
+    // could observe a torn/stale reference (final review round, Important #4).
+    @Volatile
     private var reverb: PresetReverb? = null
+    @Volatile
     private var virtualizer: Virtualizer? = null
 
     /**
@@ -204,7 +214,26 @@ class PlaybackService : MediaSessionService() {
         // continuously-collected Flow).
         serviceScope.launch {
             SleepTimerController.state.collectLatest { timerState ->
-                val remaining = timerState.remainingMillis() ?: return@collectLatest
+                val remaining = timerState.remainingMillis()
+                if (remaining == null) {
+                    // Unarmed OR in the pendingTrackEnd phase -- remainingMillis()
+                    // returns null for both (see its KDoc), so pendingTrackEnd
+                    // is the only thing distinguishing them here. Clear the
+                    // flag ONLY for the true-unarmed case: a user-initiated
+                    // Cancel during pendingTrackEnd calls
+                    // SleepTimerController.cancel(), which resets to full
+                    // defaults and lands HERE -- without this, Cancel would
+                    // stop the sheet from showing anything pending while the
+                    // pause still silently fired at the next transition
+                    // (final review round, Important #3). The pendingTrackEnd
+                    // transition itself (markPendingTrackEnd(), below) ALSO
+                    // re-enters this same branch on its own emission --
+                    // pendingTrackEnd=true there correctly skips the clear,
+                    // since the flag it would be clearing is the one this
+                    // very coroutine just set two lines below.
+                    if (!timerState.pendingTrackEnd) pendingSleepTimerPause = false
+                    return@collectLatest
+                }
                 // A fresh arm -- including a re-arm while a PREVIOUS timer's
                 // finishTrack pause is still pending on the current track --
                 // supersedes any leftover pendingSleepTimerPause from that
@@ -218,10 +247,17 @@ class PlaybackService : MediaSessionService() {
                 if (remaining > 0) delay(remaining)
                 if (timerState.finishTrack) {
                     pendingSleepTimerPause = true
+                    // Waits for the current track to end instead of
+                    // cancelling outright, so the sheet keeps showing an
+                    // active, cancelable state (final review round,
+                    // Important #3) -- consumed at the next
+                    // onMediaItemTransition (checkSleepTimerPause) or at
+                    // STATE_ENDED, both of which call cancel() themselves.
+                    SleepTimerController.markPendingTrackEnd()
                 } else {
                     withContext(Dispatchers.Main) { mediaSession?.player?.pause() }
+                    SleepTimerController.cancel()
                 }
-                SleepTimerController.cancel()
             }
         }
 
@@ -245,7 +281,17 @@ class PlaybackService : MediaSessionService() {
                     // surviving into an unrelated new queue -- see that
                     // field's KDoc (fix round, review of commit 60c7699,
                     // finding 1).
-                    pendingSleepTimerPause = false
+                    if (pendingSleepTimerPause) {
+                        pendingSleepTimerPause = false
+                        // The queue this pause was waiting on is gone --
+                        // also disarm the controller so the sheet doesn't
+                        // keep showing "Pausing after this track" for a
+                        // pause that will now never happen (same belt-and-
+                        // suspenders reasoning as onPlaybackStateChanged's
+                        // STATE_ENDED handler below, extended to cover the
+                        // pendingTrackEnd phase's own UI staleness).
+                        SleepTimerController.cancel()
+                    }
                 }
             }
 

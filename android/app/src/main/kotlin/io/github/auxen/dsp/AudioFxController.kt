@@ -18,7 +18,7 @@ import kotlinx.serialization.json.Json
 
 /**
  * A single DataStore backing every audio effect, but with one string
- * preference key per effect (see [KEY_BASS_BOOST] … [KEY_REPLAY_GAIN]) so that
+ * preference key per effect (see [KEY_BASS_BOOST] … [KEY_VIRTUALIZER]) so that
  * updating one effect never rewrites another, and a corrupt value for one
  * effect falls back to that effect's defaults without touching the rest.
  */
@@ -65,8 +65,8 @@ object AudioFxController {
 
     /**
      * Per-effect state holder: owns the [MutableStateFlow], its persistence
-     * key/serializer, and the one applier attached via `attachX`. Keeping the
-     * four effects behind one small type keeps persistence and dispatch
+     * key/serializer, and the one applier attached via `attachX`. Keeping all
+     * six effects behind one small type keeps persistence and dispatch
      * identical (and independent) across effects.
      */
     private class FxSlot<T>(

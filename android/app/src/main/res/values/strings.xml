@@ -53,4 +53,14 @@
     <string name="fx_volume_normalization_fallback_label">Fallback gain</string>
 
     <string name="fx_equalizer_title">Equalizer</string>
+
+    <!-- DSP-b final review: sleep timer sheet copy. -->
+    <string name="sleep_timer_title">Sleep timer</string>
+    <string name="sleep_timer_pause_after">Pause playback after</string>
+    <string name="sleep_timer_preset_minutes">%1$dm</string>
+    <string name="sleep_timer_finish_last_track">Finish last track</string>
+    <string name="sleep_timer_pausing_in">Pausing in %1$s</string>
+    <string name="sleep_timer_pausing_in_will_finish">Pausing in %1$s — will finish the playing track</string>
+    <string name="sleep_timer_pausing_after_track">Pausing after this track</string>
+    <string name="sleep_timer_cancel">Cancel timer</string>
 </resources>

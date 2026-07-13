@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +39,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.auxen.R
+import io.github.auxen.dsp.AudioFxController
 import io.github.auxen.dsp.BalanceState
 import io.github.auxen.dsp.BassBoostState
 import io.github.auxen.dsp.LimiterState
@@ -58,8 +60,21 @@ import kotlinx.coroutines.launch
  * standing requirement that every effect is individually toggleable with no
  * coupling between sections (docs/plans/2026-07-13-android-dsp-b-ui.md, Task
  * 3). Callers own the live [io.github.auxen.dsp.AudioFxController] state and
- * pass it in, matching the stateless-content-composable pattern already used
- * by [TrackActionSheetContent] and `AutoEqPickerResults`.
+ * pass it in for RENDERING (readouts, switch/slider positions), matching the
+ * stateless-content-composable pattern already used by
+ * [TrackActionSheetContent] and `AutoEqPickerResults`.
+ *
+ * Every commit lambda (a slider's `onCommit`, a switch's `onEnabledChange`,
+ * a dropdown/segmented-button selection) merges its field against
+ * `AudioFxController.xState.value` read FRESH at the moment it fires, not
+ * the `state` parameter closed over whenever this composable last
+ * recomposed. Two controls in the SAME section can commit independently and
+ * close together (e.g. dragging a slider while also flipping the enable
+ * switch) -- if the slower one's `state.copy(...)` used a snapshot from
+ * before the faster one's write landed, it would silently revert that
+ * write. Reading the controller directly at commit time makes this
+ * impossible regardless of recomposition timing (final review round,
+ * Important #2).
  */
 
 /**
@@ -140,6 +155,16 @@ private fun rememberDebouncedSlider(
     onCommit: (Float) -> Unit,
 ): DebouncedSliderState {
     val scope = rememberCoroutineScope()
+    // DisposableEffect(Unit) below only ever RUNS its body once (the key
+    // never changes), so the onDispose lambda it registers is permanently
+    // the one closed over at first composition -- a plain captured
+    // `onCommit` parameter would stay frozen at whatever was passed in on
+    // THAT first call, even though every later recomposition passes a fresh
+    // onCommit closure. rememberUpdatedState keeps a stable holder whose
+    // `.value` is refreshed every recomposition (via an internal
+    // SideEffect), so the flush below always invokes the CURRENT onCommit,
+    // not composition #1's (final review round, Important #2).
+    val currentOnCommit by rememberUpdatedState(onCommit)
     // Re-seeds from the upstream value only when IT changes (e.g. after a
     // commit round-trips through AudioFxController) -- not on every
     // recomposition, so mid-drag frames keep tracking the local drag instead
@@ -160,7 +185,7 @@ private fun rememberDebouncedSlider(
         pendingJob?.cancel()
         pendingJob = scope.launch {
             delay(debounceMillis)
-            onCommit(newValue)
+            currentOnCommit(newValue)
             hasUncommittedChange = false
         }
     }
@@ -176,7 +201,7 @@ private fun rememberDebouncedSlider(
         onDispose {
             if (hasUncommittedChange) {
                 pendingJob?.cancel()
-                onCommit(localValue)
+                currentOnCommit(localValue)
                 hasUncommittedChange = false
             }
         }
@@ -233,7 +258,7 @@ fun LimiterSection(
         title = stringResource(R.string.fx_limiter_title),
         subtitle = stringResource(R.string.fx_limiter_subtitle),
         enabled = state.enabled,
-        onEnabledChange = { onStateChange(state.copy(enabled = it)) },
+        onEnabledChange = { onStateChange(AudioFxController.limiterState.value.copy(enabled = it)) },
         expanded = expanded,
         onExpandedChange = onExpandedChange,
         modifier = modifier,
@@ -243,14 +268,14 @@ fun LimiterSection(
             committedValue = state.thresholdDb,
             valueRange = -12f..0f,
             formatValue = { "%.1f dB".format(it) },
-            onCommit = { onStateChange(state.copy(thresholdDb = it)) },
+            onCommit = { onStateChange(AudioFxController.limiterState.value.copy(thresholdDb = it)) },
         )
         LabeledSlider(
             label = stringResource(R.string.fx_limiter_release_label),
             committedValue = state.releaseMs,
             valueRange = 40f..500f,
             formatValue = { "%.0f ms".format(it) },
-            onCommit = { onStateChange(state.copy(releaseMs = it)) },
+            onCommit = { onStateChange(AudioFxController.limiterState.value.copy(releaseMs = it)) },
         )
     }
 }
@@ -283,7 +308,7 @@ fun ReverbSection(
         title = stringResource(R.string.fx_reverb_title),
         subtitle = stringResource(R.string.fx_reverb_subtitle),
         enabled = state.enabled,
-        onEnabledChange = { onStateChange(state.copy(enabled = it)) },
+        onEnabledChange = { onStateChange(AudioFxController.reverbState.value.copy(enabled = it)) },
         expanded = expanded,
         onExpandedChange = onExpandedChange,
         modifier = modifier,
@@ -297,7 +322,7 @@ fun ReverbSection(
                     DropdownMenuItem(
                         text = { Text(stringResource(labelRes)) },
                         onClick = {
-                            onStateChange(state.copy(preset = index))
+                            onStateChange(AudioFxController.reverbState.value.copy(preset = index))
                             menuOpen = false
                         },
                     )
@@ -353,7 +378,7 @@ fun BassBoostSection(
         title = stringResource(R.string.fx_bass_boost_title),
         subtitle = stringResource(R.string.fx_bass_boost_subtitle),
         enabled = state.enabled,
-        onEnabledChange = { onStateChange(state.copy(enabled = it)) },
+        onEnabledChange = { onStateChange(AudioFxController.bassBoostState.value.copy(enabled = it)) },
         expanded = expanded,
         onExpandedChange = onExpandedChange,
         modifier = modifier,
@@ -363,14 +388,14 @@ fun BassBoostSection(
             committedValue = state.freqHz,
             valueRange = 40f..160f,
             formatValue = { "%.0f Hz".format(it) },
-            onCommit = { onStateChange(state.copy(freqHz = it)) },
+            onCommit = { onStateChange(AudioFxController.bassBoostState.value.copy(freqHz = it)) },
         )
         LabeledSlider(
             label = stringResource(R.string.fx_bass_boost_gain_label),
             committedValue = state.gainDb,
             valueRange = 0f..12f,
             formatValue = { "%.1f dB".format(it) },
-            onCommit = { onStateChange(state.copy(gainDb = it)) },
+            onCommit = { onStateChange(AudioFxController.bassBoostState.value.copy(gainDb = it)) },
         )
     }
 }
@@ -394,12 +419,14 @@ fun BalanceSection(
         title = stringResource(R.string.fx_balance_title),
         subtitle = stringResource(R.string.fx_balance_subtitle),
         enabled = state.enabled,
-        onEnabledChange = { onStateChange(state.copy(enabled = it)) },
+        onEnabledChange = { onStateChange(AudioFxController.balanceState.value.copy(enabled = it)) },
         expanded = expanded,
         onExpandedChange = onExpandedChange,
         modifier = modifier,
     ) {
-        val slider = rememberDebouncedSlider(state.balance) { onStateChange(state.copy(balance = it)) }
+        val slider = rememberDebouncedSlider(state.balance) {
+            onStateChange(AudioFxController.balanceState.value.copy(balance = it))
+        }
         val readout = balanceReadout(slider.value)
         Text(
             text = when (readout) {
@@ -446,7 +473,7 @@ fun VirtualizerSection(
         title = stringResource(R.string.fx_virtualizer_title),
         subtitle = stringResource(R.string.fx_virtualizer_subtitle),
         enabled = state.enabled,
-        onEnabledChange = { onStateChange(state.copy(enabled = it)) },
+        onEnabledChange = { onStateChange(AudioFxController.virtualizerState.value.copy(enabled = it)) },
         expanded = expanded,
         onExpandedChange = onExpandedChange,
         modifier = modifier,
@@ -456,7 +483,9 @@ fun VirtualizerSection(
             committedValue = state.strength / 10.0,
             valueRange = 0f..100f,
             formatValue = { "${it.roundToInt()}%" },
-            onCommit = { onStateChange(state.copy(strength = (it * 10).roundToInt())) },
+            onCommit = {
+                onStateChange(AudioFxController.virtualizerState.value.copy(strength = (it * 10).roundToInt()))
+            },
         )
     }
 }
@@ -478,7 +507,7 @@ fun VolumeNormalizationSection(
         title = stringResource(R.string.fx_volume_normalization_title),
         subtitle = stringResource(R.string.fx_volume_normalization_subtitle),
         enabled = state.enabled,
-        onEnabledChange = { onStateChange(state.copy(enabled = it)) },
+        onEnabledChange = { onStateChange(AudioFxController.replayGainState.value.copy(enabled = it)) },
         expanded = expanded,
         onExpandedChange = onExpandedChange,
         modifier = modifier,
@@ -486,12 +515,12 @@ fun VolumeNormalizationSection(
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             SegmentedButton(
                 selected = !state.albumMode,
-                onClick = { onStateChange(state.copy(albumMode = false)) },
+                onClick = { onStateChange(AudioFxController.replayGainState.value.copy(albumMode = false)) },
                 shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
             ) { Text(stringResource(R.string.fx_volume_normalization_mode_track)) }
             SegmentedButton(
                 selected = state.albumMode,
-                onClick = { onStateChange(state.copy(albumMode = true)) },
+                onClick = { onStateChange(AudioFxController.replayGainState.value.copy(albumMode = true)) },
                 shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
             ) { Text(stringResource(R.string.fx_volume_normalization_mode_album)) }
         }
@@ -500,14 +529,14 @@ fun VolumeNormalizationSection(
             committedValue = state.preampDb,
             valueRange = -12f..12f,
             formatValue = { "%+.1f dB".format(it) },
-            onCommit = { onStateChange(state.copy(preampDb = it)) },
+            onCommit = { onStateChange(AudioFxController.replayGainState.value.copy(preampDb = it)) },
         )
         LabeledSlider(
             label = stringResource(R.string.fx_volume_normalization_fallback_label),
             committedValue = state.fallbackDb,
             valueRange = -12f..0f,
             formatValue = { "%.1f dB".format(it) },
-            onCommit = { onStateChange(state.copy(fallbackDb = it)) },
+            onCommit = { onStateChange(AudioFxController.replayGainState.value.copy(fallbackDb = it)) },
         )
     }
 }

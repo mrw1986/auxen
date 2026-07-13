@@ -5,9 +5,12 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performSemanticsAction
+import io.github.auxen.dsp.AudioFxController
 import io.github.auxen.dsp.BassBoostState
 import io.github.auxen.ui.theme.AuxenTheme
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,6 +48,47 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class FxSectionsDebounceFlushTest {
     @get:Rule val compose = createComposeRule()
+
+    // BassBoostSection's onCommit now merges against the LIVE
+    // AudioFxController.bassBoostState.value (final review round, Important
+    // #2) -- reset it so a prior test's leftover state can't affect these.
+    @Before
+    fun setUp() {
+        AudioFxController.resetForTest()
+    }
+
+    @After
+    fun tearDown() {
+        AudioFxController.resetForTest()
+    }
+
+    @Test
+    fun sliderDoesNotCommitBeforeTheDebounceWindowElapses() {
+        // Pins the window itself, not just "eventually commits" -- final
+        // review round, Minor #7: removing the delay(debounceMillis) call
+        // entirely would still pass sliderCommitsNormallyAfterTheDebounceSettles
+        // (advanceTimeBy is a no-op if there's nothing to wait for), so
+        // that test alone doesn't prove the debounce is actually gating
+        // anything. This one advances well short of the 50ms window and
+        // requires the commit to still be un-fired.
+        var committed: BassBoostState? = null
+        compose.setContent {
+            AuxenTheme {
+                BassBoostSection(
+                    state = BassBoostState(),
+                    onStateChange = { committed = it },
+                    expanded = true,
+                    onExpandedChange = {},
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription("Frequency")
+            .performSemanticsAction(SemanticsActions.SetProgress) { it(120f) }
+        compose.mainClock.advanceTimeBy(20L)
+
+        assertEquals(null, committed)
+    }
 
     @Test
     fun sliderCommitsNormallyAfterTheDebounceSettles() {

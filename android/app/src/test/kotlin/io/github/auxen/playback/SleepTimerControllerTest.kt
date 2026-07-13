@@ -58,6 +58,48 @@ class SleepTimerControllerTest {
         assertTrue(state.finishTrack)
     }
 
+    // -- pendingTrackEnd phase: the countdown has expired with finishTrack
+    // armed, and the service is now waiting for the CURRENT track to end
+    // before it actually pauses (final review round, Important #3) --
+
+    @Test
+    fun `markPendingTrackEnd transitions from counting down to waiting for track end`() {
+        SleepTimerController.clock = { 0L }
+        SleepTimerController.start(minutes = 15, finishTrack = true)
+        SleepTimerController.markPendingTrackEnd()
+        val state = SleepTimerController.state.value
+        assertNull(state.endElapsedRealtime)
+        assertTrue(state.finishTrack)
+        assertTrue(state.pendingTrackEnd)
+    }
+
+    @Test
+    fun `markPendingTrackEnd is a no-op when unarmed`() {
+        // Guards against a stray/late call (e.g. a race with cancel()) doing
+        // anything to an already-unarmed state.
+        SleepTimerController.markPendingTrackEnd()
+        assertEquals(SleepTimerState(), SleepTimerController.state.value)
+    }
+
+    @Test
+    fun `cancel disarms even from the pendingTrackEnd phase`() {
+        SleepTimerController.clock = { 0L }
+        SleepTimerController.start(minutes = 15, finishTrack = true)
+        SleepTimerController.markPendingTrackEnd()
+        SleepTimerController.cancel()
+        assertEquals(SleepTimerState(), SleepTimerController.state.value)
+    }
+
+    @Test
+    fun `isArmed is true while counting down and while pending track end, false otherwise`() {
+        assertEquals(false, SleepTimerState().isArmed)
+        assertEquals(true, SleepTimerState(endElapsedRealtime = 100_000L).isArmed)
+        assertEquals(
+            true,
+            SleepTimerState(endElapsedRealtime = null, finishTrack = true, pendingTrackEnd = true).isArmed,
+        )
+    }
+
     // -- remainingMillis extension: countdown math, fully clock-injected,
     // no SystemClock/Date.now anywhere in this test class --
 
