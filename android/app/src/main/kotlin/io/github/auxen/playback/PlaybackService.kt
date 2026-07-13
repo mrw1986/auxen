@@ -30,6 +30,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import io.github.auxen.Graph
 import io.github.auxen.R
+import io.github.auxen.dsp.EncodingRestorerProcessor
 import io.github.auxen.dsp.EqController
 import io.github.auxen.dsp.ParametricEqProcessor
 import io.github.auxen.model.Track
@@ -56,10 +57,14 @@ import kotlinx.coroutines.withContext
  * The audiophile part is in [EqRenderersFactory]: the EQ AudioProcessor is
  * installed directly into the player's audio sink, so the DSP chain runs
  * before the audio ever leaves the app. The sink still requests float output
- * (so Hi-Res sources aren't truncated at the AudioTrack), but the EQ
- * processor emits the same PCM encoding it receives — DefaultAudioSink's
- * built-in trailing processors are 16-bit-only, so float mid-chain would
- * break sink configuration (see [ParametricEqProcessor]).
+ * (so Hi-Res sources aren't truncated at the AudioTrack), and the EQ now
+ * always emits unclamped float — chain-level headroom, not per-processor
+ * clamping (see [ParametricEqProcessor]). [EncodingRestorerProcessor] sits
+ * last in the array and converts back to 16-bit, because DefaultAudioSink's
+ * built-in trailing processors are 16-bit-only and float mid-chain would
+ * break sink configuration. This is an interim two-processor array; Task 6
+ * (pipeline integration) replaces it with the full five-processor chain
+ * (ReplayGain, BassBoost, Balance, Limiter) plus this same restorer tail.
  */
 @UnstableApi
 class PlaybackService : MediaSessionService() {
@@ -368,11 +373,13 @@ private class EqRenderersFactory(
     ): AudioSink = DefaultAudioSink.Builder(context)
         // Request float output so Hi-Res sources aren't truncated to 16-bit at
         // the AudioTrack; devices without float support fall back automatically.
-        // The EQ processor still emits the encoding it receives (DefaultAudioSink's
-        // built-in trailing processors are 16-bit-only), and Hi-Res float content
-        // currently bypasses the EQ chain at the sink — a tracked follow-up.
+        // eqProcessor now always emits unclamped float (chain headroom); the
+        // restorer converts back to 16-bit last, since DefaultAudioSink's
+        // built-in trailing processors are 16-bit-only. Interim two-processor
+        // array — Task 6 inserts BassBoost/Balance/Limiter/ReplayGain between
+        // these two.
         .setEnableFloatOutput(true)
         .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-        .setAudioProcessors(arrayOf(eqProcessor))
+        .setAudioProcessors(arrayOf(eqProcessor, EncodingRestorerProcessor()))
         .build()
 }
