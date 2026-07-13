@@ -36,18 +36,28 @@ the mercy of the OEM's effect implementation and processes post-mix. Auxen
 does correction **inside** the player instead:
 
 ```
-ExoPlayer decoder → ParametricEqProcessor (float64 biquads, float32 samples)
-                  → DefaultAudioSink (float output enabled) → AudioTrack
+ExoPlayer decoder → ReplayGainProcessor → ParametricEqProcessor → BassBoostProcessor
+                  → BalanceProcessor → LimiterProcessor → EncodingRestorerProcessor
+                  → DefaultAudioSink → AudioTrack
 ```
+
+(Updated by the DSP-a engine batch, 2026-07-13. Mid-chain samples are always
+float32 with unclamped headroom; `EncodingRestorerProcessor` at the tail owns
+the conversion back to the source's 16-bit encoding for the sink's built-ins,
+and the limiter — on by default — is the chain's only clamping stage. Each
+effect has its own independently persisted enable flag via `AudioFxController`;
+per-track ReplayGain values come from a zero-dependency local tag parser
+(FLAC VorbisComment + ID3v2.3/2.4 TXXX) and Tidal's playbackinfo fields,
+routed on media transitions.)
 
 - `dsp/Biquad.kt` — RBJ cookbook peaking/low-shelf/high-shelf, transposed
   direct form II, double-precision state (verified against the analytic
   transfer function: response at fc matches requested gain to <0.001 dB).
 - `dsp/ParametricEqProcessor.kt` — Media3 `AudioProcessor` installed via a
-  custom `RenderersFactory`. Filters in double precision but emits the same
-  PCM encoding it receives — `DefaultAudioSink` appends 16-bit-only processors
-  after ours, so float output there breaks sink configuration; Hi-Res float
-  currently bypasses the EQ chain at the sink (a tracked follow-up).
+  custom `RenderersFactory`. Filters in double precision and always emits
+  float32 for chain headroom; sink compatibility is the restorer's job.
+  Hi-Res float sources still bypass the EQ chain at the sink (a tracked
+  follow-up).
 - `dsp/Eq.kt` — two front-ends over the same engine:
   - the desktop app's 10-band graphic EQ (same ISO bands, same ten presets),
     with automatic preamp = −(largest boost) to prevent clipping;

@@ -1,5 +1,13 @@
 # Auxen Android — DSP Suite (a): Engine Implementation Plan
 
+> **STATUS: SHIPPED (Tasks 1–7 + fix rounds; commits 34f709a..9d91b84).** Retained as record. Review-driven deviations that WON over the text below:
+> - The knee worked example ("<0.5 dB reduction at threshold") is wrong at the default kneeDb=6 — reduction at threshold is exactly kneeDb/8 (0.75 dB). Formula itself unchanged.
+> - The ReplayGain gain formula as literally written has a misplaced paren; shipped code uses the standard `10^((gain + preamp)/20)`.
+> - Task 3's "restorer inactive/pass-through" prose was resolved per the Interfaces contract: inactive for 16-bit input, active float→16-bit conversion for float input.
+> - Album↔track gain fallback is symmetric in both directions (plan only specified album→track).
+> - An interim `[eq, restorer]` wiring commit (c52403c) landed between Tasks 2 and 6 to keep every commit on the branch device-safe.
+> - Known bounded limitation (documented, real fix roadmapped): at gapless transitions, per-track RG gains land after the next track's buffered head — an unramped step, typically small (identical in album mode).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** The audio engine for the Wavelet-class effects chain: per-effect state with independent persistence, a float-through processor chain with headroom (bass boost, channel balance, soft-knee limiter, ReplayGain), and the pipeline wiring — leaving UI, platform effects (reverb/virtualizer), and the sleep timer to plan DSP-b.
