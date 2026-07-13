@@ -3,6 +3,8 @@ package io.github.auxen.playback
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.audiofx.PresetReverb
+import android.media.audiofx.Virtualizer
 import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -39,6 +41,8 @@ import io.github.auxen.dsp.EqController
 import io.github.auxen.dsp.LimiterProcessor
 import io.github.auxen.dsp.ParametricEqProcessor
 import io.github.auxen.dsp.ReplayGainProcessor
+import io.github.auxen.dsp.ReverbState
+import io.github.auxen.dsp.VirtualizerState
 import io.github.auxen.model.Track
 import io.github.auxen.provider.StreamInfo
 import io.github.auxen.ui.MainActivity
@@ -79,6 +83,11 @@ import kotlinx.coroutines.withContext
  * enable/disable flip from the UI reaches the live audio chain without a
  * service restart. [RgGainRouter] pushes ReplayGain's per-track tag values
  * into its processor on every media-item transition.
+ *
+ * Reverb and virtualizer are different: platform effects
+ * (`android.media.audiofx`), not in-process [AudioProcessor]s, so they
+ * attach to the sink's real audio session rather than the chain above. See
+ * `rebuildSessionEffects` (DSP-b Task 1).
  */
 @UnstableApi
 class PlaybackService : MediaSessionService() {
@@ -96,6 +105,14 @@ class PlaybackService : MediaSessionService() {
 
     private var preResolveJob: Job? = null
 
+    // Platform effects (android.media.audiofx), applied to the sink's real
+    // audio session -- NOT part of the in-process DSP chain the six
+    // processors above belong to (see ParametricEqProcessor's KDoc). Torn
+    // down and rebuilt whenever the session id changes; see
+    // rebuildSessionEffects.
+    private var reverb: PresetReverb? = null
+    private var virtualizer: Virtualizer? = null
+
     override fun onCreate() {
         super.onCreate()
 
@@ -110,6 +127,12 @@ class PlaybackService : MediaSessionService() {
         AudioFxController.attachBassBoost { state -> bassBoostProcessor.updateState(state) }
         AudioFxController.attachBalance { state -> balanceProcessor.updateState(state) }
         AudioFxController.attachLimiter { state -> limiterProcessor.updateState(state) }
+        // Platform effects (below the in-process chain): attach here so a
+        // settings change reaches whatever reverb/virtualizer instance
+        // currently exists, null-safely no-op'ing before the first one is
+        // built by rebuildSessionEffects (right after the player itself).
+        AudioFxController.attachReverb { state -> applyReverb(state) }
+        AudioFxController.attachVirtualizer { state -> applyVirtualizer(state) }
         val rgGainRouter = RgGainRouter(serviceScope, replayGainProcessor)
 
         val dataSourceFactory = ResolvingDataSource.Factory(
@@ -141,6 +164,19 @@ class PlaybackService : MediaSessionService() {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
 
+        // ExoPlayer assigns its audio session id synchronously in its own
+        // constructor (verified against the real 1.5.1 source:
+        // ExoPlayerImpl's constructor calls Util.generateAudioSessionIdV21
+        // and pushes it to the renderer directly, with NO Player.Listener
+        // dispatch at that point -- onAudioSessionIdChanged only fires from
+        // the explicit setAudioSessionId(int) setter, which this app never
+        // calls). So the id is already valid right here and platform
+        // effects can be built immediately, rather than waiting on a
+        // listener callback that would never fire in this app's flow. The
+        // onAudioSessionIdChanged handler below still covers any LATER
+        // legitimate change.
+        rebuildSessionEffects(player.audioSessionId)
+
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 pendingPlayMediaId = mediaItem?.mediaId
@@ -155,6 +191,10 @@ class PlaybackService : MediaSessionService() {
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) scheduleQueueSave(player)
+            }
+
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                rebuildSessionEffects(audioSessionId)
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -277,6 +317,49 @@ class PlaybackService : MediaSessionService() {
     }
 
     /**
+     * Tears down and rebuilds [reverb]/[virtualizer] for [sessionId]. Called
+     * once right after the player is built (its session id is already valid
+     * at that point -- see [onCreate]'s comment) and again from
+     * [Player.Listener.onAudioSessionIdChanged] for any later legitimate
+     * change.
+     *
+     * `runCatching` around construction: emulators and some devices lack
+     * effect implementations entirely (`PresetReverb`/`Virtualizer`'s
+     * constructors can throw), and an effect is never allowed to break
+     * playback -- a `null` instance just means [applyReverb]/[applyVirtualizer]
+     * no-op until the next successful rebuild (DSP-b Task 1).
+     */
+    private fun rebuildSessionEffects(sessionId: Int) {
+        runCatching { reverb?.release() }
+        runCatching { virtualizer?.release() }
+        reverb = null
+        virtualizer = null
+        if (sessionId == C.AUDIO_SESSION_ID_UNSET) return
+        reverb = runCatching { PresetReverb(0, sessionId) }.getOrNull()
+        virtualizer = runCatching { Virtualizer(0, sessionId) }.getOrNull()
+        applyReverb(AudioFxController.reverbState.value)
+        applyVirtualizer(AudioFxController.virtualizerState.value)
+    }
+
+    /** Null-safe: no-ops if [reverb] hasn't been built yet (or failed to build). */
+    private fun applyReverb(state: ReverbState) {
+        val r = reverb ?: return
+        runCatching {
+            r.enabled = state.enabled
+            r.preset = state.preset.toShort()
+        }
+    }
+
+    /** Null-safe: no-ops if [virtualizer] hasn't been built yet (or failed to build). */
+    private fun applyVirtualizer(state: VirtualizerState) {
+        val v = virtualizer ?: return
+        runCatching {
+            v.enabled = state.enabled
+            v.setStrength(state.strength.toShort())
+        }
+    }
+
+    /**
      * Swap every still-unresolved (auxen-scheme) copy of the given Tidal track
      * for its resolved DASH manifest. Returns true if anything was swapped.
      */
@@ -379,6 +462,10 @@ class PlaybackService : MediaSessionService() {
             release()
             mediaSession = null
         }
+        runCatching { reverb?.release() }
+        runCatching { virtualizer?.release() }
+        reverb = null
+        virtualizer = null
         preResolveJob?.cancel()
         serviceScope.cancel()
         super.onDestroy()

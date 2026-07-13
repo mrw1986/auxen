@@ -61,3 +61,33 @@ data class ReplayGainState(
     val preampDb: Double = 0.0,
     val fallbackDb: Double = 0.0,
 )
+
+/**
+ * Platform reverb (`android.media.audiofx.PresetReverb`), applied to the
+ * sink's audio session -- not part of the in-process DSP chain, unlike the
+ * six processors above (see [ParametricEqProcessor]'s KDoc for that chain).
+ *
+ * [preset] is one of `PresetReverb.PRESET_*` (`NONE`=0, `SMALLROOM`=1,
+ * `MEDIUMROOM`=2, `LARGEROOM`=3, `MEDIUMHALL`=4, `LARGEHALL`=5, `PLATE`=6),
+ * stored as a plain `Int` here (rather than the platform API's `Short`) so
+ * this state has no Android dependency -- the service converts at the
+ * platform-API boundary.
+ */
+@Serializable
+data class ReverbState(
+    val enabled: Boolean = false,
+    val preset: Int = 0,
+)
+
+/**
+ * Platform stereo widening (`android.media.audiofx.Virtualizer`), applied to
+ * the sink's audio session -- not part of the in-process DSP chain.
+ *
+ * [strength] runs 0..1000 per the platform API's own range (1000 = maximum
+ * virtualization); the UI presents this as a 0..100% slider.
+ */
+@Serializable
+data class VirtualizerState(
+    val enabled: Boolean = false,
+    val strength: Int = 500,
+)

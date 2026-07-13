@@ -32,6 +32,8 @@ class AudioFxControllerTest {
         assertEquals(BalanceState(), AudioFxController.balanceState.value)
         assertEquals(LimiterState(), AudioFxController.limiterState.value)
         assertEquals(ReplayGainState(), AudioFxController.replayGainState.value)
+        assertEquals(ReverbState(), AudioFxController.reverbState.value)
+        assertEquals(VirtualizerState(), AudioFxController.virtualizerState.value)
     }
 
     @Test
@@ -159,6 +161,43 @@ class AudioFxControllerTest {
 
         assertEquals(boostedBass, AudioFxController.bassBoostState.value)
         assertEquals(boostedBalance, AudioFxController.balanceState.value)
+    }
+
+    @Test
+    fun `updating reverb and virtualizer persists independently across a fresh initialize`() = runBlocking {
+        // DSP-b Task 1: controller slot round-trip for the two new platform-
+        // effect states, mirroring the existing bass-boost round-trip test.
+        AudioFxController.initialize(context)
+        AudioFxController.awaitInitialized()
+
+        val reverbOn = ReverbState(enabled = true, preset = 4) // MEDIUMHALL
+        val virtualizerOn = VirtualizerState(enabled = true, strength = 750)
+        AudioFxController.updateReverb(reverbOn)
+        AudioFxController.updateVirtualizer(virtualizerOn)
+        AudioFxController.awaitPersisted()
+
+        AudioFxController.resetForTest()
+        AudioFxController.initialize(context)
+        AudioFxController.awaitInitialized()
+
+        assertEquals(reverbOn, AudioFxController.reverbState.value)
+        assertEquals(virtualizerOn, AudioFxController.virtualizerState.value)
+        // Untouched effects still restore to their own defaults.
+        assertEquals(BassBoostState(), AudioFxController.bassBoostState.value)
+    }
+
+    @Test
+    fun `attachReverb replays current state and receives later updates`() = runBlocking {
+        AudioFxController.initialize(context)
+        AudioFxController.awaitInitialized()
+        AudioFxController.updateReverb(ReverbState(enabled = true, preset = 2))
+
+        val received = mutableListOf<ReverbState>()
+        AudioFxController.attachReverb { received.add(it) }
+        assertEquals(ReverbState(enabled = true, preset = 2), received.last())
+
+        AudioFxController.updateReverb(ReverbState(enabled = true, preset = 6))
+        assertEquals(ReverbState(enabled = true, preset = 6), received.last())
     }
 
     @Test

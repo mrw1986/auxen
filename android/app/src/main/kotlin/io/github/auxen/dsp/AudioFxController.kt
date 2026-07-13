@@ -28,13 +28,16 @@ internal val KEY_BASS_BOOST = stringPreferencesKey("fx_bass_boost")
 internal val KEY_BALANCE = stringPreferencesKey("fx_balance")
 internal val KEY_LIMITER = stringPreferencesKey("fx_limiter")
 internal val KEY_REPLAY_GAIN = stringPreferencesKey("fx_replay_gain")
+internal val KEY_REVERB = stringPreferencesKey("fx_reverb")
+internal val KEY_VIRTUALIZER = stringPreferencesKey("fx_virtualizer")
 
 /**
  * Single source of truth for the per-effect DSP settings, shared by the UI and
  * the playback service (both run in the app process). Mirrors [EqController],
  * but persists each effect independently under its own DataStore key.
  *
- * Each effect X in {bassBoost, balance, limiter, replayGain} exposes:
+ * Each effect X in {bassBoost, balance, limiter, replayGain, reverb,
+ * virtualizer} exposes:
  *  - `val xState: StateFlow<XState>` — the current state.
  *  - `fun updateX(state)` — sets it and persists that effect's key only.
  *  - `fun attachX(apply)` — replays the current state into `apply`
@@ -46,9 +49,15 @@ internal val KEY_REPLAY_GAIN = stringPreferencesKey("fx_replay_gain")
  *    old, now-orphaned one — mirrors [EqController.attachProcessor]'s own
  *    single-processor-field design (final-review fix round, Important #3).
  *
- * [initialize] restores all four states independently: a malformed stored JSON
+ * [initialize] restores all six states independently: a malformed stored JSON
  * for one effect resolves to that effect's defaults and leaves the others
  * untouched.
+ *
+ * [reverb] and [virtualizer] are platform effects (`android.media.audiofx`)
+ * applied to the sink's audio session, not part of the in-process DSP chain
+ * the other four processors belong to (see [ParametricEqProcessor]'s KDoc)
+ * -- this controller still owns their state/persistence/dispatch
+ * identically, `PlaybackService` just applies them differently (DSP-b Task 1).
  */
 object AudioFxController {
     private val json = Json { ignoreUnknownKeys = true }
@@ -117,11 +126,15 @@ object AudioFxController {
     private val balance = FxSlot(KEY_BALANCE, BalanceState.serializer(), BalanceState())
     private val limiter = FxSlot(KEY_LIMITER, LimiterState.serializer(), LimiterState())
     private val replayGain = FxSlot(KEY_REPLAY_GAIN, ReplayGainState.serializer(), ReplayGainState())
+    private val reverb = FxSlot(KEY_REVERB, ReverbState.serializer(), ReverbState())
+    private val virtualizer = FxSlot(KEY_VIRTUALIZER, VirtualizerState.serializer(), VirtualizerState())
 
     val bassBoostState: StateFlow<BassBoostState> = bassBoost.flow
     val balanceState: StateFlow<BalanceState> = balance.flow
     val limiterState: StateFlow<LimiterState> = limiter.flow
     val replayGainState: StateFlow<ReplayGainState> = replayGain.flow
+    val reverbState: StateFlow<ReverbState> = reverb.flow
+    val virtualizerState: StateFlow<VirtualizerState> = virtualizer.flow
 
     private var appContext: Context? = null
 
@@ -132,11 +145,15 @@ object AudioFxController {
     fun attachBalance(apply: (BalanceState) -> Unit) = balance.attach(apply)
     fun attachLimiter(apply: (LimiterState) -> Unit) = limiter.attach(apply)
     fun attachReplayGain(apply: (ReplayGainState) -> Unit) = replayGain.attach(apply)
+    fun attachReverb(apply: (ReverbState) -> Unit) = reverb.attach(apply)
+    fun attachVirtualizer(apply: (VirtualizerState) -> Unit) = virtualizer.attach(apply)
 
     fun updateBassBoost(state: BassBoostState) = update(bassBoost, state)
     fun updateBalance(state: BalanceState) = update(balance, state)
     fun updateLimiter(state: LimiterState) = update(limiter, state)
     fun updateReplayGain(state: ReplayGainState) = update(replayGain, state)
+    fun updateReverb(state: ReverbState) = update(reverb, state)
+    fun updateVirtualizer(state: VirtualizerState) = update(virtualizer, state)
 
     private fun <T> update(slot: FxSlot<T>, state: T) {
         slot.set(state)
@@ -171,6 +188,8 @@ object AudioFxController {
             prefs[balance.key]?.let { balance.restore(it, json) }
             prefs[limiter.key]?.let { limiter.restore(it, json) }
             prefs[replayGain.key]?.let { replayGain.restore(it, json) }
+            prefs[reverb.key]?.let { reverb.restore(it, json) }
+            prefs[virtualizer.key]?.let { virtualizer.restore(it, json) }
         }
     }
 
@@ -193,6 +212,8 @@ object AudioFxController {
         balance.persistJob?.join()
         limiter.persistJob?.join()
         replayGain.persistJob?.join()
+        reverb.persistJob?.join()
+        virtualizer.persistJob?.join()
     }
 
     /**
@@ -209,5 +230,7 @@ object AudioFxController {
         balance.reset()
         limiter.reset()
         replayGain.reset()
+        reverb.reset()
+        virtualizer.reset()
     }
 }
