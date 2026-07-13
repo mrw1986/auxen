@@ -34,6 +34,15 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Official Tidal API PKCE login redirect (Tidal official-API
+                 migration, Task 1); singleTask above means this lands in
+                 onNewIntent, not a fresh MainActivity instance. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="auxen" android:host="auth-callback" />
+            </intent-filter>
         </activity>
 
         <service

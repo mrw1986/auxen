@@ -19,6 +19,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -47,7 +48,7 @@ import io.github.auxen.ui.theme.ThemeMode
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
+fun SettingsScreen(viewModel: PlayerViewModel, onOpenTidalOfficialDebug: () -> Unit, modifier: Modifier = Modifier) {
     val themeMode by viewModel.themeMode.collectAsState()
     val sourcePriority by viewModel.sourcePriority.collectAsState()
     SettingsContent(
@@ -55,6 +56,7 @@ fun SettingsScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
         onThemeModeChange = viewModel::setThemeMode,
         sourcePriority = sourcePriority,
         onSourcePriorityChange = viewModel::setSourcePriority,
+        onOpenTidalOfficialDebug = onOpenTidalOfficialDebug,
         modifier = modifier,
     )
 }
@@ -66,6 +68,7 @@ internal fun SettingsContent(
     onThemeModeChange: (ThemeMode) -> Unit,
     sourcePriority: SourcePriority,
     onSourcePriorityChange: (SourcePriority) -> Unit,
+    onOpenTidalOfficialDebug: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -123,6 +126,21 @@ internal fun SettingsContent(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+
+        // Tidal official-API migration, Task 1: a clear, separate entry for
+        // the go/no-go streaming spike -- kept out of the Playback section
+        // above entirely so it can't be mistaken for a real, working
+        // setting; the existing Tidal login on Account is untouched.
+        SettingsSectionCard(title = stringResource(R.string.settings_advanced_title)) {
+            Text(
+                stringResource(R.string.settings_advanced_subtitle),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(onClick = onOpenTidalOfficialDebug) {
+                Text(stringResource(R.string.settings_tidal_official_link))
+            }
         }
     }
 }

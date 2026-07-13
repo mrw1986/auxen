@@ -1,6 +1,7 @@
 package io.github.auxen.ui
 
 import android.Manifest
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -55,7 +56,7 @@ import io.github.auxen.ui.theme.resolveDarkTheme
 private data class Destination(val route: String, val label: String, val icon: @Composable () -> Unit)
 
 /** Global overlay routes pushed from the top bar, outside the tab back stacks. */
-private val OVERLAY_ROUTES = setOf("equalizer", "account", "settings", "queue")
+private val OVERLAY_ROUTES = setOf("equalizer", "account", "settings", "queue", "tidal-official-debug")
 
 @UnstableApi
 class MainActivity : ComponentActivity() {
@@ -78,6 +79,25 @@ class MainActivity : ComponentActivity() {
             io.github.auxen.ui.theme.AuxenTheme(darkTheme = darkTheme) {
                 MainScreen(viewModel)
             }
+        }
+
+        handleTidalOfficialRedirect(intent)
+    }
+
+    /**
+     * `singleTask` (see the manifest) means the official-API PKCE redirect
+     * lands here, not a fresh [onCreate] -- see the `auxen://auth-callback`
+     * intent-filter (Tidal official-API migration, Task 1).
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleTidalOfficialRedirect(intent)
+    }
+
+    private fun handleTidalOfficialRedirect(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme == "auxen" && uri.host == "auth-callback") {
+            viewModel.completeTidalOfficialLogin(uri)
         }
     }
 
@@ -232,7 +252,13 @@ private fun MainScreen(viewModel: PlayerViewModel) {
                 )
             }
             composable("equalizer") { EqualizerScreen() }
-            composable("settings") { SettingsScreen(viewModel) }
+            composable("settings") {
+                SettingsScreen(
+                    viewModel,
+                    onOpenTidalOfficialDebug = { navController.navigate("tidal-official-debug") { launchSingleTop = true } },
+                )
+            }
+            composable("tidal-official-debug") { TidalOfficialDebugScreen(viewModel) }
             composable("queue") { QueueScreen(viewModel) }
             composable("account") { AccountScreen(viewModel) }
             composable("nowplaying") {

@@ -111,4 +111,15 @@
     <string name="queue_now_playing_label">Now playing</string>
     <string name="queue_remove_a11y">Remove %1$s from queue</string>
     <string name="queue_drag_handle_a11y">Reorder %1$s</string>
+
+    <!-- Tidal official-API migration, Task 1: go/no-go streaming spike. -->
+    <string name="settings_advanced_title">Advanced</string>
+    <string name="settings_advanced_subtitle">Experimental features under evaluation.</string>
+    <string name="settings_tidal_official_link">Try official Tidal login (beta)</string>
+
+    <string name="tidal_official_title">Official Tidal API (beta)</string>
+    <string name="tidal_official_description">Additive spike — does not affect your existing Tidal login. Logs in via the official openapi.tidal.com API and checks whether full-length Hi-Res streaming works for this app\'s registration.</string>
+    <string name="tidal_official_login_button">Try official Tidal login (beta)</string>
+    <string name="tidal_official_track_id_label">Tidal track id</string>
+    <string name="tidal_official_probe_button">Run streaming probe</string>
 </resources>

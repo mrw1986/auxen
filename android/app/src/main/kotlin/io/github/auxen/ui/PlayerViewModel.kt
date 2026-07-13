@@ -2,6 +2,7 @@ package io.github.auxen.ui
 
 import android.app.Application
 import android.content.ComponentName
+import android.net.Uri
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -14,6 +15,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
@@ -24,6 +26,9 @@ import io.github.auxen.matching.DuplicateResolver
 import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
 import io.github.auxen.playback.PlaybackService
+import io.github.auxen.provider.tidal.formatTidalStreamingProbeResult
+import io.github.auxen.provider.tidal.probePlayback
+import io.github.auxen.provider.tidal.probeStreaming
 import io.github.auxen.ui.theme.ThemeMode
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -163,6 +168,64 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Source-priority tie-break for search-result merging (Settings screen; consumed by [search]). */
     val sourcePriority = MutableStateFlow(SourcePriority.PREFER_QUALITY)
+
+    /**
+     * The go/no-go streaming spike's visible status readout (Tidal
+     * official-API migration, Task 1; "Try official Tidal login (beta)" in
+     * Settings) -- null until a login/probe has run this session.
+     */
+    val tidalOfficialStatus = MutableStateFlow<String?>(null)
+
+    /** The spike's throwaway validation player -- NOT the app's real playback pipeline; see [probePlayback]'s KDoc. */
+    private var tidalOfficialProbePlayer: ExoPlayer? = null
+
+    /** Step 1 of the official-API login: the URL to open in a Custom Tab. */
+    fun beginTidalOfficialLogin(): String = Graph.tidalOfficialSession.beginLogin()
+
+    /** Step 2: call from `MainActivity.onNewIntent` with the `auxen://auth-callback` redirect. */
+    fun completeTidalOfficialLogin(redirect: Uri) {
+        viewModelScope.launch {
+            val result = Graph.tidalOfficialSession.completeLogin(redirect)
+            tidalOfficialStatus.value = result.fold(
+                onSuccess = { "Logged in via the official Tidal API. Access token acquired -- run the streaming probe below." },
+                onFailure = { "Official-API login failed: ${it.message}" },
+            )
+        }
+    }
+
+    /**
+     * Runs the go/no-go streaming spike for [trackId]: fetches
+     * `/trackManifests/{id}` + `/trackFiles/{id}`, and -- if either came
+     * back FULL with a usable URL -- attempts a throwaway Media3 play to
+     * confirm it's genuinely playable (manifest URL preferred; a DASH
+     * manifest is required for [probePlayback]'s MIME hint, which a bare
+     * `trackFiles` file URL isn't).
+     */
+    fun runTidalOfficialStreamingProbe(trackId: String) {
+        viewModelScope.launch {
+            val session = Graph.tidalOfficialSession.storedSession()
+            if (session == null) {
+                tidalOfficialStatus.value = "Not logged in via the official API yet -- tap \"Try official Tidal login\" first."
+                return@launch
+            }
+            tidalOfficialStatus.value = "Probing track $trackId…"
+            val probe = probeStreaming(Graph.tidalOfficialApi, session.accessToken, trackId)
+            Log.i("AuxenTidalOfficial", formatTidalStreamingProbeResult(probe))
+
+            val manifestUrl = probe.manifestUri.takeIf { probe.manifestPresentation == "FULL" }
+            if (manifestUrl == null) {
+                tidalOfficialStatus.value = formatTidalStreamingProbeResult(probe)
+                return@launch
+            }
+
+            tidalOfficialProbePlayer?.release()
+            tidalOfficialProbePlayer = probePlayback(getApplication(), manifestUrl) { playbackResult ->
+                val withPlayback = probe.copy(playbackConfirmed = playbackResult.isSuccess)
+                tidalOfficialStatus.value = formatTidalStreamingProbeResult(withPlayback)
+                Log.i("AuxenTidalOfficial", formatTidalStreamingProbeResult(withPlayback))
+            }
+        }
+    }
 
     private fun libraryTabName(index: Int) = when (index) {
         0 -> "albums"
@@ -560,6 +623,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         controller?.release()
+        tidalOfficialProbePlayer?.release()
         super.onCleared()
     }
 }
