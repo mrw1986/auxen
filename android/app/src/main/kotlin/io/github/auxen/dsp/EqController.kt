@@ -90,4 +90,22 @@ object EqController {
         val gains = EqState.PRESETS[name] ?: return
         setState(EqState.fromBands(gains, enabled = true, presetName = name))
     }
+
+    /**
+     * Test-only: reset the singleton's in-memory state, detach the
+     * processor, and forget the app context so a subsequent [initialize]
+     * re-runs. Does not touch DataStore. Mirrors [AutoEqController.resetForTest]
+     * -- added so tests that seed [EqController]'s state directly (e.g. the
+     * AutoEq migration tests, which mutate it as their legacy source) can
+     * fully isolate it between runs instead of relying on a partial manual
+     * reset (`setState(EqState(), persist = false)`, which leaves
+     * [appContext]/[initJob] dangling and doesn't guarantee order-independence).
+     */
+    internal fun resetForTest() {
+        initJob?.cancel()
+        initJob = null
+        appContext = null
+        processor = null
+        _state.value = EqState()
+    }
 }

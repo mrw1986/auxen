@@ -33,11 +33,14 @@ class AutoEqControllerTest {
 
     @Before
     fun setUp() = runBlocking {
+        // Both are process-wide `object`s; wipe both singletons' in-memory
+        // state AND the shared DataStore files so every test starts from a
+        // clean slate regardless of JUnit method ordering (CI JDK-order
+        // isolation fix -- EqController.resetForTest() didn't exist when
+        // this file was first written, so it settled for a partial manual
+        // reset that left appContext/initJob dangling between tests).
         AutoEqController.resetForTest()
-        // EqController has no resetForTest of its own -- its public setState
-        // is enough to reset the in-memory singleton state the migration
-        // tests below seed directly.
-        EqController.setState(EqState(), persist = false)
+        EqController.resetForTest()
         context.autoEqDataStore.edit { it.clear() }
         context.eqDataStore.edit { it.clear() }
         Unit
@@ -46,7 +49,7 @@ class AutoEqControllerTest {
     @After
     fun tearDown() = runBlocking {
         AutoEqController.resetForTest()
-        EqController.setState(EqState(), persist = false)
+        EqController.resetForTest()
         Unit
     }
 
