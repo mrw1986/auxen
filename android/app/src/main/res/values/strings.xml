@@ -4,4 +4,49 @@
     <string name="brand_name">AUXEN</string>
     <string name="brand_tagline">UNORTHODOX AUDIO</string>
     <string name="empty_home_flavor">Feed the ox — play something to get started.</string>
+
+    <!-- DSP-b Task 3: per-effect Equalizer screen sections. -->
+    <string name="fx_section_expand">Expand %1$s</string>
+    <string name="fx_section_collapse">Collapse %1$s</string>
+
+    <string name="fx_bass_boost_title">Bass boost</string>
+    <string name="fx_bass_boost_subtitle">Low-end lift, centered below the fundamentals.</string>
+    <string name="fx_bass_boost_freq_label">Frequency</string>
+    <string name="fx_bass_boost_gain_label">Gain</string>
+
+    <string name="fx_balance_title">Balance</string>
+    <string name="fx_balance_subtitle">Shift the mix left or right.</string>
+    <string name="fx_balance_left">L</string>
+    <string name="fx_balance_right">R</string>
+    <string name="fx_balance_center">Center</string>
+    <string name="fx_balance_percent_left">L %1$d%%</string>
+    <string name="fx_balance_percent_right">R %1$d%%</string>
+
+    <string name="fx_limiter_title">Limiter</string>
+    <string name="fx_limiter_subtitle">Soft-knee protection against clipping — on by default.</string>
+    <string name="fx_limiter_threshold_label">Threshold</string>
+    <string name="fx_limiter_release_label">Release</string>
+
+    <string name="fx_reverb_title">Reverb</string>
+    <string name="fx_reverb_subtitle">Adds a sense of physical space.</string>
+    <string name="fx_reverb_preset_none">None</string>
+    <string name="fx_reverb_preset_small_room">Small room</string>
+    <string name="fx_reverb_preset_medium_room">Medium room</string>
+    <string name="fx_reverb_preset_large_room">Large room</string>
+    <string name="fx_reverb_preset_medium_hall">Medium hall</string>
+    <string name="fx_reverb_preset_large_hall">Large hall</string>
+    <string name="fx_reverb_preset_plate">Plate</string>
+
+    <string name="fx_virtualizer_title">Virtualizer</string>
+    <string name="fx_virtualizer_subtitle">Widens stereo playback over headphones.</string>
+    <string name="fx_virtualizer_strength_label">Strength</string>
+
+    <string name="fx_volume_normalization_title">Volume normalization</string>
+    <string name="fx_volume_normalization_subtitle">ReplayGain — evens out loudness between tracks.</string>
+    <string name="fx_volume_normalization_mode_track">Track</string>
+    <string name="fx_volume_normalization_mode_album">Album</string>
+    <string name="fx_volume_normalization_preamp_label">Preamp</string>
+    <string name="fx_volume_normalization_fallback_label">Fallback gain</string>
+
+    <string name="fx_equalizer_title">Equalizer</string>
 </resources>

@@ -34,7 +34,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -51,13 +50,23 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import io.github.auxen.Graph
+import io.github.auxen.R
+import io.github.auxen.dsp.AudioFxController
 import io.github.auxen.dsp.AutoEqProfile
 import io.github.auxen.dsp.EqController
 import io.github.auxen.dsp.EqState
+import io.github.auxen.ui.components.BalanceSection
+import io.github.auxen.ui.components.BassBoostSection
+import io.github.auxen.ui.components.FxSectionCard
+import io.github.auxen.ui.components.LimiterSection
+import io.github.auxen.ui.components.ReverbSection
+import io.github.auxen.ui.components.VirtualizerSection
+import io.github.auxen.ui.components.VolumeNormalizationSection
 import kotlinx.coroutines.launch
 
 /** Settings key holding the active AutoEq profile name (or `custom:<name>`). */
@@ -82,6 +91,25 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
 
     var presetMenuOpen by remember { mutableStateOf(false) }
     var importError by remember { mutableStateOf<String?>(null) }
+
+    // Per-effect section expand/collapse -- independent of each section's OWN
+    // enable switch (docs/plans/2026-07-13-android-dsp-b-ui.md, Task 3: "no
+    // master coupling"). Equalizer starts expanded since it's the primary
+    // feature on this screen; the newer effects start collapsed.
+    var eqExpanded by remember { mutableStateOf(true) }
+    var bassBoostExpanded by remember { mutableStateOf(false) }
+    var balanceExpanded by remember { mutableStateOf(false) }
+    var limiterExpanded by remember { mutableStateOf(false) }
+    var reverbExpanded by remember { mutableStateOf(false) }
+    var virtualizerExpanded by remember { mutableStateOf(false) }
+    var volumeNormalizationExpanded by remember { mutableStateOf(false) }
+
+    val bassBoostState by AudioFxController.bassBoostState.collectAsState()
+    val balanceState by AudioFxController.balanceState.collectAsState()
+    val limiterState by AudioFxController.limiterState.collectAsState()
+    val reverbState by AudioFxController.reverbState.collectAsState()
+    val virtualizerState by AudioFxController.virtualizerState.collectAsState()
+    val replayGainState by AudioFxController.replayGainState.collectAsState()
 
     // AutoEq picker state.
     var query by remember { mutableStateOf("") }
@@ -175,130 +203,180 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Equalizer", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-            Switch(checked = state.enabled, onCheckedChange = { EqController.setEnabled(it) })
-        }
-
-        // Only the graphic EQ names a preset here; the active AutoEq profile
-        // (parametric, bands == null) is shown by its own row below.
-        if (state.bands != null) {
-            state.presetName?.let {
-                Text("Active profile: $it", style = MaterialTheme.typography.bodyMedium)
+        // "Equalizer" section: the screen's pre-existing 10-band EQ + presets +
+        // AutoEq picker, now wrapped as the first FxSectionCard. Its master
+        // toggle becomes this card's switch (docs/plans/2026-07-13-android-dsp-b-ui.md,
+        // Task 3, item 1) -- the AutoEq flow itself is unchanged.
+        FxSectionCard(
+            title = stringResource(R.string.fx_equalizer_title),
+            subtitle = null,
+            enabled = state.enabled,
+            onEnabledChange = { EqController.setEnabled(it) },
+            expanded = eqExpanded,
+            onExpandedChange = { eqExpanded = it },
+        ) {
+            // Only the graphic EQ names a preset here; the active AutoEq profile
+            // (parametric, bands == null) is shown by its own row below.
+            if (state.bands != null) {
+                state.presetName?.let {
+                    Text("Active profile: $it", style = MaterialTheme.typography.bodyMedium)
+                }
             }
-        }
-        Text(
-            "Preamp: %.1f dB".format(state.preampDb),
-            style = MaterialTheme.typography.bodySmall,
-        )
+            Text(
+                "Preamp: %.1f dB".format(state.preampDb),
+                style = MaterialTheme.typography.bodySmall,
+            )
 
-        Row {
-            Column {
-                OutlinedButton(onClick = { presetMenuOpen = true }) { Text("Presets") }
-                DropdownMenu(expanded = presetMenuOpen, onDismissRequest = { presetMenuOpen = false }) {
-                    EqState.PRESETS.keys.forEach { name ->
-                        DropdownMenuItem(
-                            text = { Text(name) },
-                            onClick = {
-                                EqController.applyPreset(name)
-                                clearActiveProfileMarker()
-                                presetMenuOpen = false
-                            },
-                        )
+            Row {
+                Column {
+                    OutlinedButton(onClick = { presetMenuOpen = true }) { Text("Presets") }
+                    DropdownMenu(expanded = presetMenuOpen, onDismissRequest = { presetMenuOpen = false }) {
+                        EqState.PRESETS.keys.forEach { name ->
+                            DropdownMenuItem(
+                                text = { Text(name) },
+                                onClick = {
+                                    EqController.applyPreset(name)
+                                    clearActiveProfileMarker()
+                                    presetMenuOpen = false
+                                },
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        // 10-band graphic EQ. When a parametric AutoEq profile is active the
-        // bands list is null and the sliders show flat until touched (which
-        // switches back to graphic mode).
-        val bands = state.bands ?: List(EqState.NUM_BANDS) { 0.0 }
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            bands.forEachIndexed { index, gain ->
-                BandSlider(
-                    label = EqState.BAND_LABELS[index],
-                    gainDb = gain,
-                    onChange = {
-                        EqController.setBand(index, it)
+            // 10-band graphic EQ. When a parametric AutoEq profile is active the
+            // bands list is null and the sliders show flat until touched (which
+            // switches back to graphic mode).
+            val bands = state.bands ?: List(EqState.NUM_BANDS) { 0.0 }
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                bands.forEachIndexed { index, gain ->
+                    BandSlider(
+                        label = EqState.BAND_LABELS[index],
+                        gainDb = gain,
+                        onChange = {
+                            EqController.setBand(index, it)
+                            clearActiveProfileMarker()
+                        },
+                    )
+                }
+            }
+
+            HorizontalDivider()
+
+            // ---- AutoEq headphone-correction picker (Wavelet-style) ----
+            Text("Tune for your headphones", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Corrections for 8,850 headphones, tuned to a neutral reference.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Column(
+                modifier = Modifier.bringIntoViewRequester(searchSectionBringIntoView),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { focusState ->
+                            searchFieldFocused = focusState.isFocused
+                            if (focusState.isFocused) {
+                                scope.launch { searchSectionBringIntoView.bringIntoView() }
+                            }
+                        },
+                    label = { Text("Find your headphone model") },
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { query = "" }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                            }
+                        }
+                    },
+                )
+
+                AutoEqPickerResults(
+                    activeProfile = activeProfile,
+                    results = results,
+                    noMatches = query.isNotBlank() && loaded && results.isEmpty(),
+                    onSelectProfile = { profile ->
+                        applyAutoEq(scope, repo, profile) {
+                            activeProfile = it
+                            // Re-arm the clear guard: a later band-drag must be able to
+                            // clear this freshly-applied marker.
+                            markerCleared = false
+                        }
+                        query = ""
+                    },
+                    onClearActive = {
+                        EqController.applyPreset("Flat")
                         clearActiveProfileMarker()
                     },
                 )
             }
+
+            Button(onClick = { importLauncher.launch(arrayOf("text/plain")) }) {
+                Text("Import custom profile…")
+            }
+
+            importError?.let {
+                Text("Import failed: $it", color = MaterialTheme.colorScheme.error)
+            }
+
+            Text(
+                "Powered by AutoEq (MIT) — github.com/jaakkopasanen/AutoEq",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
-        HorizontalDivider()
-
-        // ---- AutoEq headphone-correction picker (Wavelet-style) ----
-        Text("Tune for your headphones", style = MaterialTheme.typography.titleMedium)
-        Text(
-            "Corrections for 8,850 headphones, tuned to a neutral reference.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        BassBoostSection(
+            state = bassBoostState,
+            onStateChange = { AudioFxController.updateBassBoost(it) },
+            expanded = bassBoostExpanded,
+            onExpandedChange = { bassBoostExpanded = it },
         )
 
-        Column(
-            modifier = Modifier.bringIntoViewRequester(searchSectionBringIntoView),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onFocusChanged { focusState ->
-                        searchFieldFocused = focusState.isFocused
-                        if (focusState.isFocused) {
-                            scope.launch { searchSectionBringIntoView.bringIntoView() }
-                        }
-                    },
-                label = { Text("Find your headphone model") },
-                singleLine = true,
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) {
-                            Icon(Icons.Filled.Close, contentDescription = "Clear search")
-                        }
-                    }
-                },
-            )
+        BalanceSection(
+            state = balanceState,
+            onStateChange = { AudioFxController.updateBalance(it) },
+            expanded = balanceExpanded,
+            onExpandedChange = { balanceExpanded = it },
+        )
 
-            AutoEqPickerResults(
-                activeProfile = activeProfile,
-                results = results,
-                noMatches = query.isNotBlank() && loaded && results.isEmpty(),
-                onSelectProfile = { profile ->
-                    applyAutoEq(scope, repo, profile) {
-                        activeProfile = it
-                        // Re-arm the clear guard: a later band-drag must be able to
-                        // clear this freshly-applied marker.
-                        markerCleared = false
-                    }
-                    query = ""
-                },
-                onClearActive = {
-                    EqController.applyPreset("Flat")
-                    clearActiveProfileMarker()
-                },
-            )
-        }
+        LimiterSection(
+            state = limiterState,
+            onStateChange = { AudioFxController.updateLimiter(it) },
+            expanded = limiterExpanded,
+            onExpandedChange = { limiterExpanded = it },
+        )
 
-        Button(onClick = { importLauncher.launch(arrayOf("text/plain")) }) {
-            Text("Import custom profile…")
-        }
+        ReverbSection(
+            state = reverbState,
+            onStateChange = { AudioFxController.updateReverb(it) },
+            expanded = reverbExpanded,
+            onExpandedChange = { reverbExpanded = it },
+        )
 
-        importError?.let {
-            Text("Import failed: $it", color = MaterialTheme.colorScheme.error)
-        }
+        VirtualizerSection(
+            state = virtualizerState,
+            onStateChange = { AudioFxController.updateVirtualizer(it) },
+            expanded = virtualizerExpanded,
+            onExpandedChange = { virtualizerExpanded = it },
+        )
 
-        Text(
-            "Powered by AutoEq (MIT) — github.com/jaakkopasanen/AutoEq",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        VolumeNormalizationSection(
+            state = replayGainState,
+            onStateChange = { AudioFxController.updateReplayGain(it) },
+            expanded = volumeNormalizationExpanded,
+            onExpandedChange = { volumeNormalizationExpanded = it },
         )
     }
 }
