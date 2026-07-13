@@ -3,6 +3,7 @@ package io.github.auxen.provider.local
 import android.content.ContentUris
 import android.content.Context
 import android.provider.MediaStore
+import io.github.auxen.dsp.ReplayGainInfo
 import io.github.auxen.dsp.ReplayGainTags
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
@@ -59,17 +60,7 @@ class LocalProvider(private val context: Context) : MusicProvider {
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             track.sourceId.toLong(),
         )
-        // ReplayGain tags live at the front of a FLAC/MP3 file's own metadata
-        // blocks, not scattered through it -- a 512KB budget is generous for
-        // that and avoids pulling a whole (possibly 100+MB Hi-Res) file into
-        // memory just to check for two optional comments. runCatching: a
-        // missing/unreadable/malformed file must never fail playback, it
-        // just means no ReplayGain data for this track.
-        val gains = runCatching {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                ReplayGainTags.parse(BoundedInputStream(stream, REPLAY_GAIN_READ_BUDGET_BYTES))
-            }
-        }.getOrNull()
+        val gains = replayGainFor(track.sourceId)
         StreamInfo(
             uri = uri.toString(),
             sampleRateHz = track.sampleRateHz,
@@ -77,6 +68,28 @@ class LocalProvider(private val context: Context) : MusicProvider {
             trackGainDb = gains?.trackGainDb,
             albumGainDb = gains?.albumGainDb,
         )
+    }
+
+    /**
+     * Lightweight tag-only ReplayGain read for [sourceId] -- used by
+     * [io.github.auxen.playback.PlaybackService]'s RgGainRouter on every
+     * media-item transition, without re-resolving the full [StreamInfo]
+     * (DSP-a Task 6). Shares the same read path [getStreamInfo] uses.
+     *
+     * ReplayGain tags live at the front of a FLAC/MP3 file's own metadata
+     * blocks, not scattered through it -- a 512KB budget is generous for
+     * that and avoids pulling a whole (possibly 100+MB Hi-Res) file into
+     * memory just to check for two optional comments. runCatching: a
+     * missing/unreadable/malformed file must never fail playback, it just
+     * means no ReplayGain data for this track.
+     */
+    suspend fun replayGainFor(sourceId: String): ReplayGainInfo? = withContext(Dispatchers.IO) {
+        val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, sourceId.toLong())
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                ReplayGainTags.parse(BoundedInputStream(stream, REPLAY_GAIN_READ_BUDGET_BYTES))
+            }
+        }.getOrNull()
     }
 
     private suspend fun queryTracks(

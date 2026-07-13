@@ -30,9 +30,14 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import io.github.auxen.Graph
 import io.github.auxen.R
+import io.github.auxen.dsp.AudioFxController
+import io.github.auxen.dsp.BalanceProcessor
+import io.github.auxen.dsp.BassBoostProcessor
 import io.github.auxen.dsp.EncodingRestorerProcessor
 import io.github.auxen.dsp.EqController
+import io.github.auxen.dsp.LimiterProcessor
 import io.github.auxen.dsp.ParametricEqProcessor
+import io.github.auxen.dsp.ReplayGainProcessor
 import io.github.auxen.model.Track
 import io.github.auxen.provider.StreamInfo
 import io.github.auxen.ui.MainActivity
@@ -54,17 +59,24 @@ import kotlinx.coroutines.withContext
  * app and more: lockscreen/notification controls, Bluetooth AVRCP, output
  * switching, and (later) Android Auto — all driven by the one MediaSession.
  *
- * The audiophile part is in [EqRenderersFactory]: the EQ AudioProcessor is
- * installed directly into the player's audio sink, so the DSP chain runs
- * before the audio ever leaves the app. The sink still requests float output
- * (so Hi-Res sources aren't truncated at the AudioTrack), and the EQ now
- * always emits unclamped float — chain-level headroom, not per-processor
- * clamping (see [ParametricEqProcessor]). [EncodingRestorerProcessor] sits
- * last in the array and converts back to 16-bit, because DefaultAudioSink's
- * built-in trailing processors are 16-bit-only and float mid-chain would
- * break sink configuration. This is an interim two-processor array; Task 6
- * (pipeline integration) replaces it with the full five-processor chain
- * (ReplayGain, BassBoost, Balance, Limiter) plus this same restorer tail.
+ * The audiophile part is in [EqRenderersFactory]: the full six-stage DSP
+ * chain is installed directly into the player's audio sink, so it runs
+ * before the audio ever leaves the app. Chain order (`ReplayGain ->
+ * ParametricEq -> BassBoost -> Balance -> Limiter -> EncodingRestorer`) is
+ * LAW — see [ParametricEqProcessor]'s KDoc for why. The sink still requests
+ * float output (so Hi-Res sources aren't truncated at the AudioTrack), and
+ * every stage but the last runs unclamped float — chain-level headroom, not
+ * per-processor clamping. [EncodingRestorerProcessor] alone converts back to
+ * 16-bit at the tail, because DefaultAudioSink's built-in trailing
+ * processors are 16-bit-only and float mid-chain would break sink
+ * configuration.
+ *
+ * Each effect stage (bass boost, balance, limiter, ReplayGain) is
+ * individually toggleable — [AudioFxController] owns each effect's state
+ * independently and this service `attachX`es a processor to each, so an
+ * enable/disable flip from the UI reaches the live audio chain without a
+ * service restart. [RgGainRouter] pushes ReplayGain's per-track tag values
+ * into its processor on every media-item transition.
  */
 @UnstableApi
 class PlaybackService : MediaSessionService() {
@@ -88,12 +100,30 @@ class PlaybackService : MediaSessionService() {
         val eqProcessor = ParametricEqProcessor()
         EqController.attachProcessor(eqProcessor)
 
+        val replayGainProcessor = ReplayGainProcessor()
+        val bassBoostProcessor = BassBoostProcessor()
+        val balanceProcessor = BalanceProcessor()
+        val limiterProcessor = LimiterProcessor()
+        AudioFxController.attachReplayGain { state -> replayGainProcessor.updateState(state) }
+        AudioFxController.attachBassBoost { state -> bassBoostProcessor.updateState(state) }
+        AudioFxController.attachBalance { state -> balanceProcessor.updateState(state) }
+        AudioFxController.attachLimiter { state -> limiterProcessor.updateState(state) }
+        val rgGainRouter = RgGainRouter(serviceScope, replayGainProcessor)
+
         val dataSourceFactory = ResolvingDataSource.Factory(
             DefaultDataSource.Factory(this),
             TidalUriResolver(Graph.resolver),
         )
 
-        val player = ExoPlayer.Builder(this, EqRenderersFactory(this, eqProcessor))
+        val renderersFactory = EqRenderersFactory(
+            this,
+            replayGainProcessor,
+            eqProcessor,
+            bassBoostProcessor,
+            balanceProcessor,
+            limiterProcessor,
+        )
+        val player = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(dataSourceFactory)
                     .setLoadErrorHandlingPolicy(AuxenLoadErrorPolicy()),
@@ -118,6 +148,7 @@ class PlaybackService : MediaSessionService() {
                 maybeRecordPendingPlay(player)
                 scheduleQueueSave(player)
                 preResolveUpcoming(player)
+                rgGainRouter.route(mediaItem?.mediaId)
             }
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
@@ -359,11 +390,15 @@ private class AuxenLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
     }
 }
 
-/** Renderers factory that injects the EQ into a float-output audio sink. */
+/** Renderers factory that injects the full DSP chain into a float-output audio sink. */
 @UnstableApi
 private class EqRenderersFactory(
     context: Context,
+    private val replayGainProcessor: ReplayGainProcessor,
     private val eqProcessor: ParametricEqProcessor,
+    private val bassBoostProcessor: BassBoostProcessor,
+    private val balanceProcessor: BalanceProcessor,
+    private val limiterProcessor: LimiterProcessor,
 ) : DefaultRenderersFactory(context) {
 
     override fun buildAudioSink(
@@ -373,13 +408,72 @@ private class EqRenderersFactory(
     ): AudioSink = DefaultAudioSink.Builder(context)
         // Request float output so Hi-Res sources aren't truncated to 16-bit at
         // the AudioTrack; devices without float support fall back automatically.
-        // eqProcessor now always emits unclamped float (chain headroom); the
-        // restorer converts back to 16-bit last, since DefaultAudioSink's
-        // built-in trailing processors are 16-bit-only. Interim two-processor
-        // array — Task 6 inserts BassBoost/Balance/Limiter/ReplayGain between
-        // these two.
+        // Every processor but the last runs unclamped float (chain headroom);
+        // EncodingRestorerProcessor converts back to 16-bit last, since
+        // DefaultAudioSink's built-in trailing processors are 16-bit-only.
+        // Chain order is LAW (see ParametricEqProcessor's KDoc) -- ReplayGain
+        // first so a quiet track's boost has the same downstream headroom as
+        // everything else, Limiter last-but-one so it's the one stage
+        // allowed to clamp, catching whatever upstream boosts produced.
         .setEnableFloatOutput(true)
         .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-        .setAudioProcessors(arrayOf(eqProcessor, EncodingRestorerProcessor()))
+        .setAudioProcessors(
+            arrayOf(
+                replayGainProcessor,
+                eqProcessor,
+                bassBoostProcessor,
+                balanceProcessor,
+                limiterProcessor,
+                EncodingRestorerProcessor(),
+            ),
+        )
         .build()
+}
+
+/**
+ * Pushes ReplayGain tag values for the current track into [processor] on
+ * every media-item transition.
+ *
+ * LOCAL tracks: reads tags directly via [io.github.auxen.provider.local.LocalProvider.replayGainFor]
+ * (no stream resolution needed — the tags live in the file itself). TIDAL
+ * tracks: reuses [TrackResolver]'s cache via [Graph.resolver] — playback
+ * just resolved this id moments ago (either this transition's own prepare,
+ * or [PlaybackService.preResolveUpcoming]), so this is a cache hit in the
+ * common case, not an extra network round trip. Either branch is wrapped in
+ * `runCatching`; any failure or absent tag falls through to
+ * `setTrackGains(null, null)`, which [ReplayGainProcessor] treats as "use
+ * the state's fallbackDb" — never a crash, never stale gains left over from
+ * the previous track.
+ */
+@UnstableApi
+private class RgGainRouter(
+    private val scope: CoroutineScope,
+    private val processor: ReplayGainProcessor,
+) {
+    private var job: Job? = null
+
+    fun route(mediaId: String?) {
+        job?.cancel()
+        val sourceId = mediaId?.substringAfter(':', missingDelimiterValue = "")
+        if (mediaId == null || sourceId.isNullOrEmpty()) {
+            processor.setTrackGains(null, null)
+            return
+        }
+        job = scope.launch {
+            val (trackGainDb, albumGainDb) = runCatching {
+                when {
+                    mediaId.startsWith("LOCAL:") -> {
+                        val info = Graph.local.replayGainFor(sourceId)
+                        info?.trackGainDb to info?.albumGainDb
+                    }
+                    mediaId.startsWith("TIDAL:") -> {
+                        val info = Graph.resolver.resolve(sourceId)
+                        info.trackGainDb to info.albumGainDb
+                    }
+                    else -> null to null
+                }
+            }.getOrDefault(null to null)
+            processor.setTrackGains(trackGainDb, albumGainDb)
+        }
+    }
 }

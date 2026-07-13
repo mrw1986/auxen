@@ -2,6 +2,7 @@ package io.github.auxen.dsp
 
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor.AudioFormat
+import androidx.media3.common.audio.BaseAudioProcessor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -120,5 +121,78 @@ class ProcessorChainTest {
         val restorerOutFormat = restorer.configure(pcm16Format())
         assertEquals(AudioFormat.NOT_SET, restorerOutFormat)
         assertFalse(restorer.isActive)
+    }
+
+    /**
+     * All six processors chained manually, in the DSP-a Task 6 pipeline
+     * order (`ReplayGain -> ParametricEq -> BassBoost -> Balance -> Limiter
+     * -> EncodingRestorer`), the same by-hand wiring style as the two-stage
+     * tests above -- [PlaybackService][io.github.auxen.playback.PlaybackService]'s
+     * real `AudioProcessingPipeline` wiring is exercised separately, at
+     * runtime, by the CI smoke test's tap-to-play step.
+     *
+     * EQ, BassBoost, and Balance are left at their disabled defaults in both
+     * tests below, isolating exactly the two links this test cares about:
+     * ReplayGain's boost and the limiter/restorer ceiling. The chain-level
+     * numbers here were verified in Python (double precision, matching the
+     * exact per-processor formulas) before being written as assertions.
+     */
+    private fun sixStageChain(replayGain: ReplayGainProcessor, limiter: LimiterProcessor) = listOf(
+        replayGain,
+        ParametricEqProcessor(),
+        BassBoostProcessor(),
+        BalanceProcessor(),
+        limiter,
+        EncodingRestorerProcessor(),
+    )
+
+    /** Runs [sample] through every stage of [chain] in order, returning the final int16. */
+    private fun runChain(chain: List<BaseAudioProcessor>, sample: Short): Short {
+        var format: AudioFormat = pcm16Format()
+        chain.forEach { stage -> format = stage.configure(format) }
+        chain.forEach { it.flush() }
+
+        var buffer = ByteBuffer.allocateDirect(2).order(ByteOrder.nativeOrder())
+        buffer.putShort(sample)
+        buffer.flip()
+        chain.forEach { stage ->
+            stage.queueInput(buffer)
+            buffer = stage.output.order(ByteOrder.nativeOrder())
+        }
+        return buffer.short
+    }
+
+    @Test
+    fun sixStageChainNeverOverflowsWithLimiterEnabled() {
+        val replayGain = ReplayGainProcessor()
+        replayGain.updateState(ReplayGainState(enabled = true))
+        replayGain.setTrackGains(trackGainDb = 6.0, albumGainDb = null)
+        val limiter = LimiterProcessor() // default state: enabled = true
+
+        // Verified in Python: a +6dB RG boost on an already-full-scale 16-bit
+        // sample (32767) reaches the limiter at ~1.9952 (well past 1.0) --
+        // the default limiter (thresholdDb=-1, kneeDb=6) brings it back to
+        // ~0.8913 (~-1.0dBFS), which the restorer converts to ~29205 as
+        // int16: comfortably inside the 16-bit range, never near overflow.
+        val result = runChain(sixStageChain(replayGain, limiter), 32767)
+        assertTrue("expected a limited value well under the 16-bit ceiling, got $result", result < Short.MAX_VALUE)
+        assertTrue("expected a positive, non-wrapped value, got $result", result > 0)
+    }
+
+    @Test
+    fun sixStageChainClampsAtRestorerWithLimiterDisabled() {
+        val replayGain = ReplayGainProcessor()
+        replayGain.updateState(ReplayGainState(enabled = true))
+        replayGain.setTrackGains(trackGainDb = 6.0, albumGainDb = null)
+        val limiter = LimiterProcessor()
+        limiter.updateState(LimiterState(enabled = false))
+
+        // Verified in Python: with the limiter disabled, the same +6dB-boosted
+        // signal (~1.9952, past full scale) reaches the restorer unclamped;
+        // ONLY the restorer's coerceIn(-32768, 32767) catches it -- clamped
+        // to exactly Short.MAX_VALUE, never wrapped negative (the failure
+        // mode a naive Float-to-Short cast without clamping would hit).
+        val result = runChain(sixStageChain(replayGain, limiter), 32767)
+        assertEquals(Short.MAX_VALUE, result)
     }
 }

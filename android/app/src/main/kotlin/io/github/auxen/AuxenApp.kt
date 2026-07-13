@@ -11,6 +11,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
 import io.github.auxen.data.LibraryRepository
 import io.github.auxen.db.AuxenDatabase
+import io.github.auxen.dsp.AudioFxController
 import io.github.auxen.dsp.AutoEqRepository
 import io.github.auxen.dsp.EqController
 import io.github.auxen.model.Source
@@ -38,6 +39,7 @@ class AuxenApp : Application() {
         super.onCreate()
         Graph.init(this)
         EqController.initialize(this)
+        AudioFxController.initialize(this)
         restoreAutoEqProfile()
     }
 
