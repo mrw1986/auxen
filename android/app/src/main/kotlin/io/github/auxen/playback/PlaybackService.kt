@@ -205,6 +205,16 @@ class PlaybackService : MediaSessionService() {
         serviceScope.launch {
             SleepTimerController.state.collectLatest { timerState ->
                 val remaining = timerState.remainingMillis() ?: return@collectLatest
+                // A fresh arm -- including a re-arm while a PREVIOUS timer's
+                // finishTrack pause is still pending on the current track --
+                // supersedes any leftover pendingSleepTimerPause from that
+                // previous timer. Without this, arming timer B while timer
+                // A's finish-track pause is still waiting for the current
+                // track to end would have B's countdown start while A's
+                // stale flag fires early at the very next transition,
+                // pausing playback the user just told to keep going (micro
+                // round, review of commit a252273/85c106d, finding 2).
+                pendingSleepTimerPause = false
                 if (remaining > 0) delay(remaining)
                 if (timerState.finishTrack) {
                     pendingSleepTimerPause = true

@@ -23,6 +23,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -145,12 +146,39 @@ private fun rememberDebouncedSlider(
     // of snapping back to a stale committed value.
     var localValue by remember(committedValue) { mutableStateOf(committedValue) }
     var pendingJob by remember { mutableStateOf<Job?>(null) }
+    // True from the moment a drag frame arrives until its commit actually
+    // executes (either the debounce firing normally, or the dispose-time
+    // flush below) -- tracked separately from pendingJob's own Job.isActive
+    // so the flush doesn't depend on ordering between this composable's
+    // rememberCoroutineScope() teardown and its DisposableEffect (both fire
+    // during the same "leave composition" pass; relying on Job.isActive
+    // there would silently break if that order ever flips).
+    var hasUncommittedChange by remember { mutableStateOf(false) }
     val onDrag: (Float) -> Unit = { newValue ->
         localValue = newValue
+        hasUncommittedChange = true
         pendingJob?.cancel()
         pendingJob = scope.launch {
             delay(debounceMillis)
             onCommit(newValue)
+            hasUncommittedChange = false
+        }
+    }
+    // Flush-on-dispose: if the section hosting this slider leaves
+    // composition (collapsed, screen navigated away) before the 50ms
+    // debounce settles, rememberCoroutineScope()'s scope cancellation would
+    // otherwise silently drop the last drag frame's commit -- reproduced and
+    // fixed per the DSP-b Task 3/4 review's disposal-race finding. Reads
+    // localValue live inside onDispose (not a captured parameter), so the
+    // flush always commits whatever the LATEST drag position was, not a
+    // stale value from whenever this effect was first composed.
+    DisposableEffect(Unit) {
+        onDispose {
+            if (hasUncommittedChange) {
+                pendingJob?.cancel()
+                onCommit(localValue)
+                hasUncommittedChange = false
+            }
         }
     }
     return DebouncedSliderState(localValue, onDrag)
