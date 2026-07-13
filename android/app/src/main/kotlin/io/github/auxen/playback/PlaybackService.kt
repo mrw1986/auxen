@@ -475,11 +475,26 @@ class PlaybackService : MediaSessionService() {
         serviceScope.launch { runCatching { Graph.library.recordPlay(mediaId) } }
     }
 
-    /** Consumes [pendingSleepTimerPause], if armed, by pausing right here at the transition boundary. */
+    /**
+     * Consumes [pendingSleepTimerPause], if armed, by pausing right here at
+     * the transition boundary -- the NORMAL finishTrack completion path
+     * (track ends, the next one starts, THIS pauses it immediately).
+     *
+     * Also disarms [SleepTimerController] itself, mirroring the
+     * `onPlaybackStateChanged(STATE_ENDED)` branch below: without this, the
+     * controller's `pendingTrackEnd` phase survived every successful
+     * finishTrack completion via this common path -- the sheet kept
+     * showing "Pausing after this track" with a dead Cancel button, and the
+     * Now Playing icon stayed tinted, forever, after the pause had already
+     * happened. STATE_ENDED (the rarer, queue-exhausted exit) already
+     * called cancel() correctly; this far more common path did not (final
+     * review round #2, the one real bug).
+     */
     private fun checkSleepTimerPause(player: Player) {
         if (!pendingSleepTimerPause) return
         pendingSleepTimerPause = false
         player.pause()
+        SleepTimerController.cancel()
     }
 
     /**
