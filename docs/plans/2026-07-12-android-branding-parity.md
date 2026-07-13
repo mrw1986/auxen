@@ -1,5 +1,11 @@
 # Android Branding Parity Implementation Plan
 
+> **STATUS: SHIPPED (all 3 tasks + fix round approved; commits e7661dd, 557602e, e0e845d, 83814e7).** This plan is retained as a historical record. Where the text below conflicts with the shipped state, the following review-driven deviations WON and are the current spec:
+> - **Dark brand title is gold `#F0C560`** (`AuxenColors.BrandTitleGold`), NOT TextPrimary — per `data/style.css:116` (.sidebar-brand-title), caught in review.
+> - **Brand lockup typeface is Josefin Sans 700** (`res/font/josefin_sans.ttf`, `JosefinSans` in Type.kt), NOT Fraunces — per `style.css:112` and `docs/branding/logo-guide.md`; the Fraunces instruction below came from the stale ui-mockup.html.
+> - **BrandBlock placement:** compact lockup is the top-bar TITLE on all non-account routes (MainActivity), suppressed on the account route where the full lockup lives in content. The Home LazyColumn brand item described below was shipped then REMOVED in the fix round (duplicate brand chrome vs the app-wide top bar).
+> - **Theme detection inside BrandBlock** uses `MaterialTheme.colorScheme.background.luminance() < 0.5f` (agrees with explicit `AuxenTheme(darkTheme=…)` overrides in tests), not `isSystemInDarkTheme()`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give the Android app the same brand identity as the desktop app: the ox-with-headphones logo (launcher icon, splash screen, in-app brand block, media-notification icon), the amber brand colors, and the pun taglines ("UNORTHODOX AUDIO", "Feed the Ox").

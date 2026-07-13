@@ -1,5 +1,11 @@
 # Android Theme Parity — Desktop Colors, Components, Typography
 
+> **STATUS: SHIPPED (Tasks 1–4 + fix rounds approved; commits 60266d8..228d071).** Retained as record. Shipped deviations from the text below:
+> - Task 4 additionally applied `FontFamily.Monospace` to the EqualizerScreen band-gain readout (`.equalizer-band-value` is monospace on desktop) — surfaced in review, outside the original file list.
+> - Several "re-record shifted goldens" steps actually required CREATING preview goldens (miniPlayerControls, searchField, typography-details, selectionStates) because no full-screen goldens exist in this repo — only isolated component captures.
+> - The Fraunces Bold registration is correct but CANNOT be visually proven under Robolectric (shared-JVM typeface-cache collision, diagnosed forensically); `VariableFontWeightProbeTest` is the permanent regression gate.
+> - Light `secondaryContainer`/`onSecondaryContainer` deliberately reuse the primaryContainer pair (contrast) rather than compositing the CSS rgba literally.
+
 **Goal:** Close every confirmed visual-identity gap between the Android app and the desktop source of truth (`data/style.css`, shipped GTK app), found by a 28-agent adversarially-verified parity audit (23 confirmed findings, 0 refuted). Branding-batch items (launcher icon, splash, brand block, notification icon, Josefin Sans lockup) are handled in `2026-07-12-android-branding-parity.md` and its fix rounds — this plan covers the rest.
 
 **Source-of-truth precedence** (established by the audit): `data/style.css` (shipped app) > `docs/branding/logo-guide.md` > `ui-mockup.html` (stale in places — it predates the Josefin Sans brand decision and the gold title).
