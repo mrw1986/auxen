@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -182,7 +183,18 @@ private fun ReorderableQueueList(
     }
 
     LazyColumn {
-        itemsIndexed(visualOrder, key = { _, track -> track.favoriteKey() }) { index, track ->
+        // Positional key: there's no animateItemPlacement here, and Track has
+        // no per-occurrence id, so a track-identity key (the previous
+        // `track.favoriteKey()`) bought nothing and only crashed -- a queue
+        // with the same track twice (a playlist dup, or "play next" on the
+        // same song twice; the queue is raw MediaController items, no dedup)
+        // produced duplicate keys, which Compose treats as a hard error
+        // (final review round, Critical: reproduced, IllegalArgumentException;
+        // regression test in QueueScreenUiTest).
+        itemsIndexed(visualOrder, key = { index, _ -> index }) { index, track ->
+            // Reread on every recomposition of THIS slot, not just once --
+            // see the pointerInput(Unit) note below for why this matters.
+            val currentIndex by rememberUpdatedState(index)
             AuxenTrackRow(
                 track = track,
                 isFavorite = favoriteKeys.contains(track.favoriteKey()),
@@ -203,11 +215,27 @@ private fun ReorderableQueueList(
                         Icon(
                             Icons.Filled.DragHandle,
                             contentDescription = stringResource(R.string.queue_drag_handle_a11y, track.title),
-                            modifier = Modifier.pointerInput(visualOrder) {
+                            // Unit, NOT visualOrder: onDrag reassigns visualOrder
+                            // on every row-cross (below), so keying on it made
+                            // Compose cancel-and-restart this pointerInput's
+                            // gesture-detection coroutine mid-drag -- the
+                            // restarted detectDragGesturesAfterLongPress then
+                            // waits for a fresh awaitFirstDown() that never
+                            // comes until the finger lifts, so a drag died
+                            // after moving at most one position (final review
+                            // round, Important: analysis-based, confirm
+                            // multi-position drag on-device). A stable key
+                            // keeps ONE coroutine alive for the whole gesture;
+                            // currentIndex (rememberUpdatedState) is what lets
+                            // onDragStart still pick up this slot's LATEST
+                            // index for the NEXT gesture, since a
+                            // never-restarting coroutine would otherwise
+                            // freeze it at this row's first-ever composition.
+                            modifier = Modifier.pointerInput(Unit) {
                                 detectDragGesturesAfterLongPress(
                                     onDragStart = {
-                                        dragStartIndex = index
-                                        draggedIndex = index
+                                        dragStartIndex = currentIndex
+                                        draggedIndex = currentIndex
                                         dragOffsetPx = 0f
                                     },
                                     onDrag = { change, dragAmount ->
