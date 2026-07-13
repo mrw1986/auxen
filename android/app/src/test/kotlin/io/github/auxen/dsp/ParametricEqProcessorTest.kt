@@ -16,13 +16,20 @@ class ParametricEqProcessorTest {
         AudioFormat(sampleRate, channels, C.ENCODING_PCM_16BIT)
 
     @Test
-    fun sixteenBitInputYieldsSixteenBitOutput() {
-        // Regression: DefaultAudioSink's built-in SilenceSkipping/Sonic
-        // processors run after ours and only accept 16-bit PCM — emitting
-        // float here kills sink configuration (AUDIO_TRACK_INIT_FAILED).
+    fun sixteenBitInputYieldsFloatForChainHeadroom() {
+        // Supersedes sixteenBitInputYieldsSixteenBitOutput (DSP-a Task 2): the
+        // sink-compat invariant -- DefaultAudioSink's built-in
+        // SilenceSkipping/Sonic processors run after ours and only accept
+        // 16-bit PCM -- moved to the CHAIN level (see
+        // ProcessorChainTest.chainRestoresSixteenBitForTheSink), where a final
+        // EncodingRestorerProcessor converts back to 16-bit. This processor now
+        // always emits float, unclamped, so downstream processors (bass boost,
+        // balance, limiter) have real headroom to work with instead of each
+        // clamping independently. This is an intentional, documented revisit
+        // of the old per-processor mirroring behavior, not a regression.
         val processor = ParametricEqProcessor()
         val out = processor.configure(pcm16Format())
-        assertEquals(C.ENCODING_PCM_16BIT, out.encoding)
+        assertEquals(C.ENCODING_PCM_FLOAT, out.encoding)
         assertEquals(44_100, out.sampleRate)
         assertEquals(2, out.channelCount)
     }
@@ -52,8 +59,11 @@ class ParametricEqProcessorTest {
         input.flip()
         processor.queueInput(input)
         val output = processor.output.order(ByteOrder.nativeOrder())
-        val result = ShortArray(4) { output.short }
-        assertEquals(listOf<Short>(1000, -2000, 32767, -32768), result.toList())
+        val result = FloatArray(4) { output.float }
+        // Exact /32768f promotions -- disabled EQ still converts encoding
+        // (that conversion is unconditional now), it just skips filtering.
+        val expected = floatArrayOf(1000 / 32768f, -2000 / 32768f, 32767 / 32768f, -32768 / 32768f)
+        result.forEachIndexed { i, v -> assertEquals(expected[i], v, 1e-6f) }
     }
 
     @Test
@@ -74,9 +84,41 @@ class ParametricEqProcessorTest {
         input.flip()
         processor.queueInput(input)
         val output = processor.output.order(ByteOrder.nativeOrder())
-        val a = output.short.toInt()
-        val b = output.short.toInt()
-        assertTrue("expected ~10000, got $a", a in 9_500..10_500)
-        assertTrue("expected ~-10000, got $b", b in -10_500..-9_500)
+        val a = output.float
+        val b = output.float
+        // ~20000/32768 * 0.5 = ~0.3052
+        assertTrue("expected ~0.3052, got $a", a in 0.29f..0.32f)
+        assertTrue("expected ~-0.3052, got $b", b in -0.32f..-0.29f)
+    }
+
+    @Test
+    fun boostBeyondFullScaleIsNotClampedMidChain() {
+        // Chain-headroom proof: a big low-shelf boost on a full-scale 16-bit
+        // input must be able to exceed +/-1.0f in the float output -- the old
+        // per-processor clamp block is gone, so the limiter/restorer further
+        // down the chain (not this processor) own the ceiling.
+        val processor = ParametricEqProcessor()
+        processor.updateState(
+            EqState(
+                enabled = true,
+                filters = listOf(FilterSpec(FilterType.LOW_SHELF, freqHz = 80.0, q = 1.0, gainDb = 24.0)),
+            ),
+        )
+        processor.configure(pcm16Format(channels = 1))
+        processor.flush()
+        // Three repeated full-scale samples let the shelf's boost ring up
+        // past its transient onset (verified numerically before writing this:
+        // sample index 2 clears 1.0f with a comfortable margin at these
+        // parameters, well outside float32 precision noise).
+        val input = ByteBuffer.allocateDirect(6).order(ByteOrder.nativeOrder())
+        repeat(3) { input.putShort(32767) }
+        input.flip()
+        processor.queueInput(input)
+        val output = processor.output.order(ByteOrder.nativeOrder())
+        val samples = FloatArray(3) { output.float }
+        assertTrue(
+            "Expected at least one sample to exceed 1.0f (chain headroom, no mid-chain clamp): $samples",
+            samples.any { it > 1.0f },
+        )
     }
 }

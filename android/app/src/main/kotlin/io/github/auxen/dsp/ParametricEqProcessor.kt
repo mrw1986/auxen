@@ -17,21 +17,28 @@ import kotlin.math.pow
  * ExoPlayer's audio pipeline:
  *
  *  - all processing happens in 32-bit float with double-precision biquad
- *    state regardless of source bit depth (16-bit PCM is read up to float,
- *    filtered, then written back as 16-bit);
+ *    state regardless of source bit depth (16-bit PCM is promoted to float,
+ *    filtered, and stays float on the way out — see below);
  *  - filters are double-precision biquads, stable at low frequencies;
  *  - the preamp is applied in the same pass, so headroom management is exact;
- *  - samples are clamped to full scale before any re-quantisation.
  *
- * ### Output encoding mirrors input
- * [androidx.media3.exoplayer.audio.DefaultAudioSink] appends its own built-in
- * processors (silence skipping, speed/pitch) *after* any user processor, and
- * those accept only [C.ENCODING_PCM_16BIT]. Emitting float from here made
- * sink configuration throw for every 16-bit source (`AUDIO_TRACK_INIT_FAILED`),
- * so this processor emits whatever encoding it was given: 16-bit stays 16-bit
- * through the rest of the chain, float stays float. The 16-bit output path is
- * a plain scale-and-clamp with no dithering — a deliberate simplification, as
- * the EQ's own gain changes dominate any truncation noise.
+ * ### Chain-level float headroom, not per-processor mirroring
+ * This processor is one link in a chain (`ReplayGain → ParametricEq →
+ * BassBoost → Balance → Limiter → EncodingRestorer`, DSP-a Task 2 onward)
+ * that runs entirely in float between our own processors, so a boost in one
+ * stage has real headroom to be tamed by a later stage (the limiter) instead
+ * of each processor independently clamping and destroying that information.
+ * Earlier, this processor mirrored its input encoding (16-bit in, 16-bit out)
+ * because [androidx.media3.exoplayer.audio.DefaultAudioSink] appends its own
+ * built-in processors (silence skipping, speed/pitch) *after* any user
+ * processor, and those accept only [C.ENCODING_PCM_16BIT] — emitting float
+ * for a 16-bit source broke sink configuration (`AUDIO_TRACK_INIT_FAILED`).
+ * That sink-compat contract still holds, but it now lives at the END of the
+ * chain: a final `EncodingRestorerProcessor` converts back to 16-bit right
+ * before the sink's own processors, so every processor in between — this one
+ * included — can emit unclamped float regardless of what it was given. 16-bit
+ * input is promoted (`/32768f`) and never clamped back down here; float input
+ * passes through the same filtering, also unclamped.
  *
  * Hi-res float sources currently bypass the processor chain at the sink level,
  * so the EQ is silently inactive on them today; routing the EQ into that path
@@ -71,10 +78,9 @@ class ParametricEqProcessor : BaseAudioProcessor() {
         channelCount = inputAudioFormat.channelCount
         inputEncoding = encoding
         builtGeneration = -1 // force filter rebuild for the new format
-        // Emit the same encoding we received: DefaultAudioSink appends its own
-        // 16-bit-only processors after ours, so emitting float mid-chain fails
-        // sink configuration for every 16-bit source (AUDIO_TRACK_INIT_FAILED).
-        return AudioFormat(inputAudioFormat.sampleRate, inputAudioFormat.channelCount, encoding)
+        // Always emit float: sink-compat 16-bit conversion now happens once,
+        // at the chain's tail, in EncodingRestorerProcessor (see class KDoc).
+        return AudioFormat(inputAudioFormat.sampleRate, inputAudioFormat.channelCount, C.ENCODING_PCM_FLOAT)
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
@@ -83,7 +89,9 @@ class ParametricEqProcessor : BaseAudioProcessor() {
         val is16Bit = inputEncoding == C.ENCODING_PCM_16BIT
         val bytesPerSample = if (is16Bit) 2 else 4
         val sampleCount = inputBuffer.remaining() / bytesPerSample
-        val output = replaceOutputBuffer(sampleCount * bytesPerSample)
+        // Output is always float now (see class KDoc): 4 bytes/sample
+        // regardless of the input encoding.
+        val output = replaceOutputBuffer(sampleCount * 4)
 
         val active = state.enabled && filters.isNotEmpty()
         var i = 0
@@ -99,18 +107,10 @@ class ParametricEqProcessor : BaseAudioProcessor() {
                 for (filter in filters) {
                     sample = filter.processSample(channel, sample)
                 }
-                // Sinks clip anything beyond full scale at the HAL; do it here
-                // deterministically instead.
-                if (sample > 1f) sample = 1f else if (sample < -1f) sample = -1f
+                // No clamp: the limiter and EncodingRestorerProcessor further
+                // down the chain own the ceiling, not this processor.
             }
-            if (is16Bit) {
-                // Symmetric inverse of the /32768 read; coerceIn clamps the
-                // +1.0 case (1.0 * 32768 == 32768) into the signed-16 range.
-                // No dithering — a deliberate simplification (see class KDoc).
-                output.putShort((sample * 32768f).toInt().coerceIn(-32768, 32767).toShort())
-            } else {
-                output.putFloat(sample)
-            }
+            output.putFloat(sample)
             i++
         }
         output.flip()
