@@ -144,7 +144,7 @@
       <li class="done">Reverb <span>— platform PresetReverb (7 presets) via the audio session</span></li>
       <li class="done">Virtualizer <span>— platform effect via the audio session, 0–100% strength</span></li>
       <li class="done">Sleep timer <span>— presets + “finish this track” phase, live countdown, cancelable</span></li>
-      <li class="done">Per-effect toggle UI <span>— seven expandable sections on the Equalizer screen, each with its own switch; EQ toggle is section-scoped</span></li>
+      <li class="done">Per-effect toggle UI <span>— eight expandable sections on the Equalizer screen, each with its own switch; headphone correction (AutoEq) and the graphic EQ are separate, independently-toggleable stages</span></li>
     </ul>
     <div class="dod"><b>Done means:</b> every effect has its own toggle, settings persist/restore independently, regression tests per processor + section goldens, 283 tests green. Reverb/virtualizer audibility is the one thing CI can’t verify — shipped with an on-device checklist.</div>
   </div>
@@ -248,6 +248,7 @@
   <div class="log">
     <h2>Changelog</h2>
     <table>
+      <tr><td>2026-07-13</td><td>Post-device-test fixes: reverb now routes as an auxiliary send-effect (was silent) and defaults to a real preset; virtualizer gets the Android 13/14 binaural workaround; bigger launcher icon + top-bar lockup; and AutoEq (headphone correction) split into its own independently-toggleable stage separate from the graphic EQ — importing a headphone profile no longer wipes your manual EQ. Chain is now ReplayGain → AutoEq → GraphicEq → BassBoost → Balance → Limiter → EncodingRestorer.</td></tr>
       <tr><td>2026-07-13</td><td>DSP suite complete: DSP-b shipped the user-facing half — seven per-effect toggle sections on the Equalizer screen, platform reverb + virtualizer on the sink-committed audio session, and a sleep timer (with a “finish this track” phase). 283 tests. A 59-agent final review caught a merge-blocking sheet-overflow, a stale-snapshot bug in the slider debounce, and the sleep-timer completion state gap — all fixed before ship. The whole Wavelet-class suite is now toggleable on-device.</td></tr>
       <tr><td>2026-07-13</td><td>DSP engine (DSP-a) shipped: full six-stage float-through chain live (ReplayGain → EQ → bass boost → balance → soft-knee limiter → encoding restorer), per-effect independent persistence, per-track ReplayGain from local tags + Tidal. 204 tests. A 68-agent final review caught and closed a NaN-silence import bug, an ID3v2.3 spec bug, and lifecycle races before ship. Effect UI, reverb/virtualizer, and sleep timer next (DSP-b, plan committed).</td></tr>
       <tr><td>2026-07-13</td><td>Visual Parity batch shipped: 23-finding desktop audit closed across branding (ox launcher/splash, Josefin-gold brand lockup, notification icon) and theme (amber selection states, badges, player chrome, typography) — 14 commits, every task review-gated, 138 tests + CI emulator green. Smoke flow now asserts real playback + media notification.</td></tr>
