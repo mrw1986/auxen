@@ -72,11 +72,18 @@ data class ReplayGainState(
  * stored as a plain `Int` here (rather than the platform API's `Short`) so
  * this state has no Android dependency -- the service converts at the
  * platform-API boundary.
+ *
+ * Defaults to `SMALLROOM` (1), not `NONE` (0): a fresh `ReverbState(enabled
+ * = true)` (as `reverbStateForEnableToggle` in `ui/components/FxSections.kt`
+ * also guards against at the UI's enable toggle) must never mean "enabled,
+ * but silent" -- `NONE` is a real, audible-zero preset selection, not a
+ * placeholder (platform effects fix -- user-confirmed device report,
+ * 2026-07-13).
  */
 @Serializable
 data class ReverbState(
     val enabled: Boolean = false,
-    val preset: Int = 0,
+    val preset: Int = 1,
 )
 
 /**

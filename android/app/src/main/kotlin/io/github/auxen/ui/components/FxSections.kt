@@ -281,6 +281,21 @@ fun LimiterSection(
 }
 
 /**
+ * Applied at the reverb section's enable toggle. Enabling reverb while its
+ * preset is still `PRESET_NONE` (0) would otherwise silently produce zero
+ * effect -- "reverb on" reading as "reverberation preset none" -- since the
+ * preset dropdown is a completely separate control from the enable switch.
+ * Picks a real preset (`PRESET_SMALLROOM`, 1) instead, but ONLY when
+ * enabling from `PRESET_NONE`; an already-chosen preset, or a disable, is
+ * left untouched (platform effects fix -- user-confirmed device report,
+ * 2026-07-13, the strongest and cheapest of the two root causes).
+ */
+internal fun reverbStateForEnableToggle(current: ReverbState, enabling: Boolean): ReverbState {
+    val preset = if (enabling && current.preset == 0) 1 else current.preset
+    return current.copy(enabled = enabling, preset = preset)
+}
+
+/**
  * `PresetReverb.PRESET_*` display labels, index-aligned with the platform
  * constants (`NONE`=0 .. `PLATE`=6) -- see [ReverbState.preset]'s KDoc.
  */
@@ -308,7 +323,7 @@ fun ReverbSection(
         title = stringResource(R.string.fx_reverb_title),
         subtitle = stringResource(R.string.fx_reverb_subtitle),
         enabled = state.enabled,
-        onEnabledChange = { onStateChange(AudioFxController.reverbState.value.copy(enabled = it)) },
+        onEnabledChange = { onStateChange(reverbStateForEnableToggle(AudioFxController.reverbState.value, it)) },
         expanded = expanded,
         onExpandedChange = onExpandedChange,
         modifier = modifier,

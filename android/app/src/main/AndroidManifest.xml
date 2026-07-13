@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Reverb aux-effect routing (Player.setAuxEffectInfo); a normal
+         permission, no runtime request needed. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Local music library access -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission

@@ -3,10 +3,13 @@ package io.github.auxen.playback
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.audiofx.AudioEffect
 import android.media.audiofx.PresetReverb
 import android.media.audiofx.Virtualizer
 import android.os.SystemClock
+import android.util.Log
 import androidx.media3.common.AudioAttributes
+import androidx.media3.common.AuxEffectInfo
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -133,6 +136,24 @@ class PlaybackService : MediaSessionService() {
     @Volatile
     private var virtualizer: Virtualizer? = null
 
+    // Diagnostic snapshot for the "AuxenFx" log line (platform effects fix,
+    // user-confirmed device report, 2026-07-13) -- audibility is un-CI-
+    // testable, so this is the shipped on-device fallback: `adb logcat -s
+    // AuxenFx` during a toggle pinpoints whichever hypothesis is still live.
+    // Written alongside reverb/virtualizer (same rebuild/apply call sites),
+    // read from logFxDiagnostics -- same cross-thread shape as reverb/
+    // virtualizer themselves, so @Volatile for the same reason.
+    @Volatile
+    private var reverbSetEnabledStatus: Int? = null
+    @Volatile
+    private var reverbAuxRouteSet: Boolean = false
+    @Volatile
+    private var virtualizerSetStrengthStatus: Int? = null
+    @Volatile
+    private var virtualizerSetEnabledStatus: Int? = null
+    @Volatile
+    private var virtualizerForceModeApplied: Boolean = false
+
     /**
      * One-shot flag set by the sleep-timer watcher when
      * [SleepTimerState.finishTrack] is armed and the timer expires -- the
@@ -179,12 +200,6 @@ class PlaybackService : MediaSessionService() {
         AudioFxController.attachBassBoost { state -> bassBoostProcessor.updateState(state) }
         AudioFxController.attachBalance { state -> balanceProcessor.updateState(state) }
         AudioFxController.attachLimiter { state -> limiterProcessor.updateState(state) }
-        // Platform effects (below the in-process chain): attach here so a
-        // settings change reaches whatever reverb/virtualizer instance
-        // currently exists, null-safely no-op'ing before the first one is
-        // built by rebuildSessionEffects (right after the player itself).
-        AudioFxController.attachReverb { state -> applyReverb(state) }
-        AudioFxController.attachVirtualizer { state -> applyVirtualizer(state) }
         val rgGainRouter = RgGainRouter(serviceScope, replayGainProcessor)
 
         val dataSourceFactory = ResolvingDataSource.Factory(
@@ -216,6 +231,14 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
+
+        // Platform effects (below the in-process chain): attach here (after
+        // `player` exists, since reverb's route needs player.setAuxEffectInfo)
+        // so a settings change reaches whatever reverb/virtualizer instance
+        // currently exists, null-safely no-op'ing before the first one is
+        // built by rebuildSessionEffects (right after this).
+        AudioFxController.attachReverb { state -> applyReverb(state, player) }
+        AudioFxController.attachVirtualizer { state -> applyVirtualizer(state) }
 
         // Sleep timer: collectLatest re-launches (cancelling any in-flight
         // delay) every time SleepTimerController's state changes, so a
@@ -283,6 +306,14 @@ class PlaybackService : MediaSessionService() {
                 preResolveUpcoming(player)
                 rgGainRouter.route(mediaItem?.mediaId, player.playWhenReady)
                 checkSleepTimerPause(player)
+                // Belt-and-suspenders: the AudioTrack (and therefore the
+                // platform effects attached to its session) can be recreated
+                // between tracks or on a route change without necessarily
+                // firing onAudioSessionIdChanged -- re-apply the CURRENT
+                // AudioFxController states on every transition rather than
+                // relying solely on the session-id-change path (platform
+                // effects fix, user-confirmed device report, 2026-07-13).
+                reapplySessionEffects(player)
             }
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
@@ -322,7 +353,7 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
-                rebuildSessionEffects(audioSessionId)
+                rebuildSessionEffects(audioSessionId, player)
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -334,6 +365,13 @@ class PlaybackService : MediaSessionService() {
                     // KDoc) -- this is the belt half of the belt-and-
                     // suspenders pair with onPlayWhenReadyChanged below.
                     rgGainRouter.route(player.currentMediaItem?.mediaId, player.playWhenReady)
+                    // On-device diagnostic (platform effects fix,
+                    // user-confirmed device report, 2026-07-13): playback
+                    // actually starting is the moment the user would notice
+                    // reverb/virtualizer being silent, so this is the second
+                    // of the two required log points (`adb logcat -s
+                    // AuxenFx`), alongside every session rebuild.
+                    logFxDiagnostics(player.audioSessionId)
                 } else {
                     scheduleQueueSave(player)
                 }
@@ -521,35 +559,147 @@ class PlaybackService : MediaSessionService() {
      * constructors can throw), and an effect is never allowed to break
      * playback -- a `null` instance just means [applyReverb]/[applyVirtualizer]
      * no-op until the next successful rebuild (DSP-b Task 1).
+     *
+     * `PresetReverb(1, sessionId)`, not priority 0: matches the empirically-
+     * proven recipe from four independent working Media3 players (RiMusic,
+     * ViTune, Kreate, RiPlay) that this fix was researched against -- the
+     * platform-doc-cited "session 0" alternative was tried and rejected (see
+     * the plan's RECONCILIATION note; `setAudioSessionId(UNSET)` in
+     * [onCreate] is what actually guarantees the sink adopts this exact
+     * per-session id, independent of the reverb priority question).
      */
-    private fun rebuildSessionEffects(sessionId: Int) {
+    private fun rebuildSessionEffects(sessionId: Int, player: ExoPlayer) {
+        runCatching { player.clearAuxEffectInfo() }
         runCatching { reverb?.release() }
         runCatching { virtualizer?.release() }
         reverb = null
         virtualizer = null
+        reverbSetEnabledStatus = null
+        reverbAuxRouteSet = false
+        virtualizerSetStrengthStatus = null
+        virtualizerSetEnabledStatus = null
+        virtualizerForceModeApplied = false
         if (sessionId == C.AUDIO_SESSION_ID_UNSET) return
-        reverb = runCatching { PresetReverb(0, sessionId) }.getOrNull()
+        reverb = runCatching { PresetReverb(1, sessionId) }.getOrNull()
         virtualizer = runCatching { Virtualizer(0, sessionId) }.getOrNull()
-        applyReverb(AudioFxController.reverbState.value)
+        applyReverb(AudioFxController.reverbState.value, player)
+        applyVirtualizer(AudioFxController.virtualizerState.value)
+        logFxDiagnostics(sessionId)
+    }
+
+    /**
+     * Re-runs [applyReverb]/[applyVirtualizer] for the CURRENT
+     * [AudioFxController] states without tearing down/rebuilding the
+     * platform effect objects themselves -- belt-and-suspenders against the
+     * AudioTrack being recreated (between tracks, or on a route change)
+     * without necessarily firing `onAudioSessionIdChanged` (platform
+     * effects fix, user-confirmed device report, 2026-07-13). Called from
+     * `onMediaItemTransition`.
+     */
+    private fun reapplySessionEffects(player: ExoPlayer) {
+        applyReverb(AudioFxController.reverbState.value, player)
         applyVirtualizer(AudioFxController.virtualizerState.value)
     }
 
-    /** Null-safe: no-ops if [reverb] hasn't been built yet (or failed to build). */
-    private fun applyReverb(state: ReverbState) {
+    /**
+     * Null-safe: no-ops if [reverb] hasn't been built yet (or failed to
+     * build). `PresetReverb` is an AUXILIARY (send) effect -- `enabled =
+     * true` alone is inaudible; it must additionally be routed into the
+     * sink via [ExoPlayer.setAuxEffectInfo] (-> `AudioTrack.attachAuxEffect`
+     * + `setAuxEffectSendLevel`), which is the actual root cause this fix
+     * addresses. `DefaultAudioSink` re-applies `AuxEffectInfo` across track
+     * transitions on its own; [reapplySessionEffects] is the additional
+     * belt-and-suspenders path for a recreated `AudioTrack`.
+     *
+     * Uses the `setEnabled`/method form (not the `r.enabled = ...` property
+     * assignment this used to use) specifically to capture the `Int` status
+     * code `AudioEffect.setEnabled` returns -- silently discarded by
+     * property-assignment syntax, but the whole point of
+     * [reverbSetEnabledStatus] existing for the `AuxenFx` diagnostic log.
+     */
+    private fun applyReverb(state: ReverbState, player: ExoPlayer) {
         val r = reverb ?: return
         runCatching {
-            r.enabled = state.enabled
             r.preset = clampReverbPreset(state.preset)
+            reverbSetEnabledStatus = r.setEnabled(state.enabled)
+            if (state.enabled) {
+                player.setAuxEffectInfo(AuxEffectInfo(r.id, 1f))
+                reverbAuxRouteSet = true
+            } else {
+                player.clearAuxEffectInfo()
+                reverbAuxRouteSet = false
+            }
         }
     }
 
-    /** Null-safe: no-ops if [virtualizer] hasn't been built yet (or failed to build). */
+    /**
+     * Null-safe: no-ops if [virtualizer] hasn't been built yet (or failed to
+     * build). An INSERT effect (unlike reverb) -- no aux routing needed --
+     * but Android 13/14 has a known platform bug that leaves it silent
+     * unless [Virtualizer.forceVirtualizationMode] is called with
+     * [Virtualizer.VIRTUALIZATION_MODE_BINAURAL] roughly 50ms AFTER
+     * `enabled = true` settles (sourced from the Wavelet author's
+     * documented workaround) -- also what makes it audible over the
+     * device speaker, since binaural virtualization is otherwise
+     * headphones-only by spec. Captures the current [virtualizer] instance
+     * before the delayed call, since a session rebuild could otherwise
+     * swap it out from under a still-pending delay.
+     */
     private fun applyVirtualizer(state: VirtualizerState) {
         val v = virtualizer ?: return
         runCatching {
-            v.enabled = state.enabled
-            v.setStrength(clampVirtualizerStrength(state.strength))
+            if (v.strengthSupported) {
+                // Virtualizer.setStrength returns void (throws on error), unlike
+                // AudioEffect.setEnabled which returns a status int -- capture
+                // success/failure explicitly so the AuxenFx diagnostic still has
+                // a status field for it.
+                virtualizerSetStrengthStatus = runCatching {
+                    v.setStrength(clampVirtualizerStrength(state.strength))
+                    AudioEffect.SUCCESS
+                }.getOrDefault(AudioEffect.ERROR)
+            }
+            virtualizerSetEnabledStatus = v.setEnabled(state.enabled)
         }
+        if (state.enabled) {
+            val captured = v
+            serviceScope.launch {
+                delay(50)
+                runCatching { captured.forceVirtualizationMode(Virtualizer.VIRTUALIZATION_MODE_BINAURAL) }
+                    .onSuccess { virtualizerForceModeApplied = true }
+            }
+        }
+    }
+
+    /**
+     * Emits the single `AuxenFx`-tagged diagnostic line the device
+     * checklist depends on (platform effects fix, user-confirmed device
+     * report, 2026-07-13) -- called on every session rebuild and from
+     * `onIsPlayingChanged(true)`. [formatFxDiagnosticLog] is the pure,
+     * directly-testable half; this method's only job is assembling the
+     * live snapshot from [reverb]/[virtualizer] and this service's own
+     * status fields.
+     */
+    private fun logFxDiagnostics(sessionId: Int) {
+        val r = reverb
+        val v = virtualizer
+        val message = formatFxDiagnosticLog(
+            sessionId = sessionId,
+            reverb = ReverbDiagnostics(
+                created = r != null,
+                id = r?.id,
+                hasControl = runCatching { r?.hasControl() }.getOrNull(),
+                setEnabledStatus = reverbSetEnabledStatus,
+                auxRouteSet = reverbAuxRouteSet,
+            ),
+            virtualizer = VirtualizerDiagnostics(
+                created = v != null,
+                strengthSupported = runCatching { v?.strengthSupported }.getOrNull(),
+                setStrengthStatus = virtualizerSetStrengthStatus,
+                setEnabledStatus = virtualizerSetEnabledStatus,
+                forceModeApplied = virtualizerForceModeApplied,
+            ),
+        )
+        Log.i("AuxenFx", message)
     }
 
     /**
@@ -651,6 +801,12 @@ class PlaybackService : MediaSessionService() {
         }
         mainScope.cancel()
         mediaSession?.run {
+            // MediaSession.player is typed as the base Player interface, not
+            // ExoPlayer -- clearAuxEffectInfo() is ExoPlayer-specific, so a
+            // safe cast, not a straight call (the actual runtime instance is
+            // always the ExoPlayer onCreate built; a safe cast just avoids
+            // any crash risk if that ever stops holding).
+            runCatching { (player as? ExoPlayer)?.clearAuxEffectInfo() }
             player.release()
             release()
             mediaSession = null
@@ -681,6 +837,48 @@ internal fun clampReverbPreset(preset: Int): Short = preset.coerceIn(0, 6).toSho
  * apply-site-validation reasoning as [clampReverbPreset].
  */
 internal fun clampVirtualizerStrength(strength: Int): Short = strength.coerceIn(0, 1000).toShort()
+
+/**
+ * Plain snapshot of a `PresetReverb`'s live state for the `AuxenFx`
+ * diagnostic line -- nullable where a getter can be absent (never built,
+ * or threw). Kept as a value type so [formatFxDiagnosticLog] is a pure,
+ * directly-testable function with no platform-effect object involved.
+ */
+internal data class ReverbDiagnostics(
+    val created: Boolean,
+    val id: Int?,
+    val hasControl: Boolean?,
+    val setEnabledStatus: Int?,
+    val auxRouteSet: Boolean,
+)
+
+/** Plain snapshot of a `Virtualizer`'s live state for the `AuxenFx` line. */
+internal data class VirtualizerDiagnostics(
+    val created: Boolean,
+    val strengthSupported: Boolean?,
+    val setStrengthStatus: Int?,
+    val setEnabledStatus: Int?,
+    val forceModeApplied: Boolean,
+)
+
+/**
+ * Pure formatter for the single `AuxenFx`-tagged diagnostic line the device
+ * checklist relies on (`adb logcat -s AuxenFx`). Field set + wording are
+ * pinned by [FxDiagnosticLogTest]; audibility itself is un-CI-testable, so
+ * this structured line is the shipped fallback for disambiguating the
+ * remaining device-only hypotheses.
+ */
+internal fun formatFxDiagnosticLog(
+    sessionId: Int,
+    reverb: ReverbDiagnostics,
+    virtualizer: VirtualizerDiagnostics,
+): String =
+    "sessionId=$sessionId " +
+        "reverb[created=${reverb.created} id=${reverb.id} hasControl=${reverb.hasControl} " +
+        "setEnabledStatus=${reverb.setEnabledStatus} auxRouteSet=${reverb.auxRouteSet}] " +
+        "virtualizer[created=${virtualizer.created} strengthSupported=${virtualizer.strengthSupported} " +
+        "setStrengthStatus=${virtualizer.setStrengthStatus} setEnabledStatus=${virtualizer.setEnabledStatus} " +
+        "forceModeApplied=${virtualizer.forceModeApplied}]"
 
 private inline fun <reified T : Throwable> findCause(error: Throwable): T? {
     var cause: Throwable? = error
