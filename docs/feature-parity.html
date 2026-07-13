@@ -190,15 +190,15 @@
     <p>Every feature the GTK desktop app has today, mapped against the Android port's shipped code and committed pipeline. Rows in the tables all exist on desktop; the chip shows where Android stands.</p>
     <div class="meta">
       <span>2026-07-13</span>
-      <span>branch claude/android-app-availability-y6uzb0 @ 68c4aa3</span>
+      <span>branch claude/android-app-availability-y6uzb0 @ d655592</span>
       <span>65 features tracked</span>
     </div>
   </header>
 
   <div class="tiles">
-    <div class="tile t-shipped"><b>33</b><small>Shipped</small></div>
+    <div class="tile t-shipped"><b>34</b><small>Shipped</small></div>
     <div class="tile t-partial"><b>7</b><small>Partial</small></div>
-    <div class="tile t-pipeline"><b>13</b><small>In pipeline</small></div>
+    <div class="tile t-pipeline"><b>12</b><small>In pipeline</small></div>
     <div class="tile t-gap"><b>9</b><small>Not planned yet</small></div>
     <div class="tile t-adapted"><b>3</b><small>Adapted</small></div>
   </div>
@@ -279,7 +279,7 @@
       <tr><td class="f">10-band graphic EQ + presets</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Same ISO bands and ten presets, double-precision biquads</td></tr>
       <tr><td class="f">AutoEq profile import</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Plus the searchable 8,850-profile picker — beyond desktop</td></tr>
       <tr><td class="f">ReplayGain volume normalization</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Engine live: local FLAC/ID3 tags + Tidal gains applied per track; mode/preamp UI lands in DSP-b</td></tr>
-      <tr><td class="f">Sleep timer</td><td class="s"><span class="chip c-pipeline">Pipeline</span></td><td class="n">Folded into the DSP suite's UI batch</td></tr>
+      <tr><td class="f">Sleep timer</td><td class="s"><span class="chip c-shipped">Shipped</span></td><td class="n">Presets + “finish this track” phase, live countdown, cancelable; on the Now Playing screen</td></tr>
       <tr><td class="f">Last.fm scrobbling</td><td class="s"><span class="chip c-gap">Gap</span></td><td class="n">Desktop scrobbles; Android has nothing planned</td></tr>
       <tr><td class="f">Desktop notifications</td><td class="s"><span class="chip c-adapted">Adapted</span></td><td class="n">Media notification covers it</td></tr>
       <tr><td class="f">Album art & artist image caching</td><td class="s"><span class="chip c-partial">Partial</span></td><td class="n">Coil handles album art; desktop's circular artist-image service (with disk cache) has no mobile equivalent yet</td></tr>
@@ -324,7 +324,7 @@
       <li><b>Expiring-URL self-healing</b> <span>— Tidal streams auto-refresh mid-queue</span></li>
       <li><b>Playback resumption</b> <span>— queue restores into the media notification after process death</span></li>
       <li><b>Playback error banner</b> <span>— failures are visible, not silent</span></li>
-      <li><b>Coming in the DSP suite</b> <span>— bass boost, channel balance, limiter, reverb, virtualizer (each individually toggleable)</span></li>
+      <li><b>Full DSP suite</b> <span>— bass boost, channel balance, soft-knee limiter, ReplayGain, plus platform reverb + virtualizer, each individually toggleable with its own section on the Equalizer screen (desktop has no reverb/virtualizer)</span></li>
       <li><b>Original mobile roadmap</b> <span>— Android Auto, Chromecast, widgets, offline downloads, per-device Bluetooth EQ profiles</span></li>
     </ul>
   </section>

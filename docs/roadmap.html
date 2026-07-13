@@ -99,7 +99,7 @@
     <p>The source of truth for everything between here and full desktop parity (and beyond it). Ordered by execution sequence; updated after every milestone, review, and scope decision. Companion to the <em>feature parity matrix</em>.</p>
     <div class="meta">
       <span>Updated 2026-07-13</span>
-      <span>@ 68c4aa3</span>
+      <span>@ d655592</span>
       <span>9 batches sequenced</span>
     </div>
   </header>
@@ -131,28 +131,28 @@
     <div class="dod"><b>Done means:</b> side-by-side with the desktop app, the same palette, badges, brand lockup, and type roles — 138 JVM tests + goldens green, CI emulator smoke green.</div>
   </div>
 
-  <p class="lane">In flight</p>
-
-  <div class="ms next-up">
-    <h2>1 · DSP &amp; Audio Suite <span class="chip c-active">In progress</span></h2>
-    <p class="scope">The Wavelet-class effects chain. Binding constraint: <b>every effect individually toggleable</b>, each with its own independently persisted enable flag — no coupling between effects. In-pipeline processors run in the same double-precision path as the EQ; platform effects attach to the audio session.</p>
+  <div class="ms">
+    <h2>1 · DSP &amp; Audio Suite <span class="chip c-done">Done</span></h2>
+    <p class="scope">The Wavelet-class effects chain, shipped across two batches (DSP-a engine + DSP-b UI/platform effects). Binding constraint held throughout: <b>every effect individually toggleable</b>, each with its own independently persisted enable flag — no coupling. In-pipeline processors run in the EQ's double-precision path; reverb/virtualizer attach to the sink-committed audio session.</p>
     <ul>
-      <li class="done">Per-effect state + controller <span>— four independently persisted enable/param states; single-applier design, thread-safe</span></li>
+      <li class="done">Per-effect state + controller <span>— independently persisted enable/param states; single-applier design, thread-safe</span></li>
       <li class="done">Float-through processor chain <span>— EQ emits unclamped float for headroom; encoding restorer owns the 16-bit tail; chain order pinned by test</span></li>
       <li class="done">Bass boost <span>— adjustable low-shelf (frequency + gain), in-pipeline</span></li>
       <li class="done">Channel balance <span>— attenuate-only per-channel gain, in-pipeline</span></li>
       <li class="done">Limiter <span>— soft-knee, instant attack / exponential release, on by default; replaces the old hard clip</span></li>
-      <li class="done">ReplayGain engine <span>— zero-dependency FLAC/ID3 tag parser (overflow-hardened) + Tidal playbackinfo gains, routed per track; toggles/preamp UI in DSP-b</span></li>
-      <li class="doing">Reverb <span>— platform PresetReverb via audio session; DSP-b</span></li>
-      <li class="doing">Virtualizer <span>— platform effect via audio session; DSP-b</span></li>
-      <li class="doing">Sleep timer <span>— folded in from the gap list; DSP-b</span></li>
-      <li class="doing">Per-effect toggle UI <span>— each section with its own switch; EQ's master toggle becomes section-scoped; DSP-b</span></li>
+      <li class="done">ReplayGain <span>— zero-dependency FLAC/ID3 tag parser (overflow-hardened) + Tidal playbackinfo gains, routed per track; mode/preamp/fallback UI</span></li>
+      <li class="done">Reverb <span>— platform PresetReverb (7 presets) via the audio session</span></li>
+      <li class="done">Virtualizer <span>— platform effect via the audio session, 0–100% strength</span></li>
+      <li class="done">Sleep timer <span>— presets + “finish this track” phase, live countdown, cancelable</span></li>
+      <li class="done">Per-effect toggle UI <span>— seven expandable sections on the Equalizer screen, each with its own switch; EQ toggle is section-scoped</span></li>
     </ul>
-    <div class="dod"><b>Done means:</b> every effect audibly works with its own toggle, settings persist and restore independently, regression tests per processor, goldens for the new sections, shipped to your phone.</div>
+    <div class="dod"><b>Done means:</b> every effect has its own toggle, settings persist/restore independently, regression tests per processor + section goldens, 283 tests green. Reverb/virtualizer audibility is the one thing CI can’t verify — shipped with an on-device checklist.</div>
   </div>
 
-  <div class="ms">
-    <h2>2 · Desktop-Parity Screens &amp; Tidal Discovery <span class="chip c-queued">Queued</span></h2>
+  <p class="lane">Next</p>
+
+  <div class="ms next-up">
+    <h2>2 · Desktop-Parity Screens &amp; Tidal Discovery <span class="chip c-next">Next up</span></h2>
     <p class="scope">The largest remaining batch: everything the desktop shows that Android doesn't yet, plus the Settings home for orphaned preferences. Design source: the inventory distilled from ui-mockup.html and auxen/views/.</p>
     <ul>
       <li>Tidal Home carousels <span>— personalized sections on Home when logged in</span></li>
@@ -248,6 +248,7 @@
   <div class="log">
     <h2>Changelog</h2>
     <table>
+      <tr><td>2026-07-13</td><td>DSP suite complete: DSP-b shipped the user-facing half — seven per-effect toggle sections on the Equalizer screen, platform reverb + virtualizer on the sink-committed audio session, and a sleep timer (with a “finish this track” phase). 283 tests. A 59-agent final review caught a merge-blocking sheet-overflow, a stale-snapshot bug in the slider debounce, and the sleep-timer completion state gap — all fixed before ship. The whole Wavelet-class suite is now toggleable on-device.</td></tr>
       <tr><td>2026-07-13</td><td>DSP engine (DSP-a) shipped: full six-stage float-through chain live (ReplayGain → EQ → bass boost → balance → soft-knee limiter → encoding restorer), per-effect independent persistence, per-track ReplayGain from local tags + Tidal. 204 tests. A 68-agent final review caught and closed a NaN-silence import bug, an ID3v2.3 spec bug, and lifecycle races before ship. Effect UI, reverb/virtualizer, and sleep timer next (DSP-b, plan committed).</td></tr>
       <tr><td>2026-07-13</td><td>Visual Parity batch shipped: 23-finding desktop audit closed across branding (ox launcher/splash, Josefin-gold brand lockup, notification icon) and theme (amber selection states, badges, player chrome, typography) — 14 commits, every task review-gated, 138 tests + CI emulator green. Smoke flow now asserts real playback + media notification.</td></tr>
       <tr><td>2026-07-13</td><td>DSP &amp; Audio Suite underway: per-effect state/controller landed (reviewed, concurrency-hardened); float-through chain in progress.</td></tr>

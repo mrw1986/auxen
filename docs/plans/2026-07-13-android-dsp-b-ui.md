@@ -1,5 +1,12 @@
 # Android DSP-b — Effect UI, Platform Effects, Sleep Timer
 
+> **STATUS: SHIPPED (Tasks 1–5 + final review fix rounds; commits 6426194..d655592, 283 tests).** Retained as record. Review-driven deviations that WON over the text below:
+> - **Task 1 session-id trigger:** the plan's `rebuildSessionEffects(onAudioSessionIdChanged)` sketch alone never fires — ExoPlayer's constructor-generated id is never propagated to the sink. Shipped code calls `player.setAudioSessionId(C.AUDIO_SESSION_ID_UNSET)` after construction (and after `addListener`) to force the sink-committed id through the listener. Effect audibility is untestable in CI — see the device checklist in `dspb-task-1-report.md`.
+> - **Sleep timer** gained a `pendingTrackEnd` phase (post-expiry, waiting-for-track-end, visible + cancelable) beyond the plan's two-state sketch; normal completion clears controller state via `checkSleepTimerPause` → `SleepTimerController.cancel()`.
+> - **Preset row** uses `FlowRow` (wraps) — a plain Row overflowed on narrow widths / large font scales.
+> - **rememberDebouncedSlider** flushes on dispose and reads controller state fresh at commit time (not a closure-frozen whole-state snapshot).
+> - Every effect section reads/writes only its own `AudioFxController` state — the binding per-effect-independence requirement held throughout.
+
 **Goal:** Make the DSP-a engine user-visible and complete the Wavelet-class suite: per-effect toggle UI on the Equalizer screen, platform PresetReverb + Virtualizer via the audio session, and the sleep timer. Standing user requirement (BINDING): **every effect individually toggleable, independently persisted, no coupling.**
 
 **Prerequisite:** DSP-a complete (chain live: ReplayGain → Eq → Bass → Balance → Limiter → Restorer; `AudioFxController` slots for bass/balance/limiter/replayGain; `buildDspProcessorChain` order-pinned by test).
