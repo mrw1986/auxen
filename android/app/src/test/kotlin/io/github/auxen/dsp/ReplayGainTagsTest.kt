@@ -42,6 +42,33 @@ class ReplayGainTagsTest {
 
     private val garbageBuffer = byteArrayOf(0, 1, 2, -1, -2, 16, 32, 48)
 
+    // Fix round (review of commit 73bd755), Important #1: fLaC magic + a
+    // VORBIS_COMMENT block whose vendor_length field is 0x7FFFFFFF (max
+    // positive Int32) -- Vorbis comment lengths are a genuine unbounded
+    // 32-bit field (unlike FLAC's own 24-bit block-length header), so the
+    // old addition-based bound check (`pos + vendorLength > end`) overflows
+    // to a negative sum that wrongly passes, and the next array access
+    // throws. Reproduced and the fix verified in Python (both old and new
+    // logic against this exact byte layout) before writing this test.
+    private val flacHugeVendorLength = byteArrayOf(102, 76, 97, 67, -124, 0, 0, 4, -1, -1, -1, 127)
+
+    // Fix round, Important #1 (ID3 side): ID3v2.3 header + one TXXX frame
+    // whose plain big-endian frameSize is 0x7FFFFFF0 -- matches the
+    // reviewer's own hand-simulated example exactly (frameStart + frameSize
+    // overflows to -2147483644, then bytes[negative] throws on the next
+    // loop iteration). v2.3's frameSize is plain big-endian, a genuinely
+    // unbounded 32-bit field -- v2.4's syncsafe form is capped at 28 bits
+    // and can't reach this value at all.
+    private val id3v23HugeFrameSize = byteArrayOf(73, 68, 51, 3, 0, 0, 0, 0, 0, 10, 84, 88, 88, 88, 127, -1, -1, -16, 0, 0)
+
+    // Fix round, Important #2: the same TXXX content as minimalId3v23WithTxxx
+    // above, but re-encoded with a syncsafe frame size and version byte 4 --
+    // the majorVersion >= 4 branch had zero test coverage before this.
+    private val minimalId3v24WithSyncsafeTxxx = byteArrayOf(
+        73, 68, 51, 4, 0, 0, 0, 0, 0, 41, 84, 88, 88, 88, 0, 0, 0, 31, 0, 0, 0, 114, 101, 112, 108, 97, 121,
+        103, 97, 105, 110, 95, 116, 114, 97, 99, 107, 95, 103, 97, 105, 110, 0, 45, 51, 46, 49, 48, 32, 100, 66,
+    )
+
     @Test
     fun flacWithReplayGainCommentsParsesBothValues() {
         val info = ReplayGainTags.parse(ByteArrayInputStream(minimalFlacWithRg))
@@ -84,5 +111,31 @@ class ReplayGainTagsTest {
         val truncated = byteArrayOf(102, 76, 97, 67, -124, 0, -1, -1) // huge bogus length
         val info = ReplayGainTags.parse(ByteArrayInputStream(truncated))
         assertEquals(ReplayGainInfo(trackGainDb = null, albumGainDb = null), info)
+    }
+
+    @Test
+    fun hugeVendorLengthNearIntMaxDoesNotOverflowBoundsCheckInFlac() {
+        // Before the fix round: throws ArrayIndexOutOfBoundsException. A
+        // deliberately unwrapped call (no assertThrows) so the test errors
+        // out against the buggy code for the right reason, not just fails
+        // an assertion.
+        val info = ReplayGainTags.parse(ByteArrayInputStream(flacHugeVendorLength))
+        assertEquals(ReplayGainInfo(trackGainDb = null, albumGainDb = null), info)
+    }
+
+    @Test
+    fun hugeFrameSizeNearIntMaxDoesNotOverflowBoundsCheckInId3v23() {
+        // Before the fix round: throws ArrayIndexOutOfBoundsException with
+        // index -2147483644, exactly matching the reviewer's hand simulation.
+        val info = ReplayGainTags.parse(ByteArrayInputStream(id3v23HugeFrameSize))
+        assertEquals(ReplayGainInfo(trackGainDb = null, albumGainDb = null), info)
+    }
+
+    @Test
+    fun id3v24SyncsafeFrameSizeParsesTrackGain() {
+        // Coverage gap fix: the majorVersion >= 4 (syncsafe frameSize) branch
+        // was never exercised by any prior test.
+        val info = ReplayGainTags.parse(ByteArrayInputStream(minimalId3v24WithSyncsafeTxxx))
+        assertEquals(ReplayGainInfo(trackGainDb = -3.1, albumGainDb = null), info)
     }
 }

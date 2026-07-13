@@ -92,7 +92,13 @@ object ReplayGainTags {
             return v
         }
         val vendorLength = readU32LE() ?: return null to null
-        if (vendorLength < 0 || pos + vendorLength > end) return null to null
+        // Subtraction-based bound (not `pos + vendorLength > end`): a Vorbis
+        // comment length is a genuine unbounded 32-bit field (unlike FLAC's
+        // own 24-bit block-length header), so a crafted value near
+        // Int.MAX_VALUE would overflow an addition-based check to a negative
+        // sum that wrongly passes it (fix round, review of commit 73bd755,
+        // Important #1).
+        if (vendorLength < 0 || vendorLength > end - pos) return null to null
         pos += vendorLength
         val commentCount = readU32LE() ?: return null to null
         if (commentCount < 0) return null to null
@@ -101,7 +107,7 @@ object ReplayGainTags {
         var albumGain: Double? = null
         for (i in 0 until commentCount) {
             val len = readU32LE() ?: break
-            if (len < 0 || pos + len > end) break
+            if (len < 0 || len > end - pos) break
             val comment = String(bytes, pos, len, Charsets.UTF_8)
             pos += len
             val eq = comment.indexOf('=')
@@ -131,7 +137,15 @@ object ReplayGainTags {
             // Extended header size is syncsafe in v2.4, plain big-endian in
             // v2.3; we don't need its content, just its width to skip past it.
             val extSize = if (majorVersion >= 4) syncsafeInt(bytes, offset) else beInt(bytes, offset)
-            if (extSize != null && extSize >= 0) offset += extSize.coerceAtLeast(4)
+            // Subtraction-based bound (not `offset + extSize > tagEnd`): v2.3's
+            // plain big-endian extSize is a genuinely unbounded 32-bit field
+            // (v2.4's syncsafe form is capped at 28 bits and can't reach this),
+            // so a crafted value near Int.MAX_VALUE would overflow an
+            // addition-based check to a negative sum that wrongly passes it
+            // (fix round, review of commit 73bd755, Important #1).
+            if (extSize != null && extSize >= 0 && extSize <= tagEnd - offset) {
+                offset += extSize.coerceAtLeast(4)
+            }
         }
 
         var trackGain: Double? = null
@@ -139,11 +153,12 @@ object ReplayGainTags {
         while (offset + 10 <= tagEnd) {
             if (bytes[offset] == 0.toByte()) break // padding reached
             val frameId = String(bytes, offset, 4, Charsets.US_ASCII)
-            val frameSize = if (majorVersion >= 4) syncsafeInt(bytes, offset + 4) else beInt(bytes, offset + 4)
-            if (frameSize == null || frameSize < 0) break
             val frameStart = offset + 10
+            val frameSize = if (majorVersion >= 4) syncsafeInt(bytes, offset + 4) else beInt(bytes, offset + 4)
+            // Same subtraction-based bound as extSize above -- v2.3's plain
+            // frameSize is the other genuinely unbounded 32-bit field here.
+            if (frameSize == null || frameSize < 0 || frameSize > tagEnd - frameStart) break
             val frameEnd = frameStart + frameSize
-            if (frameEnd > tagEnd) break
             if (frameId == "TXXX") {
                 parseTxxxFrame(bytes, frameStart, frameEnd)?.let { (desc, value) ->
                     when (desc.lowercase()) {
