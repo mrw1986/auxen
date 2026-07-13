@@ -48,7 +48,12 @@ and the limiter — on by default — is the chain's only clamping stage. Each
 effect has its own independently persisted enable flag via `AudioFxController`;
 per-track ReplayGain values come from a zero-dependency local tag parser
 (FLAC VorbisComment + ID3v2.3/2.4 TXXX) and Tidal's playbackinfo fields,
-routed on media transitions.)
+routed on media transitions. The DSP-b batch added two platform effects
+outside the in-pipeline chain — `PresetReverb` and `Virtualizer`, attached to
+the sink-committed audio session id (a `setAudioSessionId(UNSET)` call after
+player construction forces the id to actually propagate to the sink; the
+constructor-generated id never does) — plus a sleep timer and the per-effect
+sections UI on the Equalizer screen.)
 
 - `dsp/Biquad.kt` — RBJ cookbook peaking/low-shelf/high-shelf, transposed
   direct form II, double-precision state (verified against the analytic
