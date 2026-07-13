@@ -53,6 +53,7 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -88,6 +89,11 @@ import kotlinx.coroutines.withContext
  * (`android.media.audiofx`), not in-process [AudioProcessor]s, so they
  * attach to the sink's real audio session rather than the chain above. See
  * `rebuildSessionEffects` (DSP-b Task 1).
+ *
+ * [SleepTimerController] is unrelated to any of the above -- it just watches
+ * a [kotlinx.coroutines.flow.StateFlow] and, at expiry, either pauses
+ * immediately or (if `finishTrack`) arms `pendingSleepTimerPause`, consumed
+ * at the next `onMediaItemTransition` (DSP-b Task 2).
  */
 @UnstableApi
 class PlaybackService : MediaSessionService() {
@@ -112,6 +118,15 @@ class PlaybackService : MediaSessionService() {
     // rebuildSessionEffects.
     private var reverb: PresetReverb? = null
     private var virtualizer: Virtualizer? = null
+
+    /**
+     * One-shot flag set by the sleep-timer watcher when
+     * [SleepTimerState.finishTrack] is armed and the timer expires -- the
+     * CURRENT track is allowed to finish, and the pause happens at the next
+     * [onMediaItemTransition] instead of immediately. Consumed (reset to
+     * `false`) the moment it's acted on, hence "one-shot".
+     */
+    private var pendingSleepTimerPause = false
 
     override fun onCreate() {
         super.onCreate()
@@ -177,6 +192,25 @@ class PlaybackService : MediaSessionService() {
         // legitimate change.
         rebuildSessionEffects(player.audioSessionId)
 
+        // Sleep timer: collectLatest re-launches (cancelling any in-flight
+        // delay) every time SleepTimerController's state changes, so a
+        // re-arm or cancel() naturally supersedes whatever this coroutine
+        // was previously waiting on -- no manual job bookkeeping needed,
+        // unlike RgGainRouter (which reacts to discrete method calls, not a
+        // continuously-collected Flow).
+        serviceScope.launch {
+            SleepTimerController.state.collectLatest { timerState ->
+                val remaining = timerState.remainingMillis() ?: return@collectLatest
+                if (remaining > 0) delay(remaining)
+                if (timerState.finishTrack) {
+                    pendingSleepTimerPause = true
+                } else {
+                    withContext(Dispatchers.Main) { mediaSession?.player?.pause() }
+                }
+                SleepTimerController.cancel()
+            }
+        }
+
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 pendingPlayMediaId = mediaItem?.mediaId
@@ -187,6 +221,7 @@ class PlaybackService : MediaSessionService() {
                 scheduleQueueSave(player)
                 preResolveUpcoming(player)
                 rgGainRouter.route(mediaItem?.mediaId, player.playWhenReady)
+                checkSleepTimerPause(player)
             }
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
@@ -314,6 +349,13 @@ class PlaybackService : MediaSessionService() {
         if (!player.isPlaying) return
         pendingPlayMediaId = null
         serviceScope.launch { runCatching { Graph.library.recordPlay(mediaId) } }
+    }
+
+    /** Consumes [pendingSleepTimerPause], if armed, by pausing right here at the transition boundary. */
+    private fun checkSleepTimerPause(player: Player) {
+        if (!pendingSleepTimerPause) return
+        pendingSleepTimerPause = false
+        player.pause()
     }
 
     /**
