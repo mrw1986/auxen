@@ -125,7 +125,24 @@ class PlaybackService : MediaSessionService() {
      * CURRENT track is allowed to finish, and the pause happens at the next
      * [onMediaItemTransition] instead of immediately. Consumed (reset to
      * `false`) the moment it's acted on, hence "one-shot".
+     *
+     * If the armed track is the LAST one in a non-repeating queue, playback
+     * reaches [Player.STATE_ENDED] instead of firing another
+     * [onMediaItemTransition] -- with nothing to consume the flag, it would
+     * otherwise stay stuck `true` on this still-live service and silently
+     * pause the user's NEXT, unrelated queue on its first transition. Two
+     * consumers guard against that: `onPlaybackStateChanged(STATE_ENDED)`
+     * and the `onTimelineChanged` playlist-replaced hook (fix round, review
+     * of commit 60c7699, finding 1).
+     *
+     * `@Volatile`: the first genuinely cross-thread field in this class --
+     * written from the watcher coroutine (`Dispatchers.IO`, via
+     * `serviceScope`), read from `Player.Listener` callbacks (the main
+     * thread) -- matching the `@Volatile` convention already enforced
+     * everywhere else across the DSP work for exactly this IO-write/Main-read
+     * shape (finding 2).
      */
+    @Volatile
     private var pendingSleepTimerPause = false
 
     override fun onCreate() {
@@ -212,7 +229,29 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
-                if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) scheduleQueueSave(player)
+                if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) {
+                    scheduleQueueSave(player)
+                    // Belt-and-suspenders against pendingSleepTimerPause
+                    // surviving into an unrelated new queue -- see that
+                    // field's KDoc (fix round, review of commit 60c7699,
+                    // finding 1).
+                    pendingSleepTimerPause = false
+                }
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                // The queue-exhausted exit path: STATE_ENDED fires instead
+                // of another onMediaItemTransition, so it's the only place
+                // left to consume a flag armed on the queue's last track --
+                // pausing is moot (playback already stopped on its own), but
+                // the flag must still clear, and so must the controller's
+                // own (already-expired) timer state, so the sheet's UI
+                // doesn't keep showing a stale armed timer (fix round,
+                // review of commit 60c7699, finding 1).
+                if (playbackState == Player.STATE_ENDED && pendingSleepTimerPause) {
+                    pendingSleepTimerPause = false
+                    SleepTimerController.cancel()
+                }
             }
 
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
