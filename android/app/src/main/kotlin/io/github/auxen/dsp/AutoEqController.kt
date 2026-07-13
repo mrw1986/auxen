@@ -100,26 +100,32 @@ object AutoEqController {
         EqController.awaitInitialized()
         val legacy = EqController.state.value
         if (legacy.bands == null && legacy.filters.isNotEmpty()) {
-            // Crash-safety: both payload writes must be DURABLE before
-            // KEY_MIGRATED is set, or a process kill in the gap permanently
-            // loses the profile (guard true, autoeq_state never written) or
-            // double-applies it (guard true, legacy eq_state never reset).
-            // setState(..., persist = true) is the wrong tool here -- it
-            // launches a fire-and-forget write on a separate coroutine that
-            // this function doesn't wait for, so it can (and, on a loaded
-            // device, will) race the marker write below. Instead: write the
-            // legacy reset directly and suspend until it lands, then fold
-            // the AutoEq payload and the marker into ONE DataStore#edit
-            // transaction, so the marker can never be committed without the
-            // payload it's meant to guard.
-            app.eqDataStore.edit { it[EqController.KEY_STATE] = json.encodeToString(EqState.serializer(), EqState()) }
+            // Crash-safety: destination, THEN source reset, THEN guard --
+            // the only ordering with zero data-loss window (three
+            // sequential, directly-awaited writes; setState(..., persist =
+            // true) is the wrong tool here, since it launches a
+            // fire-and-forget write this function wouldn't wait for).
+            // Writing the destination (autoeq_state) first, rather than
+            // folding it into one transaction with the guard, closes a
+            // narrower window a first version of this fix still had: a
+            // crash between "reset the source" and "write the
+            // destination+guard together" left guard=false with the source
+            // already flattened, so the next launch's shape check
+            // (`bands == null && filters.isNotEmpty()`) no longer matched
+            // and silently migrated nothing -- profile lost from both
+            // sides. With the destination written FIRST: a crash before the
+            // source reset just re-migrates idempotently (the source is
+            // still legacy-shaped); a crash after the source reset but
+            // before the guard is also safe, since `initialize()`'s own
+            // unconditional restore (above, before this function runs) has
+            // already loaded the durable destination into memory, and the
+            // re-run's migration check finds the now-flat source and just
+            // sets the guard, leaving the already-migrated profile alone.
+            app.autoEqDataStore.edit { it[KEY_STATE] = json.encodeToString(EqState.serializer(), legacy) } // (a) destination
+            setState(legacy, persist = false) // disk already written above; sync in-memory + processor
+            app.eqDataStore.edit { it[EqController.KEY_STATE] = json.encodeToString(EqState.serializer(), EqState()) } // (b) source reset
             EqController.setState(EqState(), persist = false) // disk already written above; sync in-memory only
-            _state.value = legacy
-            processor?.updateState(legacy)
-            app.autoEqDataStore.edit {
-                it[KEY_STATE] = json.encodeToString(EqState.serializer(), legacy)
-                it[KEY_MIGRATED] = true
-            }
+            app.autoEqDataStore.edit { it[KEY_MIGRATED] = true } // (c) guard
             return
         }
         // Graphic-shaped (bands != null) or genuinely empty legacy state:

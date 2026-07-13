@@ -159,12 +159,13 @@ class AutoEqControllerTest {
         EqController.setState(legacyAutoEq, persist = false)
         AutoEqController.initialize(context)
         AutoEqController.awaitInitialized()
-        // awaitInitialized() only guarantees migrateFromLegacyIfNeeded() has
-        // RETURNED -- its own setState(legacy, persist = true) call kicks
-        // off a separate, un-awaited persist coroutine (the standard
-        // fire-and-forget setState shape). Must also wait for THAT write to
-        // land before simulating a restart, or the second initialize()
-        // below races an empty DataStore.
+        // awaitInitialized() alone is now sufficient: migrateFromLegacyIfNeeded's
+        // payload writes are directly-awaited DataStore#edit calls, not a
+        // fire-and-forget setState(persist = true) (migration crash-safety
+        // fix), so autoeq_state is already durable by the time it returns.
+        // awaitPersisted() below is a no-op in this path (migration doesn't
+        // set persistJob) -- kept rather than removed so this test doesn't
+        // quietly start depending on migration's internals to stay correct.
         AutoEqController.awaitPersisted()
         assertEquals("First Migration", AutoEqController.state.value.presetName)
 
