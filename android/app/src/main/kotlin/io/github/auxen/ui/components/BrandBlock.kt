@@ -41,14 +41,17 @@ fun BrandBlock(compact: Boolean = false, modifier: Modifier = Modifier) {
         Image(
             painterResource(logo),
             contentDescription = null,
-            modifier = Modifier.size(if (compact) 28.dp else 52.dp),
+            modifier = Modifier.size(if (compact) 40.dp else 52.dp),
         )
         Column {
             Text(
                 stringResource(R.string.brand_name),
                 fontFamily = JosefinSans,
                 fontWeight = FontWeight.Bold,
-                fontSize = if (compact) 16.sp else 22.sp,
+                // Same size in both modes now (final-review brand-sizing round: compact
+                // bumped 16.sp -> 22.sp to match full) -- the 40dp-vs-52dp logo size and
+                // the subtitle's presence/absence still distinguish compact from full.
+                fontSize = 22.sp,
                 letterSpacing = 1.sp,
                 color = if (dark) AuxenColors.BrandTitleGold else AuxenColors.BrandTitleOnLight,
             )
