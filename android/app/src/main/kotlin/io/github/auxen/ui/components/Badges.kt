@@ -37,13 +37,17 @@ fun SourceBadge(source: Source, modifier: Modifier = Modifier, tinted: Boolean =
 @Composable
 fun QualityBadge(label: String, modifier: Modifier = Modifier) {
     if (label == "Unknown") return
+    // Text/tint on a light-alpha wash over the surface -- resolves to the
+    // theme's contrast-safe primary (Amber600 in light, AmberPrimary in
+    // dark), not the raw brand amber (final-review fix round, Minor #2).
+    val color = MaterialTheme.colorScheme.primary
     Text(
         text = label.uppercase(),
         style = MaterialTheme.typography.labelSmall,
-        color = AuxenColors.AmberPrimary,
+        color = color,
         modifier = modifier
             .clip(RoundedCornerShape(50))
-            .background(AuxenColors.AmberPrimary.copy(alpha = 0.2f))
+            .background(color.copy(alpha = 0.2f))
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }

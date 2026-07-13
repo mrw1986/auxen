@@ -162,7 +162,9 @@ private fun StatCard(label: String, value: String, modifier: Modifier = Modifier
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(16.dp),
     ) {
-        Text(value, style = MaterialTheme.typography.headlineSmall, color = AuxenColors.AmberPrimary)
+        // Text tint on surfaceVariant -- resolves to the contrast-safe primary
+        // (final-review fix round, Minor #2).
+        Text(value, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
         Text(
             label,
             style = MaterialTheme.typography.bodySmall,

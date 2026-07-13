@@ -77,7 +77,10 @@ fun AuxenTrackRow(
                 Text(
                     track.title,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = if (isPlaying) AuxenColors.AmberPrimary else LocalContentColor.current,
+                    // Text tint -- resolves to the contrast-safe primary (final-review fix
+                    // round, Minor #2); the 0.08-alpha row-highlight background above is a
+                    // wash, not text, and keeps the raw brand amber.
+                    color = if (isPlaying) MaterialTheme.colorScheme.primary else LocalContentColor.current,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),

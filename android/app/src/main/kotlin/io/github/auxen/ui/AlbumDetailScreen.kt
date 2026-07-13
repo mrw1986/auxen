@@ -85,7 +85,11 @@ fun AlbumDetailScreen(
                     Text(
                         artist,
                         style = MaterialTheme.typography.bodyLarge,
-                        color = AuxenColors.AmberPrimary,
+                        // Text tint (clickable artist link) -- resolves to the contrast-safe
+                        // primary (final-review fix round, Minor #2); the Play All button
+                        // below is a container behind BgDeep content and correctly keeps the
+                        // raw brand amber.
+                        color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.clickable { onOpenArtist(artist) },
                     )
                     val meta = listOfNotNull(

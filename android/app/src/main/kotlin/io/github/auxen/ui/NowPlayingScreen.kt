@@ -161,7 +161,10 @@ fun NowPlayingScreen(viewModel: PlayerViewModel, onBack: () -> Unit) {
                 Icon(
                     Icons.Filled.Shuffle,
                     contentDescription = "Shuffle",
-                    tint = if (viewModel.shuffleEnabled) AuxenColors.AmberPrimary else LocalContentColor.current,
+                    // Icon tint -- resolves to the contrast-safe primary (final-review fix
+                    // round, Minor #2); the play button below is a container behind BgDeep
+                    // content and correctly keeps the raw brand amber.
+                    tint = if (viewModel.shuffleEnabled) MaterialTheme.colorScheme.primary else LocalContentColor.current,
                 )
             }
             IconButton(onClick = { viewModel.skipPrevious() }) {
@@ -188,7 +191,8 @@ fun NowPlayingScreen(viewModel: PlayerViewModel, onBack: () -> Unit) {
                 Icon(
                     if (viewModel.repeatMode == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
                     contentDescription = "Repeat",
-                    tint = if (viewModel.repeatMode != Player.REPEAT_MODE_OFF) AuxenColors.AmberPrimary else LocalContentColor.current,
+                    // Icon tint -- resolves to the contrast-safe primary (final-review fix round, Minor #2).
+                    tint = if (viewModel.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary else LocalContentColor.current,
                 )
             }
         }

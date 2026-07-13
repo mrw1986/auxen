@@ -10,7 +10,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import io.github.auxen.ui.theme.AuxenColors
 
 /** Fraunces section title + optional amber action link — desktop section-header. */
 @Composable
@@ -27,7 +26,8 @@ fun SectionHeader(
         Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
         if (actionLabel != null && onAction != null) {
             TextButton(onClick = onAction) {
-                Text(actionLabel, color = AuxenColors.AmberPrimary, style = MaterialTheme.typography.labelLarge)
+                // Text tint -- resolves to the contrast-safe primary (final-review fix round, Minor #2).
+                Text(actionLabel, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
             }
         }
     }

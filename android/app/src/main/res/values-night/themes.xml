@@ -3,11 +3,11 @@
     <style name="Theme.Auxen" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:windowBackground">#0C0B0F</item>
+        <item name="android:windowBackground">@color/window_background</item>
     </style>
 
     <style name="Theme.Auxen.Starting" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">#0C0B0F</item>
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
         <item name="postSplashScreenTheme">@style/Theme.Auxen</item>
     </style>

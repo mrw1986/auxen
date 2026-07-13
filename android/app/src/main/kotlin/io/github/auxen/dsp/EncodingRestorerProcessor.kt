@@ -38,16 +38,12 @@ import java.nio.ByteBuffer
 @UnstableApi
 class EncodingRestorerProcessor : BaseAudioProcessor() {
 
-    private var isFloatInput: Boolean = false
-    private var active: Boolean = false
-
     override fun onConfigure(inputAudioFormat: AudioFormat): AudioFormat {
         val encoding = inputAudioFormat.encoding
         if (encoding != C.ENCODING_PCM_16BIT && encoding != C.ENCODING_PCM_FLOAT) {
             throw UnhandledAudioFormatException(inputAudioFormat)
         }
-        isFloatInput = encoding == C.ENCODING_PCM_FLOAT
-        active = isFloatInput
+        val active = encoding == C.ENCODING_PCM_FLOAT
         if (!active) return AudioFormat.NOT_SET
         return AudioFormat(inputAudioFormat.sampleRate, inputAudioFormat.channelCount, C.ENCODING_PCM_16BIT)
     }

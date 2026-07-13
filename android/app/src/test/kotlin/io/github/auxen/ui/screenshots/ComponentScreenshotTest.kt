@@ -77,7 +77,10 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * Roborazzi golden screenshots for the core reusable components, in both the
- * light and dark [AuxenTheme] variants (7 surfaces × 2 themes = 14 goldens).
+ * light and dark [AuxenTheme] variants — every surface documented below is
+ * captured as a light/dark pair. Not stating a total count here on purpose:
+ * it goes stale every time a surface is added (final-review fix round,
+ * Minor #4) — count the `@Test` methods below if you need the current total.
  *
  * ## How goldens are produced / checked
  * `./gradlew :app:recordRoborazziDebug` writes the PNGs under
@@ -489,45 +492,50 @@ class ComponentScreenshotTest {
 
     @Composable
     private fun MiniPlayerControlsPreview() {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            AsyncImage(
-                // A null model + Coil's empty placeholder renders fully
-                // transparent (confirmed against the existing track-row
-                // goldens: the art area is solid background-color, invisible
-                // regardless of clip shape) — a visible fill here is required
-                // for the 6dp radius this golden exists to pin to actually
-                // show up in the pixel diff.
-                model = null,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFF808080)),
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Nightcall", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                Text(
-                    "Kavinsky",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                )
-            }
-            IconButton(
-                onClick = {},
-                colors = IconButtonDefaults.iconButtonColors(
-                    containerColor = AuxenColors.AmberPrimary,
-                    contentColor = AuxenColors.BgDeep,
-                ),
+        // Matches MiniPlayerBar.kt's own Surface(tonalElevation = 4.dp) wrapper
+        // (final-review fix round, Minor #3) -- without it this preview was
+        // rendering on a flat surface the real bar never uses.
+        Surface(tonalElevation = 4.dp) {
+            Row(
+                modifier = Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.PlayArrow, contentDescription = "Play")
-            }
-            IconButton(onClick = {}) {
-                Icon(Icons.Filled.SkipNext, contentDescription = "Next")
+                AsyncImage(
+                    // A null model + Coil's empty placeholder renders fully
+                    // transparent (confirmed against the existing track-row
+                    // goldens: the art area is solid background-color, invisible
+                    // regardless of clip shape) — a visible fill here is required
+                    // for the 6dp radius this golden exists to pin to actually
+                    // show up in the pixel diff.
+                    model = null,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFF808080)),
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Nightcall", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    Text(
+                        "Kavinsky",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+                IconButton(
+                    onClick = {},
+                    colors = IconButtonDefaults.iconButtonColors(
+                        containerColor = AuxenColors.AmberPrimary,
+                        contentColor = AuxenColors.BgDeep,
+                    ),
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = "Play")
+                }
+                IconButton(onClick = {}) {
+                    Icon(Icons.Filled.SkipNext, contentDescription = "Next")
+                }
             }
         }
     }

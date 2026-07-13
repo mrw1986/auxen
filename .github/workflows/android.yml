@@ -129,8 +129,15 @@ jobs:
             # MediaStyle notification should now be posted for our package. Retry loop
             # covers the small gap between the flow exiting and NotificationManager
             # finishing the post; final line is the authoritative check + failure gate.
-            for i in $(seq 1 10); do adb shell dumpsys notification | grep -q io.github.auxen && break; sleep 1; done
-            adb shell dumpsys notification | grep -q io.github.auxen || touch /tmp/maestro_failed
+            # `pkg=io.github.auxen` (not bare `io.github.auxen`, and not the `grep
+            # -q io.github.auxen` this used to run): on API 33+ dumpsys prints an
+            # `AppSettings: io.github.auxen` line for every package that has ever
+            # requested POST_NOTIFICATIONS -- present from install time, so a bare
+            # package-name match is a tautology that can never fail. The `pkg=`
+            # form only appears in NotificationRecord lines for an actually-posted
+            # (current or archived) notification (final-review fix round, Important #1).
+            for i in $(seq 1 10); do adb shell dumpsys notification | grep -q "pkg=io.github.auxen" && break; sleep 1; done
+            adb shell dumpsys notification | grep -q "pkg=io.github.auxen" || touch /tmp/maestro_failed
             ls -laR "$GITHUB_WORKSPACE/maestro-debug" maestro-shots "$HOME/.maestro" 2>&1 | head -60 || true
             cp -r maestro-shots "$GITHUB_WORKSPACE/maestro-debug-shots" 2>/dev/null || true
             test ! -f /tmp/maestro_failed

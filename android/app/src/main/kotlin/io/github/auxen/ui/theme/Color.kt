@@ -8,7 +8,6 @@ import androidx.compose.ui.graphics.Color
  */
 object AuxenColors {
     val AmberPrimary = Color(0xFFD4A039)
-    val Amber400 = Color(0xFFFFCA28)
     val Amber600 = Color(0xFFB8860B)
 
     val BgDeep = Color(0xFF0C0B0F)
@@ -19,7 +18,6 @@ object AuxenColors {
 
     val TextPrimary = Color(0xFFF0ECE4)
     val TextSecondary = Color(0xFF9E9A91)
-    val TextTertiary = Color(0xFF6B6860)
 
     val TidalBlue = Color(0xFF00C4CC)
     val LocalGreen = Color(0xFF7CB87A)
