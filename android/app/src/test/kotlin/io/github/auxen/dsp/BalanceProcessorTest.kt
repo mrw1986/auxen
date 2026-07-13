@@ -102,6 +102,29 @@ class BalanceProcessorTest {
     }
 
     @Test
+    fun outOfRangeBalanceIsClampedRatherThanPhaseInvertingAChannel() {
+        // Undocumented input (BalanceState.balance is documented -1..1): before
+        // the fix, balance=2f gave leftGain = min(1f, 1f - 2f) = -1f, which
+        // phase-inverts the left channel at full volume instead of silencing
+        // it -- clamping to the documented range first fixes this to the same
+        // result as full-right (balance=1f): leftGain=0f, rightGain=1f.
+        val processor = BalanceProcessor()
+        processor.updateState(BalanceState(enabled = true, balance = 2f))
+        processor.configure(pcm16Format())
+        processor.flush()
+        val input = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder())
+        input.putShort(10_000) // left
+        input.putShort(20_000) // right
+        input.flip()
+        processor.queueInput(input)
+        val output = processor.output.order(ByteOrder.nativeOrder())
+        val left = output.float
+        val right = output.float
+        assertEquals(0f, left, 0f) // clamped leftGain = min(1f, 1f - 1f) = 0f, not -1f
+        assertEquals(20_000 / 32_768f, right, 1e-6f) // clamped rightGain = min(1f, 1f + 1f) = 1f
+    }
+
+    @Test
     fun channelsBeyondStereoPassThroughUntouched() {
         val processor = BalanceProcessor()
         processor.updateState(BalanceState(enabled = true, balance = -1f))
