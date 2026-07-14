@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,6 +23,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -45,9 +45,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
+import io.github.auxen.R
 import io.github.auxen.ui.components.AuxenTrackRow
+import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.theme.AuxenColors
 
 /** Desktop PLAYLIST_COLORS — the 8-swatch picker palette. */
@@ -121,14 +124,11 @@ fun PlaylistDetailScreen(
             }
         }
         if (tracks.isEmpty()) {
-            Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
-                Text("This playlist is empty", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Long-press any track and choose Add to Playlist.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            EmptyState(
+                icon = Icons.Filled.QueueMusic,
+                title = stringResource(R.string.empty_playlist_title),
+                subtitle = stringResource(R.string.empty_playlist_subtitle),
+            )
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 itemsIndexed(tracks, key = { i, t -> "$i|${t.source}:${t.sourceId}" }) { index, track ->

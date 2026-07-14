@@ -14,8 +14,12 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -35,8 +39,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
+import io.github.auxen.R
 import io.github.auxen.data.AlbumGroup
 import io.github.auxen.data.LibrarySort
 import io.github.auxen.data.groupAlbums
@@ -47,6 +53,7 @@ import io.github.auxen.data.sortTracks
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.AuxenTrackRow
+import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.TrackActionSheet
 
 private val TAB_LABELS = listOf("Albums", "Artists", "Tracks")
@@ -86,6 +93,18 @@ fun LibraryScreen(
     var sheetTrack by remember { mutableStateOf<Track?>(null) }
     LaunchedEffect(Unit) { viewModel.loadLibrary() }
 
+    // Group + sort the active tab's data ONCE, reused for both the header count
+    // (Fix 11 — derived from the active tab, not always "N tracks") and the body
+    // (Fix 4 — an EmptyState when that list is empty, never a blank void).
+    val albums = if (tab == 0) sortAlbums(groupAlbums(tracks), sort, ascending) else emptyList()
+    val artists = if (tab == 1) sortArtists(groupArtists(tracks), sort, ascending) else emptyList()
+    val sortedTracks = if (tab != 0 && tab != 1) sortTracks(tracks, sort, ascending) else emptyList()
+    val countLabel = when (tab) {
+        0 -> "${albums.size} albums"
+        1 -> "${artists.size} artists"
+        else -> "${sortedTracks.size} tracks"
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         SingleChoiceSegmentedButtonRow(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -103,7 +122,7 @@ fun LibraryScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "${tracks.size} tracks",
+                countLabel,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
@@ -113,6 +132,12 @@ fun LibraryScreen(
                 sortOptionsFor(tab).forEach { option ->
                     DropdownMenuItem(
                         text = { Text(sortLabel(option)) },
+                        // Fix 35 — mark the applied sort so it's visible at a glance.
+                        trailingIcon = {
+                            if (option == sort) {
+                                Icon(Icons.Filled.Check, contentDescription = "Selected")
+                            }
+                        },
                         onClick = {
                             viewModel.setLibrarySort(option)
                             sortMenuOpen = false
@@ -129,8 +154,13 @@ fun LibraryScreen(
         }
 
         when (tab) {
-            0 -> {
-                val albums = sortAlbums(groupAlbums(tracks), sort, ascending)
+            0 -> if (albums.isEmpty()) {
+                EmptyState(
+                    icon = Icons.Filled.Album,
+                    title = stringResource(R.string.empty_library_albums_title),
+                    subtitle = stringResource(R.string.empty_library_albums_subtitle),
+                )
+            } else {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 150.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -149,8 +179,13 @@ fun LibraryScreen(
                     }
                 }
             }
-            1 -> {
-                val artists = sortArtists(groupArtists(tracks), sort, ascending)
+            1 -> if (artists.isEmpty()) {
+                EmptyState(
+                    icon = Icons.Filled.Person,
+                    title = stringResource(R.string.empty_library_artists_title),
+                    subtitle = stringResource(R.string.empty_library_artists_subtitle),
+                )
+            } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(artists, key = { it.artist }) { artist ->
                         ArtistRow(
@@ -161,10 +196,15 @@ fun LibraryScreen(
                     }
                 }
             }
-            else -> {
-                val sorted = sortTracks(tracks, sort, ascending)
+            else -> if (sortedTracks.isEmpty()) {
+                EmptyState(
+                    icon = Icons.Filled.MusicNote,
+                    title = stringResource(R.string.empty_library_tracks_title),
+                    subtitle = stringResource(R.string.empty_library_tracks_subtitle),
+                )
+            } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(sorted, key = { "${it.source}:${it.sourceId}" }) { track ->
+                    items(sortedTracks, key = { "${it.source}:${it.sourceId}" }) { track ->
                         AuxenTrackRow(
                             track = track,
                             isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,

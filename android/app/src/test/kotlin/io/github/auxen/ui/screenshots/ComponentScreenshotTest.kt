@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -77,6 +78,7 @@ import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.BalanceSection
 import io.github.auxen.ui.components.BassBoostSection
 import io.github.auxen.ui.components.BrandBlock
+import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.FxSectionCard
 import io.github.auxen.ui.components.LimiterSection
 import io.github.auxen.ui.components.QualityBadge
@@ -1042,6 +1044,32 @@ class ComponentScreenshotTest {
             onMove = { _, _ -> },
             onToggleFavorite = {},
             onClear = {},
+        )
+    }
+
+    // --- EmptyState (polish P2) ---
+    // The single shared empty / no-results surface every screen now routes its
+    // empty state through (Library/Search/Collection/Album/Artist/Home/Queue/
+    // Playlist). Pins the one visual language: a muted onSurfaceVariant glyph
+    // above a titleMedium title and a bodyMedium/onSurfaceVariant subtitle,
+    // stacked and centered. A regression in glyph tint, spacing, or type here
+    // would ripple across every screen, so this is the canonical pin.
+
+    @Test
+    fun emptyState_light() = captureComponent("empty-state-light", darkTheme = false) {
+        EmptyState(
+            icon = Icons.Filled.MusicNote,
+            title = "No local music yet",
+            subtitle = "Grant storage access or add files to this device.",
+        )
+    }
+
+    @Test
+    fun emptyState_dark() = captureComponent("empty-state-dark", darkTheme = true) {
+        EmptyState(
+            icon = Icons.Filled.MusicNote,
+            title = "No local music yet",
+            subtitle = "Grant storage access or add files to this device.",
         )
     }
 }

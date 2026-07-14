@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -35,14 +36,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
+import io.github.auxen.R
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AuxenTrackRow
+import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.SectionHeader
 import io.github.auxen.ui.components.TrackActionSheet
 import io.github.auxen.ui.theme.AuxenColors
@@ -130,6 +134,13 @@ fun SearchScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                         }
                     }
                 }
+            } else {
+                // No query and no history: an inviting prompt, not a blank void.
+                EmptyState(
+                    icon = Icons.Filled.Search,
+                    title = stringResource(R.string.empty_search_prompt_title),
+                    subtitle = stringResource(R.string.empty_search_prompt_subtitle),
+                )
             }
         } else {
             Row(
@@ -158,20 +169,31 @@ fun SearchScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                 "Tidal" -> results.filter { it.source == Source.TIDAL }
                 else -> results
             }
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(filtered, key = { "${it.source}:${it.sourceId}" }) { track ->
-                    AuxenTrackRow(
-                        track = track,
-                        isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
-                        onPlay = { viewModel.play(track) },
-                        onToggleFavorite = { viewModel.toggleFavorite(track) },
-                        onLongPress = { sheetTrack = track },
-                        trailing = {
-                            IconButton(onClick = { viewModel.enqueue(track) }) {
-                                Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = "Add to queue")
-                            }
-                        },
-                    )
+            if (filtered.isEmpty() && !viewModel.searchInFlight) {
+                // Empty results with nothing in flight is a genuine "no results",
+                // distinct from a still-loading search (spinner above) — never a
+                // blank void that reads like a swallowed error.
+                EmptyState(
+                    icon = Icons.Filled.SearchOff,
+                    title = stringResource(R.string.empty_search_no_results_title),
+                    subtitle = stringResource(R.string.empty_search_no_results_subtitle),
+                )
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(filtered, key = { "${it.source}:${it.sourceId}" }) { track ->
+                        AuxenTrackRow(
+                            track = track,
+                            isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+                            onPlay = { viewModel.play(track) },
+                            onToggleFavorite = { viewModel.toggleFavorite(track) },
+                            onLongPress = { sheetTrack = track },
+                            trailing = {
+                                IconButton(onClick = { viewModel.enqueue(track) }) {
+                                    Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = "Add to queue")
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }

@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Button
@@ -35,14 +36,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import coil.compose.AsyncImage
+import io.github.auxen.R
 import io.github.auxen.data.AlbumGroup
 import io.github.auxen.data.groupAlbums
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.AuxenTrackRow
+import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.SectionHeader
 import io.github.auxen.ui.components.TrackActionSheet
 import io.github.auxen.ui.theme.AuxenColors
@@ -101,6 +105,7 @@ fun ArtistDetailScreen(
             Row(modifier = Modifier.padding(16.dp)) {
                 Button(
                     onClick = { viewModel.playAll(tracks) },
+                    enabled = tracks.isNotEmpty(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = AuxenColors.AmberPrimary,
                         contentColor = AuxenColors.BgDeep,
@@ -110,7 +115,10 @@ fun ArtistDetailScreen(
                     Text("Play All")
                 }
                 Spacer(Modifier.width(12.dp))
-                OutlinedButton(onClick = { viewModel.playAll(tracks, shuffled = true) }) {
+                OutlinedButton(
+                    onClick = { viewModel.playAll(tracks, shuffled = true) },
+                    enabled = tracks.isNotEmpty(),
+                ) {
                     Icon(Icons.Filled.Shuffle, contentDescription = null)
                     Text("Shuffle")
                 }
@@ -136,15 +144,25 @@ fun ArtistDetailScreen(
                 }
             }
         }
-        item { SectionHeader("Tracks") }
-        items(tracks, key = { "${it.source}:${it.sourceId}" }) { track ->
-            AuxenTrackRow(
-                track = track,
-                isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
-                onPlay = { viewModel.play(track) },
-                onToggleFavorite = { viewModel.toggleFavorite(track) },
-                onLongPress = { sheetTrack = track },
-            )
+        if (tracks.isEmpty()) {
+            item {
+                EmptyState(
+                    icon = Icons.Filled.MusicNote,
+                    title = stringResource(R.string.empty_artist_tracks_title),
+                    subtitle = stringResource(R.string.empty_artist_tracks_subtitle),
+                )
+            }
+        } else {
+            item { SectionHeader("Tracks") }
+            items(tracks, key = { "${it.source}:${it.sourceId}" }) { track ->
+                AuxenTrackRow(
+                    track = track,
+                    isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+                    onPlay = { viewModel.play(track) },
+                    onToggleFavorite = { viewModel.toggleFavorite(track) },
+                    onLongPress = { sheetTrack = track },
+                )
+            }
         }
     }
 

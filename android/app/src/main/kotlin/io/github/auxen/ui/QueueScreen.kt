@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,6 +35,7 @@ import io.github.auxen.R
 import io.github.auxen.model.QueueEntry
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AuxenTrackRow
+import io.github.auxen.ui.components.EmptyState
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
@@ -105,14 +107,13 @@ internal fun QueueContent(
         }
 
         if (queue.isEmpty()) {
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
-                Text(stringResource(R.string.queue_empty_title), style = MaterialTheme.typography.titleMedium)
-                Text(
-                    stringResource(R.string.queue_empty_message),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            // Centered shared EmptyState (was a bare 24dp-inset left-aligned
+            // Column that didn't line up with the 16dp header) — polish P2, Fix 22.
+            EmptyState(
+                icon = Icons.Filled.QueueMusic,
+                title = stringResource(R.string.queue_empty_title),
+                subtitle = stringResource(R.string.queue_empty_message),
+            )
             return@Column
         }
 

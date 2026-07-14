@@ -19,6 +19,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -39,8 +43,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
+import io.github.auxen.R
 import io.github.auxen.data.AlbumGroup
 import io.github.auxen.data.groupAlbums
 import io.github.auxen.data.groupArtists
@@ -48,6 +54,7 @@ import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.AuxenTrackRow
+import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.TrackActionSheet
 import io.github.auxen.ui.theme.AuxenColors
 
@@ -115,95 +122,131 @@ fun CollectionScreen(
             }
         }
 
+        // Every tab renders the same centered EmptyState when its (filtered) list
+        // is empty — the Albums grid and Artists list previously had no empty
+        // state at all, so an empty or filtered-empty tab is now explained
+        // uniformly across all four (polish P2, Fix 12).
         when (tab) {
-            0 -> LazyColumn(modifier = Modifier.fillMaxSize()) {
-                if (filtered.isEmpty()) {
-                    item { EmptyCollectionHint() }
-                }
-                items(filtered, key = { "${it.source}:${it.sourceId}" }) { track ->
-                    AuxenTrackRow(
-                        track = track,
-                        isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
-                        onPlay = { viewModel.play(track) },
-                        onToggleFavorite = { viewModel.toggleFavorite(track) },
-                        onLongPress = { sheetTrack = track },
-                        trailing = {
-                            IconButton(onClick = { viewModel.enqueue(track) }) {
-                                Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = "Add to queue")
-                            }
-                        },
-                    )
-                }
-            }
-            1 -> LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 150.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.fillMaxSize().padding(16.dp),
-            ) {
-                items(groupAlbums(filtered), key = { "${it.album}|${it.albumArtist}" }) { album ->
-                    AlbumCard(
-                        title = album.album,
-                        artist = album.albumArtist,
-                        artUrl = album.artUrl,
-                        source = album.tracks.firstOrNull()?.source,
-                        onClick = { onOpenAlbum(album) },
-                        onPlay = { viewModel.playAll(album.tracks) },
-                    )
+            0 -> if (filtered.isEmpty()) {
+                EmptyState(
+                    icon = Icons.Filled.FavoriteBorder,
+                    title = stringResource(R.string.empty_collection_tracks_title),
+                    subtitle = stringResource(R.string.empty_collection_tracks_subtitle),
+                )
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(filtered, key = { "${it.source}:${it.sourceId}" }) { track ->
+                        AuxenTrackRow(
+                            track = track,
+                            isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+                            onPlay = { viewModel.play(track) },
+                            onToggleFavorite = { viewModel.toggleFavorite(track) },
+                            onLongPress = { sheetTrack = track },
+                            trailing = {
+                                IconButton(onClick = { viewModel.enqueue(track) }) {
+                                    Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = "Add to queue")
+                                }
+                            },
+                        )
+                    }
                 }
             }
-            2 -> LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(groupArtists(filtered), key = { it.artist }) { artist ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onOpenArtist(artist.artist) }
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+            1 -> {
+                val albums = groupAlbums(filtered)
+                if (albums.isEmpty()) {
+                    EmptyState(
+                        icon = Icons.Filled.Album,
+                        title = stringResource(R.string.empty_collection_albums_title),
+                        subtitle = stringResource(R.string.empty_collection_albums_subtitle),
+                    )
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 150.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxSize().padding(16.dp),
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(artist.artist, style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                "${artist.tracks.size} favorited",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        items(albums, key = { "${it.album}|${it.albumArtist}" }) { album ->
+                            AlbumCard(
+                                title = album.album,
+                                artist = album.albumArtist,
+                                artUrl = album.artUrl,
+                                source = album.tracks.firstOrNull()?.source,
+                                onClick = { onOpenAlbum(album) },
+                                onPlay = { viewModel.playAll(album.tracks) },
                             )
                         }
                     }
                 }
             }
-            else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
-                if (playlists.isEmpty()) {
-                    item { EmptyCollectionHint(message = "No playlists yet — long-press any track to add one.") }
-                }
-                items(playlists, key = { it.id }) { playlist ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onOpenPlaylist(playlist.id) }
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        // Parse once per color (not every recomposition); fall back
-                        // to the brand token, never a drifting literal. The 1dp
-                        // outline keeps pale user colors visible on the white
-                        // light-theme surface (polish P1, Fix 3).
-                        val dotColor = remember(playlist.color) {
-                            playlist.color
-                                ?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
-                                ?: AuxenColors.AmberPrimary
+            2 -> {
+                val artists = groupArtists(filtered)
+                if (artists.isEmpty()) {
+                    EmptyState(
+                        icon = Icons.Filled.Person,
+                        title = stringResource(R.string.empty_collection_artists_title),
+                        subtitle = stringResource(R.string.empty_collection_artists_subtitle),
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        items(artists, key = { it.artist }) { artist ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onOpenArtist(artist.artist) }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(artist.artist, style = MaterialTheme.typography.bodyLarge)
+                                    Text(
+                                        "${artist.tracks.size} favorited",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
                         }
-                        Box(
-                            Modifier
-                                .size(14.dp)
-                                .background(dotColor, CircleShape)
-                                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
-                        )
-                        Text(
-                            playlist.name,
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-                        )
+                    }
+                }
+            }
+            else -> if (playlists.isEmpty()) {
+                EmptyState(
+                    icon = Icons.Filled.QueueMusic,
+                    title = stringResource(R.string.empty_collection_playlists_title),
+                    subtitle = stringResource(R.string.empty_collection_playlists_subtitle),
+                )
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(playlists, key = { it.id }) { playlist ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenPlaylist(playlist.id) }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            // Parse once per color (not every recomposition); fall back
+                            // to the brand token, never a drifting literal. The 1dp
+                            // outline keeps pale user colors visible on the white
+                            // light-theme surface (polish P1, Fix 3).
+                            val dotColor = remember(playlist.color) {
+                                playlist.color
+                                    ?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
+                                    ?: AuxenColors.AmberPrimary
+                            }
+                            Box(
+                                Modifier
+                                    .size(14.dp)
+                                    .background(dotColor, CircleShape)
+                                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
+                            )
+                            Text(
+                                playlist.name,
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -223,13 +266,5 @@ fun CollectionScreen(
             onAddToPlaylist = { viewModel.addToPlaylist(track, it) },
             onCreatePlaylist = { viewModel.createPlaylistAndAdd(track, it) },
         )
-    }
-}
-
-@Composable
-private fun EmptyCollectionHint(message: String = "Tap the heart on any track to add it here.") {
-    Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
-        Text("Nothing here yet", style = MaterialTheme.typography.titleMedium)
-        Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

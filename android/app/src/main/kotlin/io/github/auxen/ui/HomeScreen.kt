@@ -12,6 +12,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +33,7 @@ import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.AuxenTrackRow
+import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.SectionHeader
 import java.util.Calendar
 
@@ -138,19 +141,11 @@ fun HomeScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
             }
         } else if (addedAlbums.isEmpty()) {
             item {
-                Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
-                    Text("Nothing here yet", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Play something from your Library or Search.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        stringResource(R.string.empty_home_flavor),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                EmptyState(
+                    icon = Icons.Filled.MusicNote,
+                    title = stringResource(R.string.empty_home_title),
+                    subtitle = stringResource(R.string.empty_home_subtitle),
+                )
             }
         }
     }

@@ -112,6 +112,40 @@
     <string name="queue_remove_a11y">Remove %1$s from queue</string>
     <string name="queue_drag_handle_a11y">Reorder %1$s</string>
 
+    <!-- Polish P2: one consistent empty / no-results surface per screen.
+         Titles are titleMedium; subtitles are bodyMedium/onSurfaceVariant. -->
+    <string name="empty_library_tracks_title">No local music yet</string>
+    <string name="empty_library_tracks_subtitle">Grant storage access or add files to this device.</string>
+    <string name="empty_library_albums_title">No albums yet</string>
+    <string name="empty_library_albums_subtitle">Local albums appear here once you add music.</string>
+    <string name="empty_library_artists_title">No artists yet</string>
+    <string name="empty_library_artists_subtitle">Local artists appear here once you add music.</string>
+
+    <string name="empty_search_prompt_title">Search your library and Tidal</string>
+    <string name="empty_search_prompt_subtitle">Find tracks, albums, and artists across your music.</string>
+    <string name="empty_search_no_results_title">No results</string>
+    <string name="empty_search_no_results_subtitle">Try a different search or filter.</string>
+
+    <string name="empty_collection_tracks_title">No favorite tracks yet</string>
+    <string name="empty_collection_tracks_subtitle">Tap the heart on any track to add it here.</string>
+    <string name="empty_collection_albums_title">No favorite albums yet</string>
+    <string name="empty_collection_albums_subtitle">Favorite a track to see its album here.</string>
+    <string name="empty_collection_artists_title">No favorite artists yet</string>
+    <string name="empty_collection_artists_subtitle">Favorite a track to see its artist here.</string>
+    <string name="empty_collection_playlists_title">No playlists yet</string>
+    <string name="empty_collection_playlists_subtitle">Long-press any track and choose Add to Playlist.</string>
+
+    <string name="empty_album_tracks_title">No tracks</string>
+    <string name="empty_album_tracks_subtitle">This album has no playable tracks.</string>
+    <string name="empty_artist_tracks_title">No tracks</string>
+    <string name="empty_artist_tracks_subtitle">This artist has no playable tracks.</string>
+
+    <string name="empty_playlist_title">This playlist is empty</string>
+    <string name="empty_playlist_subtitle">Long-press any track and choose Add to Playlist.</string>
+
+    <string name="empty_home_title">Nothing here yet</string>
+    <string name="empty_home_subtitle">Play something from your Library or Search.</string>
+
     <!-- Tidal official-API migration, Task 1: go/no-go streaming spike. -->
     <string name="settings_advanced_title">Advanced</string>
     <string name="settings_advanced_subtitle">Experimental features under evaluation.</string>
