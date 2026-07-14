@@ -1,14 +1,18 @@
 package io.github.auxen.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -39,6 +43,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -52,7 +57,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -66,6 +74,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import coil.compose.AsyncImage
 import io.github.auxen.R
+import io.github.auxen.model.Source
 import io.github.auxen.playback.SleepTimerController
 import io.github.auxen.playback.SleepTimerState
 import io.github.auxen.playback.isArmed
@@ -78,10 +87,16 @@ import kotlinx.coroutines.delay
 
 /**
  * Full-screen player — the desktop now-playing bar expanded to a mobile
- * screen: large art, marquee title/artist, seek, transport with 3-state
- * repeat, favorite heart, and source/quality badges.
+ * screen: a blurred album-art backdrop, the sharp art card, marquee
+ * title/artist, seek, transport with 3-state repeat, favorite heart, and
+ * source/quality badges.
+ *
+ * This is the thin stateful wrapper: it reads [viewModel]/[SleepTimerController]
+ * and owns the sleep-timer sheet, then delegates the whole visual to the
+ * ViewModel-free [NowPlayingContent] (same split as `QueueContent`/
+ * `SettingsContent`, which lets `NowPlayingScreenshotTest` render it without a
+ * live `MediaController`).
  */
-@OptIn(ExperimentalFoundationApi::class)
 @UnstableApi
 @Composable
 fun NowPlayingScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onOpenQueue: () -> Unit) {
@@ -90,98 +105,307 @@ fun NowPlayingScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onOpenQueue
     val positionMs by viewModel.positionMs.collectAsState()
     val durationMs by viewModel.durationMs.collectAsState()
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
-    var dragPositionMs by remember { mutableStateOf<Long?>(null) }
     var showSleepTimerSheet by remember { mutableStateOf(false) }
     val sleepTimerState by SleepTimerController.state.collectAsState()
 
-    Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    val favoriteKey = track?.let { "${it.source.name}:${it.sourceId}" }
+
+    NowPlayingContent(
+        title = metadata?.title?.toString() ?: "Nothing playing",
+        artist = metadata?.artist?.toString() ?: "",
+        artworkModel = metadata?.artworkUri,
+        source = track?.source,
+        qualityLabel = track?.qualityLabel,
+        isFavorite = favoriteKey != null && favoriteKey in favoriteKeys,
+        positionMs = positionMs,
+        durationMs = durationMs,
+        isPlaying = viewModel.isPlaying,
+        shuffleEnabled = viewModel.shuffleEnabled,
+        repeatMode = viewModel.repeatMode,
+        sleepTimerArmed = sleepTimerState.isArmed,
+        onBack = onBack,
+        onOpenQueue = onOpenQueue,
+        onOpenSleepTimer = { showSleepTimerSheet = true },
+        onToggleFavorite = { track?.let { viewModel.toggleFavorite(it) } },
+        onTogglePlayPause = { viewModel.togglePlayPause() },
+        onSkipPrevious = { viewModel.skipPrevious() },
+        onSkipNext = { viewModel.skipNext() },
+        onToggleShuffle = { viewModel.toggleShuffle() },
+        onCycleRepeat = { viewModel.cycleRepeat() },
+        onSeek = { viewModel.seekTo(it) },
+    )
+
+    if (showSleepTimerSheet) {
+        SleepTimerSheet(onDismiss = { showSleepTimerSheet = false })
+    }
+}
+
+/**
+ * Stateless now-playing surface. Layout is responsive via [BoxWithConstraints]:
+ *
+ *  - **Tall phones** stack top bar → art → controls in a `Column`. The art
+ *    sits in a `weight(1f)` box so it takes only the space *left over* after
+ *    the (unweighted, intrinsic-height) transport block is laid out — it
+ *    shrinks to fit rather than pushing the controls off-screen. This is the
+ *    fix for the reported "just image + timebar" bug, which came from an
+ *    always-`fillMaxWidth().aspectRatio(1f)` art in a non-scrollable column.
+ *  - **Wide / near-square screens** (tablets, landscape) put the art beside
+ *    the controls in a two-pane `Row`, which uses the extra width well and
+ *    keeps every control comfortably on-screen.
+ *
+ * In both modes the transport row is guaranteed visible without scrolling.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun NowPlayingContent(
+    title: String,
+    artist: String,
+    artworkModel: Any?,
+    source: Source?,
+    qualityLabel: String?,
+    isFavorite: Boolean,
+    positionMs: Long,
+    durationMs: Long,
+    isPlaying: Boolean,
+    shuffleEnabled: Boolean,
+    repeatMode: Int,
+    sleepTimerArmed: Boolean,
+    onBack: () -> Unit,
+    onOpenQueue: () -> Unit,
+    onOpenSleepTimer: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onSkipPrevious: () -> Unit,
+    onSkipNext: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onCycleRepeat: () -> Unit,
+    onSeek: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        // Near-square or wider than ~600dp: art and controls share the width
+        // side-by-side rather than stacking (the stacked square would waste the
+        // horizontal room and crowd the vertical).
+        val twoPane = maxWidth >= 600.dp && maxWidth >= maxHeight * 0.9f
+
+        NowPlayingBackdrop(artworkModel, Modifier.matchParentSize())
+
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
-            Spacer(Modifier.weight(1f))
-            // Queue (Desktop-Parity Screens, sub-batch A, Task 2): lives here
-            // rather than on MiniPlayerBar, which is already an "ultra-narrow
-            // tier" per its own KDoc with no spare room for a third icon
-            // alongside play/next.
-            IconButton(onClick = onOpenQueue) {
-                Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = stringResource(R.string.queue_title))
-            }
-            // Moved here from the transport row below (final review round,
-            // Important #5): a 6th icon in that row's SpaceEvenly
-            // arrangement pushed Play/Pause off-center. Top bar is the
-            // natural home for a screen-level action that isn't part of
-            // transport control proper.
-            IconButton(onClick = { showSleepTimerSheet = true }) {
-                Icon(
-                    Icons.Filled.Bedtime,
-                    contentDescription = "Sleep timer",
-                    // Tinted while armed, matching the shuffle/repeat convention below.
-                    // isArmed (not endElapsedRealtime != null): also true during the
-                    // pendingTrackEnd phase, which has no countdown timestamp of its
-                    // own but is still an active pending pause.
-                    tint = if (sleepTimerState.isArmed) MaterialTheme.colorScheme.primary else LocalContentColor.current,
-                )
-            }
-        }
-        Spacer(Modifier.height(16.dp))
-        AsyncImage(
-            model = metadata?.artworkUri,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp)),
-        )
-        Spacer(Modifier.height(24.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    metadata?.title?.toString() ?: "Nothing playing",
-                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 22.sp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Clip,
-                    modifier = Modifier.basicMarquee(),
-                )
-                Text(
-                    metadata?.artist?.toString() ?: "",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (track != null) {
-                val key = "${track.source.name}:${track.sourceId}"
-                IconButton(onClick = { viewModel.toggleFavorite(track) }) {
-                    Icon(
-                        if (key in favoriteKeys) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                        contentDescription = "Favorite",
-                        tint = if (key in favoriteKeys) AuxenColors.FavoriteRed else LocalContentColor.current,
+            NowPlayingTopBar(
+                onBack = onBack,
+                onOpenQueue = onOpenQueue,
+                onOpenSleepTimer = onOpenSleepTimer,
+                sleepTimerArmed = sleepTimerArmed,
+            )
+
+            if (twoPane) {
+                Row(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AlbumArtCard(
+                        artworkModel = artworkModel,
+                        modifier = Modifier.weight(1f).fillMaxHeight().padding(vertical = 16.dp),
                     )
+                    Spacer(Modifier.width(32.dp))
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        TrackMetadata(title, artist, source, qualityLabel, isFavorite, onToggleFavorite)
+                        Spacer(Modifier.height(20.dp))
+                        SeekBar(positionMs, durationMs, onSeek)
+                        Spacer(Modifier.height(12.dp))
+                        TransportBar(isPlaying, shuffleEnabled, repeatMode, onTogglePlayPause, onSkipPrevious, onSkipNext, onToggleShuffle, onCycleRepeat)
+                    }
                 }
+            } else {
+                // weight(1f): the art claims only the space the intrinsic-height
+                // metadata/seek/transport block below leaves free, so it can
+                // never push those off the bottom of a short screen.
+                AlbumArtCard(
+                    artworkModel = artworkModel,
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 12.dp),
+                )
+                TrackMetadata(title, artist, source, qualityLabel, isFavorite, onToggleFavorite)
+                Spacer(Modifier.height(16.dp))
+                SeekBar(positionMs, durationMs, onSeek)
+                Spacer(Modifier.height(12.dp))
+                TransportBar(isPlaying, shuffleEnabled, repeatMode, onTogglePlayPause, onSkipPrevious, onSkipNext, onToggleShuffle, onCycleRepeat)
+                Spacer(Modifier.height(20.dp))
             }
         }
-        if (track != null) {
-            Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                SourceBadge(track.source)
+    }
+}
+
+/**
+ * Blurred, dimmed album-art fill behind a theme-aware scrim — the "premium
+ * now-playing" backdrop. The scrim is a vertical gradient over the theme
+ * [MaterialTheme.colorScheme.background] so title/badge text keeps its
+ * contrast in both light and dark. The art layer is skipped entirely when
+ * [artworkModel] is null (nothing to blur), leaving just the flat background.
+ */
+@Composable
+private fun NowPlayingBackdrop(artworkModel: Any?, modifier: Modifier) {
+    val background = MaterialTheme.colorScheme.background
+    Box(modifier.background(background)) {
+        if (artworkModel != null) {
+            AsyncImage(
+                model = artworkModel,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize().blur(48.dp).alpha(0.5f),
+            )
+        }
+        Box(
+            Modifier.matchParentSize().background(
+                Brush.verticalGradient(
+                    listOf(background.copy(alpha = 0.55f), background.copy(alpha = 0.92f)),
+                ),
+            ),
+        )
+    }
+}
+
+@Composable
+private fun NowPlayingTopBar(
+    onBack: () -> Unit,
+    onOpenQueue: () -> Unit,
+    onOpenSleepTimer: () -> Unit,
+    sleepTimerArmed: Boolean,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+        }
+        Spacer(Modifier.weight(1f))
+        // Queue (Desktop-Parity Screens, sub-batch A, Task 2): lives here
+        // rather than on MiniPlayerBar, which is already an "ultra-narrow
+        // tier" per its own KDoc with no spare room for a third icon
+        // alongside play/next.
+        IconButton(onClick = onOpenQueue) {
+            Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = stringResource(R.string.queue_title))
+        }
+        // Moved here from the transport row (final review round, Important
+        // #5): a 6th icon in that row's SpaceEvenly arrangement pushed
+        // Play/Pause off-center. Top bar is the natural home for a screen-
+        // level action that isn't part of transport control proper.
+        IconButton(onClick = onOpenSleepTimer) {
+            Icon(
+                Icons.Filled.Bedtime,
+                contentDescription = "Sleep timer",
+                // Tinted while armed, matching the shuffle/repeat convention.
+                // isArmed (not endElapsedRealtime != null): also true during the
+                // pendingTrackEnd phase, which has no countdown timestamp of its
+                // own but is still an active pending pause.
+                tint = if (sleepTimerArmed) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+            )
+        }
+    }
+}
+
+/**
+ * The sharp album-art card, centered and always square. Its own
+ * [BoxWithConstraints] fits the square to whichever of the available box's
+ * dimensions is smaller, so it never overflows whether the box is portrait
+ * (phone, stacked) or landscape/tall (tablet pane). A raised [Surface] gives
+ * it a lifted, premium feel and a deterministic `surfaceVariant` fill while
+ * art loads (or in null-art goldens).
+ */
+@Composable
+private fun AlbumArtCard(artworkModel: Any?, modifier: Modifier) {
+    BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
+        // Landscape box -> the height is the limiting dimension; otherwise the
+        // width is. Fill the limiting one and let aspectRatio derive the other.
+        val squared = if (maxHeight < maxWidth) Modifier.fillMaxHeight() else Modifier.fillMaxWidth()
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shadowElevation = 18.dp,
+            modifier = squared.aspectRatio(1f),
+        ) {
+            AsyncImage(
+                model = artworkModel,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TrackMetadata(
+    title: String,
+    artist: String,
+    source: Source?,
+    qualityLabel: String?,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                // titleMedium (DM Sans) at 22sp — pinned verbatim by
+                // ComponentScreenshotTest's typography-details golden (proves
+                // the title is sans-serif DM Sans, not Fraunces).
+                style = MaterialTheme.typography.titleMedium.copy(fontSize = 22.sp),
+                maxLines = 1,
+                overflow = TextOverflow.Clip,
+                modifier = Modifier.basicMarquee(),
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                artist,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (source != null) {
+            IconButton(onClick = onToggleFavorite) {
+                Icon(
+                    if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                    contentDescription = "Favorite",
+                    tint = if (isFavorite) AuxenColors.FavoriteRed else LocalContentColor.current,
+                )
+            }
+        }
+    }
+    if (source != null) {
+        Spacer(Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            SourceBadge(source)
+            if (qualityLabel != null) {
                 Spacer(Modifier.width(6.dp))
-                QualityBadge(track.qualityLabel)
+                QualityBadge(qualityLabel)
             }
         }
-        Spacer(Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun SeekBar(positionMs: Long, durationMs: Long, onSeek: (Long) -> Unit) {
+    var dragPositionMs by remember { mutableStateOf<Long?>(null) }
+    val max = durationMs.toFloat().coerceAtLeast(1f)
+    Column(modifier = Modifier.fillMaxWidth()) {
         Slider(
-            value = (dragPositionMs ?: positionMs).toFloat().coerceIn(0f, durationMs.toFloat().coerceAtLeast(1f)),
+            value = (dragPositionMs ?: positionMs).toFloat().coerceIn(0f, max),
             onValueChange = { dragPositionMs = it.toLong() },
             onValueChangeFinished = {
-                dragPositionMs?.let { viewModel.seekTo(it) }
+                dragPositionMs?.let(onSeek)
                 dragPositionMs = null
             },
-            valueRange = 0f..durationMs.toFloat().coerceAtLeast(1f),
+            valueRange = 0f..max,
             colors = SliderDefaults.colors(
                 thumbColor = AuxenColors.AmberPrimary,
                 activeTrackColor = AuxenColors.AmberPrimary,
@@ -201,55 +425,65 @@ fun NowPlayingScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onOpenQueue
                 fontFamily = FontFamily.Monospace,
             )
         }
-        Spacer(Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { viewModel.toggleShuffle() }) {
-                Icon(
-                    Icons.Filled.Shuffle,
-                    contentDescription = "Shuffle",
-                    // Icon tint -- resolves to the contrast-safe primary (final-review fix
-                    // round, Minor #2); the play button below is a container behind BgDeep
-                    // content and correctly keeps the raw brand amber.
-                    tint = if (viewModel.shuffleEnabled) MaterialTheme.colorScheme.primary else LocalContentColor.current,
-                )
-            }
-            IconButton(onClick = { viewModel.skipPrevious() }) {
-                Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous", modifier = Modifier.size(36.dp))
-            }
-            IconButton(
-                onClick = { viewModel.togglePlayPause() },
-                colors = IconButtonDefaults.iconButtonColors(
-                    containerColor = AuxenColors.AmberPrimary,
-                    contentColor = AuxenColors.BgDeep,
-                ),
-                modifier = Modifier.size(64.dp),
-            ) {
-                Icon(
-                    if (viewModel.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = if (viewModel.isPlaying) "Pause" else "Play",
-                    modifier = Modifier.size(36.dp),
-                )
-            }
-            IconButton(onClick = { viewModel.skipNext() }) {
-                Icon(Icons.Filled.SkipNext, contentDescription = "Next", modifier = Modifier.size(36.dp))
-            }
-            IconButton(onClick = { viewModel.cycleRepeat() }) {
-                Icon(
-                    if (viewModel.repeatMode == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
-                    contentDescription = "Repeat",
-                    // Icon tint -- resolves to the contrast-safe primary (final-review fix round, Minor #2).
-                    tint = if (viewModel.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary else LocalContentColor.current,
-                )
-            }
-        }
     }
+}
 
-    if (showSleepTimerSheet) {
-        SleepTimerSheet(onDismiss = { showSleepTimerSheet = false })
+@Composable
+private fun TransportBar(
+    isPlaying: Boolean,
+    shuffleEnabled: Boolean,
+    repeatMode: Int,
+    onTogglePlayPause: () -> Unit,
+    onSkipPrevious: () -> Unit,
+    onSkipNext: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onCycleRepeat: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onToggleShuffle) {
+            Icon(
+                Icons.Filled.Shuffle,
+                contentDescription = "Shuffle",
+                // Icon tint -- resolves to the contrast-safe primary (final-review fix
+                // round, Minor #2); the play button below is a container behind BgDeep
+                // content and correctly keeps the raw brand amber.
+                tint = if (shuffleEnabled) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+            )
+        }
+        IconButton(onClick = onSkipPrevious) {
+            Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous", modifier = Modifier.size(38.dp))
+        }
+        // Clearly-primary transport control: larger amber container than the
+        // ghost skip/shuffle/repeat buttons around it.
+        IconButton(
+            onClick = onTogglePlayPause,
+            colors = IconButtonDefaults.iconButtonColors(
+                containerColor = AuxenColors.AmberPrimary,
+                contentColor = AuxenColors.BgDeep,
+            ),
+            modifier = Modifier.size(72.dp),
+        ) {
+            Icon(
+                if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = if (isPlaying) "Pause" else "Play",
+                modifier = Modifier.size(40.dp),
+            )
+        }
+        IconButton(onClick = onSkipNext) {
+            Icon(Icons.Filled.SkipNext, contentDescription = "Next", modifier = Modifier.size(38.dp))
+        }
+        IconButton(onClick = onCycleRepeat) {
+            Icon(
+                if (repeatMode == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
+                contentDescription = "Repeat",
+                // Icon tint -- resolves to the contrast-safe primary (final-review fix round, Minor #2).
+                tint = if (repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+            )
+        }
     }
 }
 
