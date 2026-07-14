@@ -1,10 +1,13 @@
 package io.github.auxen.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -44,8 +48,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import io.github.auxen.R
@@ -59,14 +66,20 @@ val PLAYLIST_COLORS = listOf(
     "#e74c3c", "#3498db", "#e67e22", "#1abc9c",
 )
 
+/**
+ * Parse a stored `#RRGGBB` playlist color, falling back to the brand amber token
+ * (never a drifting literal) when null/malformed. Wrap call sites in
+ * `remember(color)` so it isn't re-parsed on every recomposition.
+ */
 private fun parseColor(hex: String?): Color =
-    runCatching { Color(android.graphics.Color.parseColor(hex ?: "#d4a039")) }
+    runCatching { Color(android.graphics.Color.parseColor(hex)) }
         .getOrDefault(AuxenColors.AmberPrimary)
 
 /**
  * Playlist detail — desktop PlaylistView: color-dot header, Play All/Shuffle,
  * rename/recolor/delete, and per-row remove + move up/down reordering.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @UnstableApi
 @Composable
 fun PlaylistDetailScreen(
@@ -89,7 +102,15 @@ fun PlaylistDetailScreen(
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
-            Box(Modifier.size(16.dp).background(parseColor(playlist?.color), CircleShape))
+            // Parse once per color (not every recomposition); the 1dp outline keeps
+            // pale user colors visible on the light-theme surface.
+            val dotColor = remember(playlist?.color) { parseColor(playlist?.color) }
+            Box(
+                Modifier
+                    .size(16.dp)
+                    .background(dotColor, CircleShape)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
+            )
             Text(
                 playlist?.name ?: "Playlist",
                 style = MaterialTheme.typography.headlineSmall,
@@ -177,17 +198,58 @@ fun PlaylistDetailScreen(
             onDismissRequest = { showColors = false },
             title = { Text("Playlist color") },
             text = {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                val currentColor = playlist?.color
+                // FlowRow so all 8 swatches reflow onto multiple lines and stay
+                // reachable inside the ~264dp AlertDialog content slot (a single
+                // non-wrapping Row clipped the last swatches off-dialog).
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                     PLAYLIST_COLORS.forEach { hex ->
+                        val selected = hex.equals(currentColor, ignoreCase = true)
+                        // 48dp hit target for accessibility; clip BEFORE clickable
+                        // so the ripple is circular.
                         Box(
-                            Modifier
-                                .size(32.dp)
-                                .background(parseColor(hex), CircleShape)
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
                                 .clickable {
                                     viewModel.recolorPlaylist(playlistId, hex)
                                     showColors = false
+                                }
+                                .semantics {
+                                    contentDescription = if (selected) "$hex, selected" else hex
                                 },
-                        )
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(parseColor(hex))
+                                    .then(
+                                        if (selected) {
+                                            Modifier.border(
+                                                2.dp,
+                                                MaterialTheme.colorScheme.onSurface,
+                                                CircleShape,
+                                            )
+                                        } else {
+                                            Modifier
+                                        },
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (selected) {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             },
