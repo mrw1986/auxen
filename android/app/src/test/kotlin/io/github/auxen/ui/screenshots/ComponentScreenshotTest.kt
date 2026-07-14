@@ -3,6 +3,7 @@ package io.github.auxen.ui.screenshots
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -356,14 +357,23 @@ class ComponentScreenshotTest {
 
     // --- AlbumCard ---
 
+    // AlbumCard now fills its parent's width (adaptive-grid behavior). In a grid
+    // its cell bounds it; here there is no cell, so it is wrapped in a 170dp Box
+    // — a representative adaptive-grid cell width on the Pixel-7 profile — so the
+    // golden matches production (a fill-width card in the bare Surface would span
+    // the whole ~411dp screen and the square art would blow up to match).
     @Test
     fun albumCard_light() = captureComponent("album-card-light", darkTheme = false) {
-        AlbumCard(title = "OutRun", artist = "Kavinsky", artUrl = null, source = Source.TIDAL, onClick = {}, onPlay = {})
+        Box(Modifier.width(170.dp)) {
+            AlbumCard(title = "OutRun", artist = "Kavinsky", artUrl = null, source = Source.TIDAL, onClick = {}, onPlay = {})
+        }
     }
 
     @Test
     fun albumCard_dark() = captureComponent("album-card-dark", darkTheme = true) {
-        AlbumCard(title = "OutRun", artist = "Kavinsky", artUrl = null, source = Source.TIDAL, onClick = {}, onPlay = {})
+        Box(Modifier.width(170.dp)) {
+            AlbumCard(title = "OutRun", artist = "Kavinsky", artUrl = null, source = Source.TIDAL, onClick = {}, onPlay = {})
+        }
     }
 
     // --- SourceBadge (solid + tinted) + QualityBadge row — theme-parity badge pins ---

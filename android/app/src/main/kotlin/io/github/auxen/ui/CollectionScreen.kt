@@ -53,6 +53,7 @@ import io.github.auxen.data.groupArtists
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AlbumCard
+import io.github.auxen.ui.components.ArtistRow
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.TrackActionSheet
@@ -96,6 +97,12 @@ fun CollectionScreen(
                     selected = tab == index,
                     onClick = { tab = index },
                     shape = SegmentedButtonDefaults.itemShape(index = index, count = COLLECTION_TABS.size),
+                    // Drop the leading selection-check icon: with four equal
+                    // segments its ~26dp eats the active tab's label width and
+                    // clips "Playlists"/"Artists" at ~320-360dp. Removing it lets
+                    // the active tab render at the same width the inactive tabs
+                    // already fit their full labels in.
+                    icon = {},
                 ) { Text(label) }
             }
         }
@@ -190,22 +197,12 @@ fun CollectionScreen(
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
                         items(artists, key = { it.artist }) { artist ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onOpenArtist(artist.artist) }
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(artist.artist, style = MaterialTheme.typography.bodyLarge)
-                                    Text(
-                                        "${artist.tracks.size} favorited",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
+                            ArtistRow(
+                                name = artist.artist,
+                                subtitle = "${artist.tracks.size} favorited",
+                                artUrl = artist.artUrl,
+                                onClick = { onOpenArtist(artist.artist) },
+                            )
                         }
                     }
                 }

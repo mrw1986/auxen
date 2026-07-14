@@ -1,6 +1,5 @@
 package io.github.auxen.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -52,6 +51,7 @@ import io.github.auxen.data.sortArtists
 import io.github.auxen.data.sortTracks
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AlbumCard
+import io.github.auxen.ui.components.ArtistRow
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.TrackActionSheet
@@ -190,7 +190,8 @@ fun LibraryScreen(
                     items(artists, key = { it.artist }) { artist ->
                         ArtistRow(
                             name = artist.artist,
-                            trackCount = artist.tracks.size,
+                            subtitle = "${artist.tracks.size} tracks",
+                            artUrl = artist.artUrl,
                             onClick = { onOpenArtist(artist.artist) },
                         )
                     }
@@ -236,25 +237,5 @@ fun LibraryScreen(
             onAddToPlaylist = { viewModel.addToPlaylist(track, it) },
             onCreatePlaylist = { viewModel.createPlaylistAndAdd(track, it) },
         )
-    }
-}
-
-@Composable
-private fun ArtistRow(name: String, trackCount: Int, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(name, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                "$trackCount tracks",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
     }
 }

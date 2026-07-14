@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -123,6 +124,9 @@ fun HomeScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                             source = Source.LOCAL,
                             onClick = { viewModel.playAll(album.tracks) },
                             onPlay = { viewModel.playAll(album.tracks) },
+                            // Carousel item — a fill-width card has no width
+                            // constraint inside a LazyRow, so pin it here.
+                            modifier = Modifier.width(150.dp),
                         )
                     }
                 }

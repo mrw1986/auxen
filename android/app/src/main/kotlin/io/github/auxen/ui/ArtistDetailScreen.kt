@@ -139,6 +139,9 @@ fun ArtistDetailScreen(
                             source = album.tracks.firstOrNull()?.source,
                             onClick = { onOpenAlbum(album) },
                             onPlay = { viewModel.playAll(album.tracks) },
+                            // Carousel item — a fill-width card has no width
+                            // constraint inside a LazyRow, so pin it here.
+                            modifier = Modifier.width(150.dp),
                         )
                     }
                 }
