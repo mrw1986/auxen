@@ -19,14 +19,22 @@ android {
         versionName = "0.1.0"
 
         // Tidal API credentials are NOT checked into the repo. Put them in
-        // ~/.gradle/gradle.properties or android/local.properties as
-        //   auxen.tidalClientId=...
-        //   auxen.tidalClientSecret=...
-        // (the same client id/secret pair the desktop app's tidalapi uses).
+        // ~/.gradle/gradle.properties or android/local.properties.
+        //   auxen.tidalClientId / auxen.tidalClientSecret
+        //     = the INTERNAL tidalapi client (same pair the desktop app uses);
+        //       drives TidalAuth's device-code login against api.tidal.com/v1.
+        //   auxen.tidalOfficialClientId
+        //     = the OFFICIAL developer app "Auxen" (developer.tidal.com); drives
+        //       the official Open API PKCE login (TidalOfficialSession). It is a
+        //       DIFFERENT client id from the internal one — using the internal id
+        //       against login.tidal.com/authorize returns error 11102. PKCE is a
+        //       public-client flow, so no official secret is sent (none needed here).
         val tidalClientId = (project.findProperty("auxen.tidalClientId") as? String) ?: ""
         val tidalClientSecret = (project.findProperty("auxen.tidalClientSecret") as? String) ?: ""
+        val tidalOfficialClientId = (project.findProperty("auxen.tidalOfficialClientId") as? String) ?: ""
         buildConfigField("String", "TIDAL_CLIENT_ID", "\"$tidalClientId\"")
         buildConfigField("String", "TIDAL_CLIENT_SECRET", "\"$tidalClientSecret\"")
+        buildConfigField("String", "TIDAL_OFFICIAL_CLIENT_ID", "\"$tidalOfficialClientId\"")
     }
 
     buildTypes {

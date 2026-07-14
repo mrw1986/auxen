@@ -49,7 +49,10 @@ internal fun validateRedirect(redirect: Uri, expectedState: String?): Result<Str
  */
 class TidalOfficialSession(context: Context, private val client: OkHttpClient) {
     private val appContext = context.applicationContext
-    private val clientId: String get() = BuildConfig.TIDAL_CLIENT_ID
+    // The OFFICIAL developer-app client id (developer.tidal.com), NOT the
+    // internal tidalapi client BuildConfig.TIDAL_CLIENT_ID that TidalAuth uses.
+    // login.tidal.com/authorize rejects the internal id with error 11102.
+    private val clientId: String get() = BuildConfig.TIDAL_OFFICIAL_CLIENT_ID
 
     // In-memory only for the duration of one login attempt -- NOT persisted
     // across process death mid-flow. Acceptable for a go/no-go spike (the
