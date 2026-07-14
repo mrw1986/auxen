@@ -19,7 +19,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -59,7 +61,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
@@ -212,7 +213,12 @@ internal fun NowPlayingContent(
                     )
                     Spacer(Modifier.width(32.dp))
                     Column(
-                        modifier = Modifier.weight(1f),
+                        // Scroll so a pathologically short+wide window (e.g.
+                        // 600x300dp) scrolls the controls rather than clipping
+                        // the transport row; tall two-pane sizes (the tested
+                        // tablet golden) have ample height, so nothing scrolls
+                        // and the layout is unchanged.
+                        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.Center,
                     ) {
                         TrackMetadata(title, artist, source, qualityLabel, isFavorite, onToggleFavorite)
