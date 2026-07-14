@@ -102,6 +102,11 @@ dependencies {
     // rejected).
     implementation(libs.androidx.browser)
 
+    // Animated drag-reorder for the Queue screen's up-next list (github.com/Calvin-LL/Reorderable).
+    // 2.5.1 is the latest stable 2.x; it targets Compose 1.7.x, matching this
+    // module's Compose BOM (2024.12.01). minSdk 21, below the app's 26.
+    implementation(libs.reorderable)
+
     implementation(libs.androidx.room.runtime)
     ksp(libs.androidx.room.compiler)
 

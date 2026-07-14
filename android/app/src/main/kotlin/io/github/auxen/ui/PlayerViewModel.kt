@@ -23,6 +23,7 @@ import io.github.auxen.Graph
 import io.github.auxen.data.LibrarySort
 import io.github.auxen.db.PlaylistEntity
 import io.github.auxen.matching.DuplicateResolver
+import io.github.auxen.model.QueueEntry
 import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
 import io.github.auxen.playback.PlaybackService
@@ -133,13 +134,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
      * controller reindexes asynchronously, so a local splice could disagree
      * with the eventual real state.
      */
-    val queue = MutableStateFlow<List<Track>>(emptyList())
+    val queue = MutableStateFlow<List<QueueEntry>>(emptyList())
 
-    /** Index of the currently-playing item within [queue]; -1 if none. */
+    /** Real controller index of the currently-playing item within [queue]; -1 if none. */
     val queueIndex = MutableStateFlow(-1)
 
     private fun refreshQueue(c: Player) {
-        queue.value = Graph.tracksFrom(c)
+        queue.value = Graph.queueEntriesFrom(c)
         queueIndex.value = c.currentMediaItemIndex
     }
 

@@ -64,6 +64,7 @@ import io.github.auxen.dsp.LimiterState
 import io.github.auxen.dsp.ReplayGainState
 import io.github.auxen.dsp.ReverbState
 import io.github.auxen.dsp.VirtualizerState
+import io.github.auxen.model.QueueEntry
 import io.github.auxen.model.Source
 import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
@@ -995,9 +996,9 @@ class ComponentScreenshotTest {
     // favorited row's filled heart. Empty pins the empty-state copy.
 
     private val queueTracks = listOf(
-        Track(title = "Silhouette", artist = "Rewired", source = Source.LOCAL, sourceId = "q1"),
-        Track(title = "Nightcall", artist = "Kavinsky", source = Source.TIDAL, sourceId = "q2"),
-        Track(title = "Everlong", artist = "Foo Fighters", source = Source.LOCAL, sourceId = "q3"),
+        QueueEntry("q1", Track(title = "Silhouette", artist = "Rewired", source = Source.LOCAL, sourceId = "q1")),
+        QueueEntry("q2", Track(title = "Nightcall", artist = "Kavinsky", source = Source.TIDAL, sourceId = "q2")),
+        QueueEntry("q3", Track(title = "Everlong", artist = "Foo Fighters", source = Source.LOCAL, sourceId = "q3")),
     )
 
     @Test

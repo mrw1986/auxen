@@ -16,6 +16,7 @@ import io.github.auxen.dsp.AudioFxController
 import io.github.auxen.dsp.AutoEqController
 import io.github.auxen.dsp.AutoEqRepository
 import io.github.auxen.dsp.EqController
+import io.github.auxen.model.QueueEntry
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.playback.QueueStateStore
@@ -33,6 +34,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 @UnstableApi
@@ -151,6 +153,15 @@ object Graph {
     /** MediaMetadata extras key holding the serialized [Track] JSON. */
     const val TRACK_EXTRA_KEY = "auxen.track"
 
+    /**
+     * MediaMetadata extras key holding a per-occurrence UUID stamped by
+     * [mediaItemFor]. Unlike [MediaItem.mediaId] (`SOURCE:sourceId`, shared by
+     * every occurrence of a track and parsed by ReplayGain/Tidal routing in
+     * `PlaybackService`), this is unique per enqueued item, so a queue with the
+     * same track twice still has distinct, reorder-stable keys — see [QueueEntry].
+     */
+    const val QUEUE_UID_KEY = "auxen.queueUid"
+
     val json = Json { ignoreUnknownKeys = true }
 
     lateinit var resolver: TrackResolver
@@ -189,7 +200,12 @@ object Graph {
         } else {
             "auxen://tidal/${track.sourceId}"
         }
-        val extras = Bundle().apply { putString(TRACK_EXTRA_KEY, json.encodeToString(track)) }
+        val extras = Bundle().apply {
+            putString(TRACK_EXTRA_KEY, json.encodeToString(track))
+            // Fresh per-occurrence id (see QUEUE_UID_KEY / QueueEntry). NOT the
+            // mediaId, which stays "SOURCE:sourceId" for routing/detection.
+            putString(QUEUE_UID_KEY, UUID.randomUUID().toString())
+        }
         val metadata = MediaMetadata.Builder()
             .setTitle(track.title)
             .setArtist(track.artist)
@@ -222,4 +238,25 @@ object Graph {
     /** Snapshot every track in [player]'s current queue, in order. */
     fun tracksFrom(player: Player): List<Track> =
         (0 until player.mediaItemCount).mapNotNull { i -> trackFor(player.getMediaItemAt(i)) }
+
+    /**
+     * Snapshot [player]'s queue as [QueueEntry]s — like [tracksFrom] but each
+     * item also carries its per-occurrence id (the [QUEUE_UID_KEY] extra
+     * stamped by [mediaItemFor]). Items that predate the stamp (an older
+     * restored queue) fall back to `"$index:SOURCE:sourceId"`, which is only
+     * unique within a single snapshot but that is all the Queue UI needs it
+     * for. Windows whose [Track] fails to decode are dropped, exactly as
+     * [tracksFrom] drops them.
+     */
+    fun queueEntriesFrom(player: Player): List<QueueEntry> =
+        queueEntriesFrom((0 until player.mediaItemCount).map(player::getMediaItemAt))
+
+    /** [queueEntriesFrom] over a plain media-item list — the unit-testable core. */
+    fun queueEntriesFrom(items: List<MediaItem>): List<QueueEntry> =
+        items.mapIndexedNotNull { index, item ->
+            val track = trackFor(item) ?: return@mapIndexedNotNull null
+            val id = item.mediaMetadata.extras?.getString(QUEUE_UID_KEY)
+                ?: "$index:${track.source.name}:${track.sourceId}"
+            QueueEntry(id, track)
+        }
 }

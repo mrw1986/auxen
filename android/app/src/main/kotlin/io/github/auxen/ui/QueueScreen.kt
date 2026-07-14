@@ -1,14 +1,13 @@
 package io.github.auxen.ui
 
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DragHandle
@@ -19,36 +18,38 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.auxen.R
+import io.github.auxen.model.QueueEntry
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AuxenTrackRow
-import kotlin.math.roundToInt
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 /**
- * Queue screen (Desktop-Parity Screens, sub-batch A, Task 2): pinned
- * now-playing summary + the full live queue, reorderable via a long-press
- * drag handle, tap-to-jump, remove, and clear. Desktop reference
- * (`auxen/views/queue_panel.py`) excludes the current-index track from its
- * scrollable list entirely (shown only in the pinned section); this
- * deliberately does NOT do that -- the current track stays IN the list
- * (highlighted, drag handle hidden) so every row's index is always a real,
- * direct queue index. Excluding it would mean every jump/remove/move call
- * from the list needs to translate a "position among the OTHERS" back to a
- * real queue index, which is exactly the kind of index-math a reorderable
- * list is already fragile enough without.
+ * Queue screen: a pinned now-playing summary + the scrollable "up next" list,
+ * reorderable via a long-press drag handle (animated + haptic, powered by
+ * `sh.calvin.reorderable`), tap-to-jump, remove, and clear.
+ *
+ * Unlike the earlier in-house version, the now-playing track is shown ONLY in
+ * the pinned header — it is excluded from the scrollable list (matching the
+ * desktop `queue_panel.py`), so it never appears twice. Because the list is
+ * therefore filtered, every jump/remove/move from a list row translates the
+ * row's stable [QueueEntry.id] back to a real controller index before calling
+ * the ViewModel (whose `jumpTo`/`removeFromQueue`/`moveInQueue` take real
+ * indices). Per-occurrence ids make that translation exact even when the same
+ * track appears more than once.
  *
  * Thin VM-collecting shell over [QueueContent], same split as
  * `SettingsContent`/`AutoEqPickerResults`.
@@ -73,7 +74,7 @@ fun QueueScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
 
 @Composable
 internal fun QueueContent(
-    queue: List<Track>,
+    queue: List<QueueEntry>,
     playingIndex: Int,
     favoriteKeys: Set<String>,
     onJumpTo: (Int) -> Unit,
@@ -115,7 +116,8 @@ internal fun QueueContent(
             return@Column
         }
 
-        if (playingIndex in queue.indices) {
+        val playingEntry = queue.getOrNull(playingIndex)
+        if (playingEntry != null) {
             Text(
                 stringResource(R.string.queue_now_playing_label),
                 style = MaterialTheme.typography.labelMedium,
@@ -123,11 +125,11 @@ internal fun QueueContent(
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
             AuxenTrackRow(
-                track = queue[playingIndex],
-                isFavorite = favoriteKeys.contains(queue[playingIndex].favoriteKey()),
+                track = playingEntry.track,
+                isFavorite = favoriteKeys.contains(playingEntry.track.favoriteKey()),
                 isPlaying = true,
                 onPlay = { onJumpTo(playingIndex) },
-                onToggleFavorite = { onToggleFavorite(queue[playingIndex]) },
+                onToggleFavorite = { onToggleFavorite(playingEntry.track) },
             )
             HorizontalDivider()
         }
@@ -145,20 +147,22 @@ internal fun QueueContent(
 }
 
 /**
- * The reorderable body: a plain [LazyColumn] with a manual long-press drag
- * on each row's trailing handle. No third-party reorderable-list dependency
- * -- checked the classpath first (none present) -- since [targetDragIndex]'s
- * fixed-row-height assumption (every row is the same [AuxenTrackRow], same
- * content shape) keeps this simple enough not to need one.
+ * The reorderable "up next" body: a [LazyColumn] of every queue entry EXCEPT
+ * the pinned playing one, wired to `sh.calvin.reorderable` for animated
+ * long-press drag-reorder.
  *
- * `visualOrder` is a LOCAL copy used only to preview the reorder while
- * dragging; it re-syncs to [queue] via the `remember(queue)` key whenever
- * [queue] changes for any other reason (track advance, an external
- * remove), so a completed drag can never leave a stale view behind.
+ * [upNextOrder] is a LOCAL, optimistic copy of the filtered queue that the
+ * reorder callback mutates in place for smooth animation while dragging; it
+ * re-syncs to the real (filtered) queue whenever that changes for any other
+ * reason (track advance, external remove, our own committed move) — but never
+ * mid-drag, so a completed drag can't be clobbered before it commits. The
+ * controller is never mutated until the drag ends: on drop, [queueMoveTarget]
+ * translates the final local order into the single real-index
+ * `moveMediaItem` that reproduces it.
  */
 @Composable
 private fun ReorderableQueueList(
-    queue: List<Track>,
+    queue: List<QueueEntry>,
     playingIndex: Int,
     favoriteKeys: Set<String>,
     onJumpTo: (Int) -> Unit,
@@ -166,98 +170,61 @@ private fun ReorderableQueueList(
     onMove: (Int, Int) -> Unit,
     onToggleFavorite: (Track) -> Unit,
 ) {
-    var visualOrder by remember(queue) { mutableStateOf(queue) }
-    var itemHeightPx by remember { mutableFloatStateOf(0f) }
-    var dragStartIndex by remember { mutableStateOf<Int?>(null) }
-    var draggedIndex by remember { mutableStateOf<Int?>(null) }
-    var dragOffsetPx by remember { mutableFloatStateOf(0f) }
+    val upNext = remember(queue, playingIndex) {
+        queue.filterIndexed { index, _ -> index != playingIndex }
+    }
+    var upNextOrder by remember { mutableStateOf(upNext) }
+    var draggingId by remember { mutableStateOf<String?>(null) }
+    // Re-sync the optimistic order from the real queue, but not while a drag is
+    // in flight (that would yank rows out from under the finger).
+    LaunchedEffect(upNext) { if (draggingId == null) upNextOrder = upNext }
 
-    fun endDrag(commit: Boolean) {
-        val start = dragStartIndex
-        val end = draggedIndex
-        if (commit && start != null && end != null && start != end) onMove(start, end)
-        if (!commit) visualOrder = queue
-        dragStartIndex = null
-        draggedIndex = null
-        dragOffsetPx = 0f
+    val haptics = LocalHapticFeedback.current
+    val lazyListState = rememberLazyListState()
+    val reorderState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        upNextOrder = upNextOrder.toMutableList().apply { add(to.index, removeAt(from.index)) }
+        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     }
 
-    LazyColumn {
-        // Positional key: there's no animateItemPlacement here, and Track has
-        // no per-occurrence id, so a track-identity key (the previous
-        // `track.favoriteKey()`) bought nothing and only crashed -- a queue
-        // with the same track twice (a playlist dup, or "play next" on the
-        // same song twice; the queue is raw MediaController items, no dedup)
-        // produced duplicate keys, which Compose treats as a hard error
-        // (final review round, Critical: reproduced, IllegalArgumentException;
-        // regression test in QueueScreenUiTest).
-        itemsIndexed(visualOrder, key = { index, _ -> index }) { index, track ->
-            // Reread on every recomposition of THIS slot, not just once --
-            // see the pointerInput(Unit) note below for why this matters.
-            val currentIndex by rememberUpdatedState(index)
-            AuxenTrackRow(
-                track = track,
-                isFavorite = favoriteKeys.contains(track.favoriteKey()),
-                isPlaying = index == playingIndex,
-                onPlay = { onJumpTo(index) },
-                onToggleFavorite = { onToggleFavorite(track) },
-                modifier = Modifier.onGloballyPositioned {
-                    if (itemHeightPx == 0f) itemHeightPx = it.size.height.toFloat()
-                },
-                trailing = {
-                    IconButton(onClick = { onRemove(index) }) {
-                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.queue_remove_a11y, track.title))
-                    }
-                    // The playing row can't be dragged -- reordering "what's
-                    // currently playing" out from under itself is confusing
-                    // UX every major queue implementation avoids the same way.
-                    if (index != playingIndex) {
+    LazyColumn(state = lazyListState) {
+        items(upNextOrder, key = { it.id }) { entry ->
+            ReorderableItem(reorderState, key = entry.id) { _ ->
+                val track = entry.track
+                // Real controller index of this row, resolved from the full
+                // (unchanged) queue by the entry's unique id — exact even for
+                // duplicate tracks.
+                val realIndex = queue.indexOfFirst { it.id == entry.id }
+                AuxenTrackRow(
+                    track = track,
+                    isFavorite = favoriteKeys.contains(track.favoriteKey()),
+                    isPlaying = false,
+                    onPlay = { if (realIndex >= 0) onJumpTo(realIndex) },
+                    onToggleFavorite = { onToggleFavorite(track) },
+                    trailing = {
+                        IconButton(onClick = { if (realIndex >= 0) onRemove(realIndex) }) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = stringResource(R.string.queue_remove_a11y, track.title),
+                            )
+                        }
                         Icon(
                             Icons.Filled.DragHandle,
                             contentDescription = stringResource(R.string.queue_drag_handle_a11y, track.title),
-                            // Unit, NOT visualOrder: onDrag reassigns visualOrder
-                            // on every row-cross (below), so keying on it made
-                            // Compose cancel-and-restart this pointerInput's
-                            // gesture-detection coroutine mid-drag -- the
-                            // restarted detectDragGesturesAfterLongPress then
-                            // waits for a fresh awaitFirstDown() that never
-                            // comes until the finger lifts, so a drag died
-                            // after moving at most one position (final review
-                            // round, Important: analysis-based, confirm
-                            // multi-position drag on-device). A stable key
-                            // keeps ONE coroutine alive for the whole gesture;
-                            // currentIndex (rememberUpdatedState) is what lets
-                            // onDragStart still pick up this slot's LATEST
-                            // index for the NEXT gesture, since a
-                            // never-restarting coroutine would otherwise
-                            // freeze it at this row's first-ever composition.
-                            modifier = Modifier.pointerInput(Unit) {
-                                detectDragGesturesAfterLongPress(
-                                    onDragStart = {
-                                        dragStartIndex = currentIndex
-                                        draggedIndex = currentIndex
-                                        dragOffsetPx = 0f
-                                    },
-                                    onDrag = { change, dragAmount ->
-                                        change.consume()
-                                        val current = draggedIndex ?: return@detectDragGesturesAfterLongPress
-                                        dragOffsetPx += dragAmount.y
-                                        val target = targetDragIndex(visualOrder.size, current, dragOffsetPx, itemHeightPx)
-                                        if (target != current) {
-                                            visualOrder = visualOrder.toMutableList()
-                                                .apply { add(target, removeAt(current)) }
-                                            dragOffsetPx -= (target - current) * itemHeightPx
-                                            draggedIndex = target
-                                        }
-                                    },
-                                    onDragEnd = { endDrag(commit = true) },
-                                    onDragCancel = { endDrag(commit = false) },
-                                )
-                            },
+                            modifier = Modifier.longPressDraggableHandle(
+                                onDragStarted = { draggingId = entry.id },
+                                onDragStopped = {
+                                    val id = draggingId
+                                    draggingId = null
+                                    if (id != null) {
+                                        queueMoveTarget(queue, upNextOrder, id)
+                                            ?.let { (from, target) -> onMove(from, target) }
+                                    }
+                                },
+                            ),
                         )
-                    }
-                },
-            )
+                    },
+                )
+            }
         }
     }
 }
@@ -266,16 +233,37 @@ private fun ReorderableQueueList(
 private fun Track.favoriteKey() = "${source.name}:$sourceId"
 
 /**
- * Given the dragged item's current index among [itemCount] uniform-height
- * rows and how far its pointer has moved since the drag started
- * ([dragOffsetPx], downward positive, reset to the remainder after each
- * shift -- see the call site), returns the index it should now occupy.
- * Rounds to the nearest row (not floor/ceil) so a shift triggers once the
- * drag crosses the HALFWAY point of the next row, not the whole row --
- * matches how every mainstream reorderable list feels to drag.
+ * Translate a completed drag in the FILTERED (playing-excluded) up-next list
+ * back to the single real-queue move that reproduces it.
+ *
+ * The Queue screen pins the playing track and drags only the *other* entries,
+ * so the reorderable list is a filtered view while
+ * [PlayerViewModel.moveInQueue] needs real controller indices. [queue] is the
+ * full, unchanged snapshot (playing item still in place); [reorderedUpNext] is
+ * the up-next list in its final dragged order; [draggedId] is the moved
+ * entry's [QueueEntry.id]. Entries are matched by id, so a duplicate track
+ * resolves to the exact occurrence dragged — never a same-titled sibling.
+ *
+ * Returns `(fromRealIndex, toRealIndex)` for `moveMediaItem`, or null when the
+ * drag was a no-op. `toRealIndex` is the index the dragged item must land at:
+ * the position, in the queue-minus-dragged-item, of whatever now follows it
+ * in [reorderedUpNext] (or the end, if it is now last). `moveMediaItem(from,
+ * to)` — remove at `from`, insert at `to` — then yields exactly the desired
+ * relative order of the non-playing items, wherever the (untouched) playing
+ * item ends up floating.
  */
-internal fun targetDragIndex(itemCount: Int, draggedIndex: Int, dragOffsetPx: Float, itemHeightPx: Float): Int {
-    if (itemCount == 0 || itemHeightPx <= 0f) return draggedIndex
-    val shift = (dragOffsetPx / itemHeightPx).roundToInt()
-    return (draggedIndex + shift).coerceIn(0, itemCount - 1)
+internal fun queueMoveTarget(
+    queue: List<QueueEntry>,
+    reorderedUpNext: List<QueueEntry>,
+    draggedId: String,
+): Pair<Int, Int>? {
+    val fromReal = queue.indexOfFirst { it.id == draggedId }
+    if (fromReal < 0) return null
+    val position = reorderedUpNext.indexOfFirst { it.id == draggedId }
+    if (position < 0) return null
+    val remaining = queue.filter { it.id != draggedId }
+    val next = reorderedUpNext.getOrNull(position + 1)
+    val toReal = if (next == null) remaining.size else remaining.indexOfFirst { it.id == next.id }
+    if (toReal < 0) return null
+    return if (toReal == fromReal) null else fromReal to toReal
 }
