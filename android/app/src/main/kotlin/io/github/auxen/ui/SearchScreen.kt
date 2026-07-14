@@ -27,6 +27,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,8 +51,15 @@ import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.SectionHeader
 import io.github.auxen.ui.components.TrackActionSheet
 import io.github.auxen.ui.theme.AuxenColors
+import kotlinx.coroutines.delay
 
 private val TYPE_FILTERS = listOf("All", "Local", "Tidal")
+
+// Mirrors PlayerViewModel.onSearchQueryChange's debounce (delay(300)). While a
+// keystroke is still within this window the VM has not started search() yet, so
+// searchInFlight is false and results are empty — suppressing "No results" here
+// keeps the field from flashing a failure state during normal typing.
+private const val SEARCH_DEBOUNCE_MS = 300L
 
 /**
  * Search — desktop SearchView: debounced input, type filter chips,
@@ -68,6 +76,18 @@ fun SearchScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     var typeFilter by rememberSaveable { mutableStateOf("All") }
     var sheetTrack by remember { mutableStateOf<Track?>(null) }
     val keyboard = LocalSoftwareKeyboardController.current
+
+    // Local mirror of the VM's debounce: true while a keystroke is still waiting
+    // out the debounce and search() has not run. Used to hold back the
+    // "No results" state until the search has actually settled.
+    var searchPending by remember { mutableStateOf(false) }
+    LaunchedEffect(query) {
+        searchPending = query.isNotBlank()
+        if (query.isNotBlank()) {
+            delay(SEARCH_DEBOUNCE_MS)
+            searchPending = false
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -169,10 +189,11 @@ fun SearchScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                 "Tidal" -> results.filter { it.source == Source.TIDAL }
                 else -> results
             }
-            if (filtered.isEmpty() && !viewModel.searchInFlight) {
-                // Empty results with nothing in flight is a genuine "no results",
-                // distinct from a still-loading search (spinner above) — never a
-                // blank void that reads like a swallowed error.
+            if (filtered.isEmpty() && !viewModel.searchInFlight && !searchPending) {
+                // Empty results with nothing in flight AND nothing pending in the
+                // debounce is a genuine "no results", distinct from a still-loading
+                // search (spinner above) or a query that hasn't been searched yet —
+                // never a blank void that reads like a swallowed error.
                 EmptyState(
                     icon = Icons.Filled.SearchOff,
                     title = stringResource(R.string.empty_search_no_results_title),
