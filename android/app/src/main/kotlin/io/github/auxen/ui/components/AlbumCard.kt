@@ -20,10 +20,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
 import io.github.auxen.model.Source
 import io.github.auxen.ui.theme.AuxenColors
 
@@ -43,10 +41,10 @@ fun AlbumCard(
 ) {
     Column(modifier = modifier.width(150.dp).clickable(onClick = onClick)) {
         Box {
-            AsyncImage(
+            ArtworkImage(
                 model = artUrl,
                 contentDescription = title,
-                contentScale = ContentScale.Crop,
+                glyphSize = 48.dp,
                 modifier = Modifier
                     .aspectRatio(1f)
                     .clip(RoundedCornerShape(10.dp)),

@@ -33,7 +33,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
-import coil.compose.AsyncImage
 import io.github.auxen.ui.PlayerViewModel
 
 /**
@@ -56,7 +55,7 @@ fun MiniPlayerBar(viewModel: PlayerViewModel, onOpen: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().height(60.dp).clickable(onClick = onOpen).padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                AsyncImage(
+                ArtworkImage(
                     model = metadata.artworkUri,
                     contentDescription = null,
                     modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),

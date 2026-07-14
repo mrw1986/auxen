@@ -29,7 +29,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.ui.theme.AuxenColors
@@ -66,7 +65,7 @@ fun AuxenTrackRow(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AsyncImage(
+        ArtworkImage(
             model = track.albumArtUrl,
             contentDescription = null,
             modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
