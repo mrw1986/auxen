@@ -4,7 +4,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,17 +13,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -33,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -52,6 +51,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import io.github.auxen.Graph
@@ -265,12 +265,28 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
                 )
             }
 
-            Button(onClick = { importLauncher.launch(arrayOf("text/plain")) }) {
+            // Secondary action (outlined), not a filled amber CTA -- importing a
+            // custom profile is the exception, the bundled database is the path.
+            OutlinedButton(onClick = { importLauncher.launch(arrayOf("text/plain")) }) {
                 Text("Import custom profile…")
             }
 
             importError?.let {
-                Text("Import failed: $it", color = MaterialTheme.colorScheme.error)
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(Icons.Filled.ErrorOutline, contentDescription = null)
+                        Text("Import failed: $it", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
             }
 
             Text(
@@ -301,7 +317,15 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
 
             Row {
                 Column {
-                    OutlinedButton(onClick = { presetMenuOpen = true }) { Text("Presets") }
+                    // Reads as a menu trigger, not a plain button: a "Presets"
+                    // label with a trailing dropdown caret at a stable min width.
+                    OutlinedButton(
+                        onClick = { presetMenuOpen = true },
+                        modifier = Modifier.widthIn(min = 180.dp),
+                    ) {
+                        Text("Presets", modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                        Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                    }
                     DropdownMenu(expanded = presetMenuOpen, onDismissRequest = { presetMenuOpen = false }) {
                         EqState.PRESETS.keys.forEach { name ->
                             DropdownMenuItem(
@@ -316,10 +340,12 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
                 }
             }
 
-            // 10-band graphic EQ.
+            // 10-band graphic EQ. Each band takes an equal weighted slice of the
+            // row width so all ten fit on a phone and distribute evenly on a
+            // tablet -- no hidden horizontal scroll, no fixed per-band width.
             val bands = eqState.bands ?: List(EqState.NUM_BANDS) { 0.0 }
             Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 bands.forEachIndexed { index, gain ->
@@ -327,6 +353,7 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
                         label = EqState.BAND_LABELS[index],
                         gainDb = gain,
                         onChange = { EqController.setBand(index, it) },
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
@@ -424,37 +451,46 @@ internal fun AutoEqPickerResults(
     onSelectProfile: (AutoEqProfile) -> Unit,
     onClearActive: () -> Unit,
 ) {
-    activeProfile?.let { name ->
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "Active: $name",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = onClearActive) {
-                Text("Clear")
+    // A single wrapping Column: emits ONE vertical stack rather than sibling
+    // nodes, so a single-slot host (Material's Surface Box in the screenshot
+    // preview) lays the active row and results out stacked instead of
+    // overlapping. Plain rows -- NOT a LazyColumn: this renders inside
+    // EqualizerScreen's page-level verticalScroll, where a nested same-axis
+    // LazyColumn needed a fixed height cap (heightIn(max = 240.dp)) that showed
+    // only ~4-5 matches and fought the outer scroll. Emitting rows straight
+    // into the page scroll lets the whole result set scroll with it; the
+    // 50-match cap + hint below bound the length.
+    Column(modifier = Modifier.fillMaxWidth()) {
+        activeProfile?.let { name ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Active: $name",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onClearActive) {
+                    Text("Clear")
+                }
             }
         }
-    }
 
-    if (noMatches) {
-        Text(
-            "No matching profiles",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    } else if (results.isNotEmpty()) {
-        LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
-            items(results, key = { it.index }) { profile ->
-                ProfileRow(profile) { onSelectProfile(profile) }
-            }
-        }
-        if (results.size >= 50) {
+        if (noMatches) {
             Text(
-                "Showing the first 50 matches — refine your search.",
-                style = MaterialTheme.typography.labelSmall,
+                "No matching profiles",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        } else if (results.isNotEmpty()) {
+            results.forEach { profile ->
+                ProfileRow(profile) { onSelectProfile(profile) }
+            }
+            if (results.size >= 50) {
+                Text(
+                    "Showing the first 50 matches — refine your search.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -468,8 +504,13 @@ private fun ProfileRow(profile: AutoEqProfile, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            // Subtitle-less rows are ~35dp otherwise -- below the 48dp minimum
+            // touch target. heightIn floors the tappable area; Center keeps the
+            // single line vertically centered within it.
+            .heightIn(min = 48.dp)
             .clickable(onClick = onClick)
             .padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.Center,
     ) {
         Text(profile.name, style = MaterialTheme.typography.bodyLarge)
         if (subtitle.isNotEmpty()) {
@@ -489,14 +530,22 @@ private fun ProfileRow(profile: AutoEqProfile, onClick: () -> Unit) {
  * reasoning as [AutoEqPickerResults]'s extraction.
  */
 @Composable
-internal fun BandSlider(label: String, gainDb: Double, onChange: (Double) -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+internal fun BandSlider(
+    label: String,
+    gainDb: Double,
+    onChange: (Double) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text("%.0f".format(gainDb), style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
         VerticalSlider(
             value = gainDb.toFloat(),
             onChange = { onChange(it.toDouble()) },
             valueRange = EqState.MIN_GAIN_DB.toFloat()..EqState.MAX_GAIN_DB.toFloat(),
-            modifier = Modifier.height(180.dp).width(40.dp),
+            // Fills its (weighted) cell; the widthIn floor only bites when width
+            // is unbounded -- e.g. a horizontally scrolling preview -- keeping
+            // the thumb a sane size instead of collapsing to zero there.
+            modifier = Modifier.height(180.dp).widthIn(min = 40.dp).fillMaxWidth(),
         )
         Text(label, style = MaterialTheme.typography.labelSmall)
     }

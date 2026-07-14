@@ -1,13 +1,19 @@
 package io.github.auxen.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
@@ -32,6 +38,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -81,6 +88,13 @@ import kotlinx.coroutines.launch
  * An expandable card with an independent enable [Switch] and an independent
  * expand/collapse chevron. Neither control affects the other: disabling a
  * section doesn't collapse it, and collapsing a section doesn't disable it.
+ *
+ * The whole title/subtitle area is a tap target for expand/collapse (not just
+ * the chevron) -- the chevron alone was a ~24dp target inside a full-width
+ * header. The [Switch] stays a separate hit target, spaced off the chevron so
+ * a title tap can never flip it. Expansion is animated: the body fades/expands
+ * via [AnimatedVisibility] and a single [Icons.Filled.ExpandMore] chevron
+ * rotates 180deg via [animateFloatAsState] rather than swapping two glyphs.
  */
 @Composable
 fun FxSectionCard(
@@ -96,7 +110,11 @@ fun FxSectionCard(
     Card(modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onExpandedChange(!expanded) },
+                ) {
                     Text(title, style = MaterialTheme.typography.titleMedium)
                     subtitle?.let {
                         Text(
@@ -114,18 +132,26 @@ fun FxSectionCard(
                     // unlabeled switch is indistinguishable from any other.
                     modifier = Modifier.semantics { contentDescription = title },
                 )
+                // Keeps the switch's hit target clearly off the chevron's, so
+                // the two adjacent controls aren't fat-fingered for each other.
+                Spacer(Modifier.width(8.dp))
+                val chevronRotation by animateFloatAsState(
+                    targetValue = if (expanded) 180f else 0f,
+                    label = "fxSectionChevronRotation",
+                )
                 IconButton(onClick = { onExpandedChange(!expanded) }) {
                     Icon(
-                        if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        Icons.Filled.ExpandMore,
                         contentDescription = if (expanded) {
                             stringResource(R.string.fx_section_collapse, title)
                         } else {
                             stringResource(R.string.fx_section_expand, title)
                         },
+                        modifier = Modifier.rotate(chevronRotation),
                     )
                 }
             }
-            if (expanded) {
+            AnimatedVisibility(visible = expanded) {
                 Column(
                     modifier = Modifier.padding(top = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -329,8 +355,19 @@ fun ReverbSection(
         modifier = modifier,
     ) {
         Column {
-            OutlinedButton(onClick = { menuOpen = true }) {
-                Text(stringResource(REVERB_PRESET_LABEL_RES[state.preset.coerceIn(0, 6)]))
+            // Reads as a menu trigger, not a plain button: current preset name
+            // left-aligned with a trailing dropdown caret, at a stable min width
+            // so it doesn't jitter as the selected preset name changes length.
+            OutlinedButton(
+                onClick = { menuOpen = true },
+                modifier = Modifier.widthIn(min = 200.dp),
+            ) {
+                Text(
+                    stringResource(REVERB_PRESET_LABEL_RES[state.preset.coerceIn(0, 6)]),
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Start,
+                )
+                Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 REVERB_PRESET_LABEL_RES.forEachIndexed { index, labelRes ->
