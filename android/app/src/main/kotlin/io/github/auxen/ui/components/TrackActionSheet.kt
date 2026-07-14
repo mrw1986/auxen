@@ -1,6 +1,7 @@
 package io.github.auxen.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -163,12 +164,20 @@ internal fun TrackActionSheetContent(
                 SheetAction(
                     playlist.name,
                     {
+                        // Parse once per color (not every recomposition); fall back
+                        // to the brand token, never a drifting literal. The 1dp
+                        // outline keeps pale user colors visible on the white
+                        // light-theme surface (polish P1, Fix 3).
+                        val dotColor = remember(playlist.color) {
+                            playlist.color
+                                ?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
+                                ?: AuxenColors.AmberPrimary
+                        }
                         Box(
-                            Modifier.size(12.dp).background(
-                                runCatching { Color(android.graphics.Color.parseColor(playlist.color ?: "#d4a039")) }
-                                    .getOrDefault(AuxenColors.AmberPrimary),
-                                CircleShape,
-                            ),
+                            Modifier
+                                .size(12.dp)
+                                .background(dotColor, CircleShape)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
                         )
                     },
                 ) { onAddToPlaylist(playlist.id) }

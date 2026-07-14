@@ -32,7 +32,6 @@ import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.SectionHeader
-import io.github.auxen.ui.theme.AuxenColors
 import java.util.Calendar
 
 /** Time-of-day greeting — desktop HomePage header. */
@@ -84,8 +83,12 @@ fun HomeScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                         onClick = { viewModel.setHomeFilter(value) },
                         label = { Text(label) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = AuxenColors.AmberPrimary,
-                            selectedLabelColor = AuxenColors.BgDeep,
+                            // Theme-aware accent: colorScheme.primary is the brand
+                            // amber in dark (== AmberPrimary) but the darker,
+                            // contrast-safe Amber600 in light; onPrimary is BgDeep
+                            // in both themes (polish P1, Fix 1).
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
                         ),
                     )
                 }

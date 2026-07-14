@@ -413,8 +413,13 @@ private fun SeekBar(positionMs: Long, durationMs: Long, onSeek: (Long) -> Unit) 
             },
             valueRange = 0f..max,
             colors = SliderDefaults.colors(
-                thumbColor = AuxenColors.AmberPrimary,
-                activeTrackColor = AuxenColors.AmberPrimary,
+                // Foreground accents (thumb + filled track): theme-aware primary,
+                // so light mode uses the contrast-safe Amber600 instead of the raw
+                // dark-theme gold. Dark is unchanged (primary == AmberPrimary).
+                // The 72dp play button below stays raw AmberPrimary — it's an amber
+                // container behind a dark glyph, correct in both themes (polish P1).
+                thumbColor = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary,
                 inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
             ),
             modifier = Modifier.fillMaxWidth(),

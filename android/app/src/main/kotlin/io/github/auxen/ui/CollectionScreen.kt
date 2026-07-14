@@ -1,7 +1,8 @@
 package io.github.auxen.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -102,8 +103,12 @@ fun CollectionScreen(
                         onClick = { viewModel.setCollectionFilter(value) },
                         label = { Text(label) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = AuxenColors.AmberPrimary,
-                            selectedLabelColor = AuxenColors.BgDeep,
+                            // Theme-aware accent: colorScheme.primary is the brand
+                            // amber in dark (== AmberPrimary) but the darker,
+                            // contrast-safe Amber600 in light; onPrimary is BgDeep
+                            // in both themes (polish P1, Fix 1).
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
                         ),
                     )
                 }
@@ -179,12 +184,20 @@ fun CollectionScreen(
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        // Parse once per color (not every recomposition); fall back
+                        // to the brand token, never a drifting literal. The 1dp
+                        // outline keeps pale user colors visible on the white
+                        // light-theme surface (polish P1, Fix 3).
+                        val dotColor = remember(playlist.color) {
+                            playlist.color
+                                ?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
+                                ?: AuxenColors.AmberPrimary
+                        }
                         Box(
-                            Modifier.size(14.dp).background(
-                                runCatching { Color(android.graphics.Color.parseColor(playlist.color ?: "#d4a039")) }
-                                    .getOrDefault(AuxenColors.AmberPrimary),
-                                CircleShape,
-                            ),
+                            Modifier
+                                .size(14.dp)
+                                .background(dotColor, CircleShape)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
                         )
                         Text(
                             playlist.name,

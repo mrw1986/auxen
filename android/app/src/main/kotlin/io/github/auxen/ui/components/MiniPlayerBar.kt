@@ -35,7 +35,6 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import coil.compose.AsyncImage
 import io.github.auxen.ui.PlayerViewModel
-import io.github.auxen.ui.theme.AuxenColors
 
 /**
  * Collapsed player bar — the desktop now-playing bar's ultra-narrow tier
@@ -85,8 +84,13 @@ fun MiniPlayerBar(viewModel: PlayerViewModel, onOpen: () -> Unit) {
                 IconButton(
                     onClick = { viewModel.togglePlayPause() },
                     colors = IconButtonDefaults.iconButtonColors(
-                        containerColor = AuxenColors.AmberPrimary,
-                        contentColor = AuxenColors.BgDeep,
+                        // Theme-aware amber: primary is the brand gold in dark
+                        // (== AmberPrimary) and the contrast-safe Amber600 in light,
+                        // matching the progress indicator below so the bar's two
+                        // amber accents stay one color; onPrimary is BgDeep in both
+                        // themes (polish P1, Fix 1).
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
                     ),
                 ) {
                     Icon(
@@ -101,7 +105,9 @@ fun MiniPlayerBar(viewModel: PlayerViewModel, onOpen: () -> Unit) {
             if (durationMs > 0) {
                 LinearProgressIndicator(
                     progress = { (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) },
-                    color = AuxenColors.AmberPrimary,
+                    // Foreground accent line — theme-aware primary (Amber600 in
+                    // light, AmberPrimary in dark), matching the play button above.
+                    color = MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     modifier = Modifier.fillMaxWidth().height(2.dp),
                     drawStopIndicator = {},

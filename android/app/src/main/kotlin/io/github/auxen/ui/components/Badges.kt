@@ -37,17 +37,21 @@ fun SourceBadge(source: Source, modifier: Modifier = Modifier, tinted: Boolean =
 @Composable
 fun QualityBadge(label: String, modifier: Modifier = Modifier) {
     if (label == "Unknown") return
-    // Text/tint on a light-alpha wash over the surface -- resolves to the
-    // theme's contrast-safe primary (Amber600 in light, AmberPrimary in
-    // dark), not the raw brand amber (final-review fix round, Minor #2).
-    val color = MaterialTheme.colorScheme.primary
+    // Amber-tinted pill. The wash is the theme's contrast-safe primary
+    // (Amber600 in light, AmberPrimary in dark) at low alpha; the LABEL,
+    // however, uses onPrimaryContainer, not the amber itself. An amber label on
+    // the pale light wash failed WCAG at ~2.6:1 (Amber600 #B8860B on ~#F1E7CE);
+    // onPrimaryContainer is a dark brown (#3D2E00) in light (~10.7:1) and a warm
+    // cream (#F0ECE4) in dark (~11:1), so it clears 4.5:1 in BOTH themes while
+    // the pill still reads as amber (polish P1, Fix 2).
+    val wash = MaterialTheme.colorScheme.primary
     Text(
         text = label.uppercase(),
         style = MaterialTheme.typography.labelSmall,
-        color = color,
+        color = MaterialTheme.colorScheme.onPrimaryContainer,
         modifier = modifier
             .clip(RoundedCornerShape(50))
-            .background(color.copy(alpha = 0.2f))
+            .background(wash.copy(alpha = 0.2f))
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }
