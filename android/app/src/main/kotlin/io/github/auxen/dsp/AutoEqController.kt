@@ -10,10 +10,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
@@ -179,9 +181,18 @@ object AutoEqController {
      * re-runs (including the migration). Does not touch DataStore.
      */
     internal fun resetForTest() {
-        initJob?.cancel()
+        // cancelAndJoin (not cancel): these jobs run on Dispatchers.IO, so a
+        // non-blocking cancel() lets a prior test's still-in-flight coroutine
+        // write _state.value AFTER this reset, re-polluting this process-wide
+        // object on unlucky JUnit method orderings — the CI JDK-17 flake in
+        // "state starts at defaults" (local JDK 21 happens to order it safely).
+        // Joining blocks until the coroutine actually stops, so no dangling
+        // emission can survive into the next test.
+        runBlocking {
+            initJob?.cancelAndJoin()
+            persistJob?.cancelAndJoin()
+        }
         initJob = null
-        persistJob?.cancel()
         persistJob = null
         appContext = null
         processor = null

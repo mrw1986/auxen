@@ -9,10 +9,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
@@ -102,7 +104,10 @@ object EqController {
      * [appContext]/[initJob] dangling and doesn't guarantee order-independence).
      */
     internal fun resetForTest() {
-        initJob?.cancel()
+        // See AutoEqController.resetForTest: cancelAndJoin (not cancel) so an
+        // IO-dispatched initJob from a prior test can't write _state.value
+        // after this reset on an unlucky JUnit ordering (CI JDK-17 isolation).
+        runBlocking { initJob?.cancelAndJoin() }
         initJob = null
         appContext = null
         processor = null
