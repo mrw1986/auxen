@@ -944,16 +944,23 @@ private class EqRenderersFactory(
         enableFloatOutput: Boolean,
         enableAudioTrackPlaybackParams: Boolean,
     ): AudioSink = DefaultAudioSink.Builder(context)
-        // Request float output so Hi-Res sources aren't truncated to 16-bit at
-        // the AudioTrack; devices without float support fall back automatically.
-        // Every processor but the last runs unclamped float (chain headroom);
-        // EncodingRestorerProcessor converts back to 16-bit last, since
-        // DefaultAudioSink's built-in trailing processors are 16-bit-only.
+        // MUST stay false. In Media3 1.5.1, DefaultAudioSink inserts the app
+        // AudioProcessor chain ONLY on its integer path -- the float-output path
+        // skips setAudioProcessors entirely, silently bypassing the WHOLE DSP
+        // chain (EQ, AutoEq, bass, balance, limiter, ReplayGain) for any source
+        // that decodes to float. That was the "DSP does nothing" bug (dead on all
+        // routes for float/hi-res sources; ParametricEqProcessor's KDoc already
+        // noted it). The integer path reduces hi-res to 16-bit before the chain;
+        // each processor accepts 16-bit input (see their onConfigure) and
+        // upconverts to float internally for headroom, and EncodingRestorer-
+        // Processor converts back to 16-bit at the tail -- so this design already
+        // outputs 16-bit and loses nothing by running integer. (True float-through
+        // WITH DSP would require a custom/forked AudioSink -- a tracked follow-up.)
         // Chain order is LAW (see ParametricEqProcessor's KDoc) -- ReplayGain
         // first so a quiet track's boost has the same downstream headroom as
         // everything else, Limiter last-but-one so it's the one stage
         // allowed to clamp, catching whatever upstream boosts produced.
-        .setEnableFloatOutput(true)
+        .setEnableFloatOutput(false)
         .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
         .setAudioProcessors(
             buildDspProcessorChain(
