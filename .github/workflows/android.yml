@@ -180,9 +180,13 @@ jobs:
           # fails distinctly and is what attempt 2 is for.
           emulator-boot-timeout: 900
           # Harden for headless CI + a deterministic clean boot: software GPU,
-          # no audio / boot-anim / cameras / metrics, and -no-snapshot so
-          # attempt 2 can never load a bad snapshot written by attempt 1.
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none -camera-front none -no-metrics
+          # no boot-anim / cameras / metrics, and -no-snapshot so attempt 2 can
+          # never load a bad snapshot written by attempt 1. NOTE: audio is
+          # intentionally LEFT ENABLED (do NOT add -noaudio) -- the smoke flow's
+          # last step plays a track and the workflow then asserts the media
+          # notification posted; without an audio device playback can't sustain,
+          # the foreground service never posts, and that check fails.
+          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -no-snapshot -camera-back none -camera-front none -no-metrics
           # Pre-warm the adb server before the emulator connects -- directly
           # targets "Unable to connect to adb daemon on port: 5037"; best-effort.
           pre-emulator-launch-script: adb start-server || true
@@ -198,7 +202,7 @@ jobs:
           force-avd-creation: true
           disable-animations: true
           emulator-boot-timeout: 900
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none -camera-front none -no-metrics
+          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -no-snapshot -camera-back none -camera-front none -no-metrics
           pre-emulator-launch-script: adb start-server || true
           script: ${{ env.SMOKE_SCRIPT }}
 
