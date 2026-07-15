@@ -45,6 +45,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
@@ -228,6 +229,15 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
             }
         }
 
+        // Bit-Perfect / Direct mode bypasses the entire DSP chain, so dim every
+        // section below to the standard disabled alpha to signal they're inactive
+        // (the banner above explains why). Left adjustable rather than
+        // input-blocked -- a user can pre-configure EQ here that takes effect the
+        // moment they leave Direct mode, and dimming alone never steals the scroll.
+        Column(
+            modifier = Modifier.alpha(if (bitPerfect) 0.38f else 1f),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
         // "Tune for your headphones" section: the AutoEq picker, wired to its
         // own controller and switch (AutoEq split, Task 2, item 1). FIRST in
         // the list -- correction is meant to be applied before the graphic EQ
@@ -423,6 +433,7 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
             expanded = volumeNormalizationExpanded,
             onExpandedChange = { volumeNormalizationExpanded = it },
         )
+        } // end dimmed-when-Direct-mode DSP section wrapper
     }
 }
 
