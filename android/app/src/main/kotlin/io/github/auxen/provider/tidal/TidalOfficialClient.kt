@@ -22,6 +22,14 @@ class TidalOfficialClient(private val client: OkHttpClient) {
     suspend fun getTrack(id: String, accessToken: String): Result<TrackDocument> =
         execute(TidalOfficialEndpoints.trackRequest(id, accessToken))
 
+    /** Fetch a track as a JSON:API compound document (credits/lyrics/artists/albums). */
+    suspend fun getTrackMetadata(
+        id: String,
+        accessToken: String,
+        include: List<String>,
+        countryCode: String? = null,
+    ): Result<TidalDocument> = execute(TidalOfficialEndpoints.trackRequest(id, accessToken, include, countryCode))
+
     suspend fun getTrackManifest(id: String, accessToken: String, formats: List<String>): Result<TrackManifestDocument> =
         execute(TidalOfficialEndpoints.trackManifestRequest(id, accessToken, formats))
 

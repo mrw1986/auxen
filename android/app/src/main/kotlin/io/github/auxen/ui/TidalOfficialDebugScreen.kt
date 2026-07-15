@@ -113,5 +113,29 @@ fun TidalOfficialDebugScreen(viewModel: PlayerViewModel, modifier: Modifier = Mo
                 modifier = Modifier.padding(top = 8.dp),
             )
         }
+
+        HorizontalDivider()
+
+        // Slice-1 id-equivalence gate: prove an internal-v1 track id resolves on
+        // the official v2 API and yields non-null artist + album ids (the
+        // assumption the rest of Slice 1's enrichment is built on).
+        var idProbeTrackId by remember { mutableStateOf("") }
+        val idProbeStatus by viewModel.tidalIdProbeStatus.collectAsState()
+        OutlinedTextField(
+            value = idProbeTrackId,
+            onValueChange = { idProbeTrackId = it },
+            label = { Text(stringResource(R.string.tidal_official_id_probe_label)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = { viewModel.runTidalIdEquivalenceProbe(idProbeTrackId) },
+            enabled = idProbeTrackId.isNotBlank(),
+        ) {
+            Text(stringResource(R.string.tidal_official_id_probe_button))
+        }
+        idProbeStatus?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+        }
     }
 }

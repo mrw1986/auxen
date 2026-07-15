@@ -20,8 +20,24 @@ object TidalOfficialEndpoints {
             .header("Accept", "application/vnd.api+json")
             .build()
 
-    fun trackRequest(id: String, accessToken: String): Request =
-        authed("$BASE/tracks/$id".toHttpUrl(), accessToken)
+    /**
+     * `GET /tracks/{id}`. With no [include]/[countryCode] this is the bare
+     * track fetch the streaming spike uses (unchanged URL). With `?include=`
+     * it is a JSON:API compound document for the metadata layer (credits/
+     * lyrics/artists/albums). [countryCode] is optional per the spec.
+     */
+    fun trackRequest(
+        id: String,
+        accessToken: String,
+        include: List<String> = emptyList(),
+        countryCode: String? = null,
+    ): Request {
+        val url = "$BASE/tracks/$id".toHttpUrl().newBuilder()
+            .apply { countryCode?.let { addQueryParameter("countryCode", it) } }
+            .apply { include.forEach { addQueryParameter("include", it) } }
+            .build()
+        return authed(url, accessToken)
+    }
 
     /**
      * `manifestType=MPEG_DASH` (not `HLS` -- no `media3-exoplayer-hls`

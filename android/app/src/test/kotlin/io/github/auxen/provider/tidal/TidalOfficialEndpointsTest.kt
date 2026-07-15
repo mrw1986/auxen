@@ -79,6 +79,19 @@ class TidalOfficialEndpointsTest {
     }
 
     @Test
+    fun `track request carries include params and country code when asked`() {
+        val request = TidalOfficialEndpoints.trackRequest(
+            id = "75413016", accessToken = "tok-123",
+            include = listOf("artists", "albums"), countryCode = "US",
+        )
+        val url = request.url
+        assertEquals("/v2/tracks/75413016", url.encodedPath)
+        assertEquals(listOf("artists", "albums"), url.queryParameterValues("include"))
+        assertEquals("US", url.queryParameter("countryCode"))
+        assertEquals("Bearer tok-123", request.header("Authorization"))
+    }
+
+    @Test
     fun `artist request omits the country code when not supplied`() {
         val request = TidalOfficialEndpoints.artistRequest(
             id = "100",

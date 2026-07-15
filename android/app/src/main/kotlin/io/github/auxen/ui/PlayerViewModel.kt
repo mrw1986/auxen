@@ -290,6 +290,45 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private val _tidalIdProbeStatus = MutableStateFlow<String?>(null)
+    val tidalIdProbeStatus: StateFlow<String?> = _tidalIdProbeStatus.asStateFlow()
+
+    /**
+     * Slice-1 gate: prove an internal-v1 track id is the SAME catalog id the
+     * official v2 API accepts. Resolves the track's artist/album ids on the
+     * official API, then fetches the artist name to make the match
+     * human-verifiable. Only names/ids/ISRC in the readout — never a token.
+     */
+    fun runTidalIdEquivalenceProbe(tidalTrackId: String) {
+        viewModelScope.launch {
+            val id = tidalTrackId.trim()
+            _tidalIdProbeStatus.value = "Resolving track $id on the official v2 API…"
+            val repo = Graph.tidalMetadata
+            val relations = repo.trackRelations(id)
+            val rel = relations.getOrNull()
+            if (rel == null) {
+                _tidalIdProbeStatus.value =
+                    "FAIL: the official API rejected track id $id — ${relations.exceptionOrNull()?.message}. " +
+                        "id-equivalence does NOT hold; fall back to ISRC/barcodeId matching."
+                return@launch
+            }
+            val artistName = rel.artistId?.let { repo.artistOverview(it).getOrNull()?.name }
+            _tidalIdProbeStatus.value = buildString {
+                appendLine("Track id $id resolves on the official v2 API (same catalog id).")
+                appendLine("ISRC: ${rel.isrc ?: "—"}")
+                appendLine("Artist: ${artistName ?: "—"} (id ${rel.artistId ?: "—"})")
+                appendLine("Album id: ${rel.albumId ?: "—"}")
+                appendLine(
+                    if (rel.artistId != null && rel.albumId != null) {
+                        "PASS — the internal-v1 track id is the same catalog id the official v2 API accepts."
+                    } else {
+                        "PARTIAL — track resolved but a relationship was missing; inspect the ids above."
+                    },
+                )
+            }
+        }
+    }
+
     private fun libraryTabName(index: Int) = when (index) {
         0 -> "albums"
         1 -> "artists"

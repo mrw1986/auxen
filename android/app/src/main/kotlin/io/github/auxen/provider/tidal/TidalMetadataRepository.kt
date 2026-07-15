@@ -85,6 +85,15 @@ class TidalMetadataRepository(
         }
     }
 
+    /** Resolve the artist + album ids (and isrc) for a Tidal track — the detail-fetch entry point. */
+    suspend fun trackRelations(trackId: String): Result<TrackRelations> {
+        val token = session.validAccessToken()
+            ?: return Result.failure(IllegalStateException("Not logged in to the official Tidal API"))
+        return client.getTrackMetadata(trackId, token, TRACK_RELATIONS_INCLUDE, countryCode).mapCatching { doc ->
+            trackRelationsFrom(doc, json) ?: error("Track $trackId not found on the official API")
+        }
+    }
+
     // The current user's numeric id (also their userCollection id), resolved
     // once via /users/me and cached for the process lifetime (cleared implicitly
     // on process death). THE single source of the user id for any user/
@@ -109,5 +118,6 @@ class TidalMetadataRepository(
 
     companion object {
         val ARTIST_INCLUDE = listOf("biography", "similarArtists", "albums")
+        val TRACK_RELATIONS_INCLUDE = listOf("artists", "albums")
     }
 }

@@ -183,4 +183,6 @@
     <string name="tidal_official_probe_button">Run streaming probe</string>
     <string name="tidal_official_artist_id_label">Tidal artist id</string>
     <string name="tidal_official_metadata_button">Fetch artist metadata</string>
+    <string name="tidal_official_id_probe_label">Tidal track id (internal-v1) for id check</string>
+    <string name="tidal_official_id_probe_button">Check id equivalence (official v2)</string>
 </resources>
