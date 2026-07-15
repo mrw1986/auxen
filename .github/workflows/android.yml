@@ -55,6 +55,71 @@ jobs:
     # Required since 2026-07-12 after two consecutive green runs
     # (29207916463, 29208254002). If emulator flakiness ever becomes chronic,
     # prefer fixing the flake source over re-adding continue-on-error.
+    #
+    # 2026-07-15: the flake became chronic. 4+ runs failed with the SAME
+    # signature during emulator BOOT ("ERROR | Unable to connect to adb daemon
+    # on port: 5037" -> Maestro "Unable to launch app"), never inside the app
+    # itself (the build job's unit tests + Roborazzi are green every run). This
+    # is the well-known android-emulator-runner adb/boot race on GitHub runners.
+    # Fixed at the SOURCE rather than with masking continue-on-error:
+    #   (1) hardened emulator-options + raised emulator-boot-timeout + a fresh
+    #       AVD per attempt + pre-warmed adb server, and
+    #   (2) the boot+smoke runs as TWO attempts. Attempt 1 is allowed to fail so
+    #       a flaky boot can be re-attempted, but attempt 2 has NO
+    #       continue-on-error and is the authoritative pass/fail gate. A REAL
+    #       app/launch bug reproduces on BOTH attempts, so it still fails the job
+    #       red -- only a transient boot flake is absorbed. This is NOT the
+    #       failure-masking continue-on-error the note above warns against (that
+    #       one sat on the single/terminal step and swallowed every failure).
+    # The smoke SCRIPT is shared verbatim between both attempts via
+    # env.SMOKE_SCRIPT so they run byte-identical boot+smoke.
+    env:
+      # android-emulator-runner runs this script LINE BY LINE (each line its own
+      # sh -c), so every shell construct must fit on one physical line. Shared by
+      # both retry attempts below -- edit here once so they can never drift.
+      SMOKE_SCRIPT: |
+        adb install -r apk/app-debug.apk
+        # Pre-grant so no runtime permission dialog blocks the flow.
+        adb shell pm grant io.github.auxen android.permission.READ_MEDIA_AUDIO
+        adb shell pm grant io.github.auxen android.permission.POST_NOTIFICATIONS
+        # Seed local media (emulator has none by default) and index it.
+        adb shell mkdir -p /sdcard/Music
+        adb push smoke-tone.mp3 /sdcard/Music/smoke-tone.mp3
+        # API 30+ media indexing: MediaProvider's scan_file content call
+        # ("cmd media scan" has no such service on modern images); legacy
+        # broadcast kept as a harmless belt-and-suspenders fallback.
+        adb shell content call --uri content://media/ --method scan_file --arg /sdcard/Music/smoke-tone.mp3 || true
+        adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Music/smoke-tone.mp3 || true
+        # Deterministic gate: wait until MediaStore actually indexed the
+        # tone. NOTE: android-emulator-runner executes this script input
+        # LINE BY LINE (each line its own sh -c), so shell constructs must
+        # fit on one physical line.
+        for i in $(seq 1 20); do adb shell content query --uri content://media/external/audio/media --projection title 2>/dev/null | grep -q "Smoke Tone" && break; sleep 2; done
+        adb shell content query --uri content://media/external/audio/media --projection title | grep "Smoke Tone"
+        # Absolute path: each script line runs in its own sh, so an
+        # earlier `export PATH` line would not reach this one. The
+        # touch-file trick lets later lines run (env vars don't survive
+        # between per-line shells) so diagnostics upload on failure, while
+        # the final `test` line preserves the pass/fail signal.
+        $HOME/.maestro/bin/maestro test --debug-output "$GITHUB_WORKSPACE/maestro-debug" android/maestro/smoke.yaml || touch /tmp/maestro_failed
+        # Runtime proof PlaybackService.onCreate()'s media-notification wiring
+        # (DefaultMediaNotificationProvider + ic_stat_auxen) actually works: the
+        # flow's last step tapped "Smoke Tone" to start playback, so the resulting
+        # MediaStyle notification should now be posted for our package. Retry loop
+        # covers the small gap between the flow exiting and NotificationManager
+        # finishing the post; final line is the authoritative check + failure gate.
+        # `pkg=io.github.auxen` (not bare `io.github.auxen`, and not the `grep
+        # -q io.github.auxen` this used to run): on API 33+ dumpsys prints an
+        # `AppSettings: io.github.auxen` line for every package that has ever
+        # requested POST_NOTIFICATIONS -- present from install time, so a bare
+        # package-name match is a tautology that can never fail. The `pkg=`
+        # form only appears in NotificationRecord lines for an actually-posted
+        # (current or archived) notification (final-review fix round, Important #1).
+        for i in $(seq 1 10); do adb shell dumpsys notification | grep -q "pkg=io.github.auxen" && break; sleep 1; done
+        adb shell dumpsys notification | grep -q "pkg=io.github.auxen" || touch /tmp/maestro_failed
+        ls -laR "$GITHUB_WORKSPACE/maestro-debug" maestro-shots "$HOME/.maestro" 2>&1 | head -60 || true
+        cp -r maestro-shots "$GITHUB_WORKSPACE/maestro-debug-shots" 2>/dev/null || true
+        test ! -f /tmp/maestro_failed
     steps:
       - uses: actions/checkout@v4
 
@@ -91,56 +156,51 @@ jobs:
       - name: Install Maestro
         run: curl -fsSL https://get.maestro.mobile.dev | bash
 
-      - name: Run smoke flow on emulator
+      # Anti-flake retry (see the job-level comment above). Boot the emulator
+      # and run the smoke script; if a flaky boot fails attempt 1, retry ONCE.
+      # Both attempts are byte-identical (shared env.SMOKE_SCRIPT + identical
+      # hardened options), so the only thing the retry re-rolls is the transient
+      # adb/boot race. Attempt 1 may fail without failing the job so the retry
+      # can run; attempt 2 has NO continue-on-error and is the authoritative gate
+      # -- a genuine app/launch failure reproduces on both and still fails red.
+      - name: Run smoke flow on emulator (attempt 1)
+        id: smoke_attempt_1
+        continue-on-error: true
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           arch: x86_64
           target: google_apis
+          # Fresh AVD each attempt so a half-created AVD from attempt 1 can never
+          # poison attempt 2.
+          force-avd-creation: true
           disable-animations: true
-          script: |
-            adb install -r apk/app-debug.apk
-            # Pre-grant so no runtime permission dialog blocks the flow.
-            adb shell pm grant io.github.auxen android.permission.READ_MEDIA_AUDIO
-            adb shell pm grant io.github.auxen android.permission.POST_NOTIFICATIONS
-            # Seed local media (emulator has none by default) and index it.
-            adb shell mkdir -p /sdcard/Music
-            adb push smoke-tone.mp3 /sdcard/Music/smoke-tone.mp3
-            # API 30+ media indexing: MediaProvider's scan_file content call
-            # ("cmd media scan" has no such service on modern images); legacy
-            # broadcast kept as a harmless belt-and-suspenders fallback.
-            adb shell content call --uri content://media/ --method scan_file --arg /sdcard/Music/smoke-tone.mp3 || true
-            adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Music/smoke-tone.mp3 || true
-            # Deterministic gate: wait until MediaStore actually indexed the
-            # tone. NOTE: android-emulator-runner executes this script input
-            # LINE BY LINE (each line its own sh -c), so shell constructs must
-            # fit on one physical line.
-            for i in $(seq 1 20); do adb shell content query --uri content://media/external/audio/media --projection title 2>/dev/null | grep -q "Smoke Tone" && break; sleep 2; done
-            adb shell content query --uri content://media/external/audio/media --projection title | grep "Smoke Tone"
-            # Absolute path: each script line runs in its own sh, so an
-            # earlier `export PATH` line would not reach this one. The
-            # touch-file trick lets later lines run (env vars don't survive
-            # between per-line shells) so diagnostics upload on failure, while
-            # the final `test` line preserves the pass/fail signal.
-            $HOME/.maestro/bin/maestro test --debug-output "$GITHUB_WORKSPACE/maestro-debug" android/maestro/smoke.yaml || touch /tmp/maestro_failed
-            # Runtime proof PlaybackService.onCreate()'s media-notification wiring
-            # (DefaultMediaNotificationProvider + ic_stat_auxen) actually works: the
-            # flow's last step tapped "Smoke Tone" to start playback, so the resulting
-            # MediaStyle notification should now be posted for our package. Retry loop
-            # covers the small gap between the flow exiting and NotificationManager
-            # finishing the post; final line is the authoritative check + failure gate.
-            # `pkg=io.github.auxen` (not bare `io.github.auxen`, and not the `grep
-            # -q io.github.auxen` this used to run): on API 33+ dumpsys prints an
-            # `AppSettings: io.github.auxen` line for every package that has ever
-            # requested POST_NOTIFICATIONS -- present from install time, so a bare
-            # package-name match is a tautology that can never fail. The `pkg=`
-            # form only appears in NotificationRecord lines for an actually-posted
-            # (current or archived) notification (final-review fix round, Important #1).
-            for i in $(seq 1 10); do adb shell dumpsys notification | grep -q "pkg=io.github.auxen" && break; sleep 1; done
-            adb shell dumpsys notification | grep -q "pkg=io.github.auxen" || touch /tmp/maestro_failed
-            ls -laR "$GITHUB_WORKSPACE/maestro-debug" maestro-shots "$HOME/.maestro" 2>&1 | head -60 || true
-            cp -r maestro-shots "$GITHUB_WORKSPACE/maestro-debug-shots" 2>/dev/null || true
-            test ! -f /tmp/maestro_failed
+          # Raised from the 600s default: give a slow-but-real boot headroom so a
+          # boot that would have finished is never retried. The adb-daemon race
+          # fails distinctly and is what attempt 2 is for.
+          emulator-boot-timeout: 900
+          # Harden for headless CI + a deterministic clean boot: software GPU,
+          # no audio / boot-anim / cameras / metrics, and -no-snapshot so
+          # attempt 2 can never load a bad snapshot written by attempt 1.
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none -camera-front none -no-metrics
+          # Pre-warm the adb server before the emulator connects -- directly
+          # targets "Unable to connect to adb daemon on port: 5037"; best-effort.
+          pre-emulator-launch-script: adb start-server || true
+          script: ${{ env.SMOKE_SCRIPT }}
+
+      - name: Run smoke flow on emulator (attempt 2 - retry flaky boot only)
+        if: ${{ steps.smoke_attempt_1.outcome == 'failure' }}
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: true
+          disable-animations: true
+          emulator-boot-timeout: 900
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none -camera-front none -no-metrics
+          pre-emulator-launch-script: adb start-server || true
+          script: ${{ env.SMOKE_SCRIPT }}
 
       - name: Upload Maestro debug output
         if: always()
