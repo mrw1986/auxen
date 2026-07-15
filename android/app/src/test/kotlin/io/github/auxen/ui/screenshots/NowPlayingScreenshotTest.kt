@@ -133,8 +133,34 @@ class NowPlayingScreenshotTest {
                 Surface { PopulatedContent() }
             }
         }
-        listOf("Shuffle", "Previous", "Pause", "Next", "Repeat").forEach { desc ->
+        // State-aware labels (polish item 13): PopulatedContent is playing with
+        // shuffle on and repeat-all, so the toggle handles are "Shuffle on" /
+        // "Repeat all" rather than the old static "Shuffle" / "Repeat".
+        listOf("Shuffle on", "Previous", "Pause", "Next", "Repeat all").forEach { desc ->
             compose.onNodeWithContentDescription(desc).assertIsDisplayed()
+        }
+    }
+
+    /**
+     * Polish item 13: the shuffle/repeat/favorite/sleep-timer controls convey
+     * their on/off state to screen readers via a state-aware contentDescription
+     * (not color/tint alone). PopulatedContent is favorited, shuffle-on,
+     * repeat-all, timer-armed, so every "on" label must be present.
+     */
+    @Test
+    fun nowPlayingControls_stateAwareA11yLabels() {
+        compose.setContent {
+            AuxenTheme(darkTheme = true) {
+                Surface { PopulatedContent() }
+            }
+        }
+        listOf(
+            "Shuffle on",
+            "Repeat all",
+            "Remove from favorites",
+            "Sleep timer (armed)",
+        ).forEach { desc ->
+            compose.onNodeWithContentDescription(desc).assertExists()
         }
     }
 }

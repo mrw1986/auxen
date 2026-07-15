@@ -112,6 +112,29 @@
     <string name="queue_remove_a11y">Remove %1$s from queue</string>
     <string name="queue_drag_handle_a11y">Reorder %1$s</string>
 
+    <!-- Polish item 13: full-screen Now Playing controls. The shuffle /
+         repeat / favorite / sleep-timer toggles previously conveyed their
+         on/off state by color/tint only; these state-aware contentDescription
+         strings let a screen reader announce the current state. The remaining
+         labels extract the screen's other hardcoded user-facing text. -->
+    <string name="now_playing_nothing_playing">Nothing playing</string>
+    <string name="now_playing_back">Back</string>
+    <string name="now_playing_previous">Previous</string>
+    <string name="now_playing_next">Next</string>
+    <string name="now_playing_play">Play</string>
+    <string name="now_playing_pause">Pause</string>
+    <string name="now_playing_favorite_add">Add to favorites</string>
+    <string name="now_playing_favorite_remove">Remove from favorites</string>
+    <string name="now_playing_shuffle_on">Shuffle on</string>
+    <string name="now_playing_shuffle_off">Shuffle off</string>
+    <string name="now_playing_repeat_off">Repeat off</string>
+    <string name="now_playing_repeat_all">Repeat all</string>
+    <string name="now_playing_repeat_one">Repeat one</string>
+    <!-- Sleep-timer top-bar icon: reuses sleep_timer_title as the base label
+         and appends the "armed" state as a format string (so translators keep
+         control of the full phrase) when the timer is running. -->
+    <string name="now_playing_sleep_timer_armed">%1$s (armed)</string>
+
     <!-- Polish P2: one consistent empty / no-results surface per screen.
          Titles are titleMedium; subtitles are bodyMedium/onSurfaceVariant. -->
     <string name="empty_library_tracks_title">No local music yet</string>

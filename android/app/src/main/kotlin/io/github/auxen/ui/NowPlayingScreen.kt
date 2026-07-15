@@ -112,7 +112,7 @@ fun NowPlayingScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onOpenQueue
     val favoriteKey = track?.let { "${it.source.name}:${it.sourceId}" }
 
     NowPlayingContent(
-        title = metadata?.title?.toString() ?: "Nothing playing",
+        title = metadata?.title?.toString() ?: stringResource(R.string.now_playing_nothing_playing),
         artist = metadata?.artist?.toString() ?: "",
         artworkModel = metadata?.artworkUri,
         source = track?.source,
@@ -288,7 +288,7 @@ private fun NowPlayingTopBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.now_playing_back))
         }
         Spacer(Modifier.weight(1f))
         // Queue (Desktop-Parity Screens, sub-batch A, Task 2): lives here
@@ -305,7 +305,15 @@ private fun NowPlayingTopBar(
         IconButton(onClick = onOpenSleepTimer) {
             Icon(
                 Icons.Filled.Bedtime,
-                contentDescription = "Sleep timer",
+                // State-aware for screen readers: the armed state is otherwise
+                // conveyed only by the primary tint below (polish item 13).
+                // Reuses sleep_timer_title as the base label; the armed variant
+                // appends "(armed)" via a format string.
+                contentDescription = if (sleepTimerArmed) {
+                    stringResource(R.string.now_playing_sleep_timer_armed, stringResource(R.string.sleep_timer_title))
+                } else {
+                    stringResource(R.string.sleep_timer_title)
+                },
                 // Tinted while armed, matching the shuffle/repeat convention.
                 // isArmed (not endElapsedRealtime != null): also true during the
                 // pendingTrackEnd phase, which has no countdown timestamp of its
@@ -381,7 +389,11 @@ private fun TrackMetadata(
             IconButton(onClick = onToggleFavorite) {
                 Icon(
                     if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                    contentDescription = "Favorite",
+                    // State-aware for screen readers (polish item 13): the
+                    // favorited state is otherwise conveyed only by the red tint.
+                    contentDescription = stringResource(
+                        if (isFavorite) R.string.now_playing_favorite_remove else R.string.now_playing_favorite_add,
+                    ),
                     tint = if (isFavorite) AuxenColors.FavoriteRed else LocalContentColor.current,
                 )
             }
@@ -458,7 +470,11 @@ private fun TransportBar(
         IconButton(onClick = onToggleShuffle) {
             Icon(
                 Icons.Filled.Shuffle,
-                contentDescription = "Shuffle",
+                // State-aware for screen readers (polish item 13): the on state
+                // is otherwise conveyed only by the primary tint below.
+                contentDescription = stringResource(
+                    if (shuffleEnabled) R.string.now_playing_shuffle_on else R.string.now_playing_shuffle_off,
+                ),
                 // Icon tint -- resolves to the contrast-safe primary (final-review fix
                 // round, Minor #2); the play button below is a container behind BgDeep
                 // content and correctly keeps the raw brand amber.
@@ -466,7 +482,7 @@ private fun TransportBar(
             )
         }
         IconButton(onClick = onSkipPrevious) {
-            Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous", modifier = Modifier.size(38.dp))
+            Icon(Icons.Filled.SkipPrevious, contentDescription = stringResource(R.string.now_playing_previous), modifier = Modifier.size(38.dp))
         }
         // Clearly-primary transport control: larger amber container than the
         // ghost skip/shuffle/repeat buttons around it.
@@ -480,17 +496,25 @@ private fun TransportBar(
         ) {
             Icon(
                 if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                contentDescription = if (isPlaying) "Pause" else "Play",
+                contentDescription = stringResource(if (isPlaying) R.string.now_playing_pause else R.string.now_playing_play),
                 modifier = Modifier.size(40.dp),
             )
         }
         IconButton(onClick = onSkipNext) {
-            Icon(Icons.Filled.SkipNext, contentDescription = "Next", modifier = Modifier.size(38.dp))
+            Icon(Icons.Filled.SkipNext, contentDescription = stringResource(R.string.now_playing_next), modifier = Modifier.size(38.dp))
         }
         IconButton(onClick = onCycleRepeat) {
             Icon(
                 if (repeatMode == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
-                contentDescription = "Repeat",
+                // State-aware for screen readers (polish item 13): the active mode
+                // is otherwise conveyed only by the primary tint below.
+                contentDescription = stringResource(
+                    when (repeatMode) {
+                        Player.REPEAT_MODE_ONE -> R.string.now_playing_repeat_one
+                        Player.REPEAT_MODE_ALL -> R.string.now_playing_repeat_all
+                        else -> R.string.now_playing_repeat_off
+                    },
+                ),
                 // Icon tint -- resolves to the contrast-safe primary (final-review fix round, Minor #2).
                 tint = if (repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary else LocalContentColor.current,
             )
