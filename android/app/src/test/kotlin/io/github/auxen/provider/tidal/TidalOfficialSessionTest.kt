@@ -2,6 +2,7 @@ package io.github.auxen.provider.tidal
 
 import android.net.Uri
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -55,5 +56,27 @@ class TidalOfficialSessionTest {
         val result = validateRedirect(redirect, expectedState = "xyz")
         assertTrue(result.isFailure)
         assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("code", ignoreCase = true))
+    }
+
+    @Test
+    fun `token is fresh well before expiry`() {
+        // expires at 100_000; now 10_000; 60s skew -> not yet
+        assertFalse(officialTokenNeedsRefresh(expiresAtMillis = 100_000L, nowMillis = 10_000L, skewMillis = 60_000L))
+    }
+
+    @Test
+    fun `token needs refresh inside the skew window`() {
+        // expires at 100_000; now 50_000; skew 60_000 -> 50_000 >= 40_000 -> refresh
+        assertTrue(officialTokenNeedsRefresh(expiresAtMillis = 100_000L, nowMillis = 50_000L, skewMillis = 60_000L))
+    }
+
+    @Test
+    fun `token needs refresh once past expiry`() {
+        assertTrue(officialTokenNeedsRefresh(expiresAtMillis = 100_000L, nowMillis = 200_000L, skewMillis = 60_000L))
+    }
+
+    @Test
+    fun `legacy session with unknown expiry (0) always refreshes`() {
+        assertTrue(officialTokenNeedsRefresh(expiresAtMillis = 0L, nowMillis = 1_000L, skewMillis = 60_000L))
     }
 }

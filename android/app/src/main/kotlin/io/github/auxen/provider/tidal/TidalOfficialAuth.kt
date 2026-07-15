@@ -89,10 +89,16 @@ object TidalOfficialAuth {
     )
 
     /** A resolved session, in the naming this codebase's own [TidalAuth.Session] uses. */
-    data class Session(val accessToken: String, val refreshToken: String?, val expiresInSeconds: Long)
+    data class Session(val accessToken: String, val refreshToken: String?, val expiresAtMillis: Long)
 
-    fun parseTokenResponse(body: String): Session {
+    /**
+     * Parse the OAuth2 token body, converting the relative `expires_in`
+     * (seconds) to an absolute [Session.expiresAtMillis] using [nowMillis].
+     * [nowMillis] is a parameter (not a `System.currentTimeMillis()` call)
+     * so the conversion stays pure and unit-testable.
+     */
+    fun parseTokenResponse(body: String, nowMillis: Long): Session {
         val token = json.decodeFromString<TokenResponse>(body)
-        return Session(token.access_token, token.refresh_token, token.expires_in)
+        return Session(token.access_token, token.refresh_token, nowMillis + token.expires_in * 1000L)
     }
 }

@@ -33,6 +33,16 @@ internal fun validateRedirect(redirect: Uri, expectedState: String?): Result<Str
 }
 
 /**
+ * True when an access token expiring at [expiresAtMillis] should be
+ * proactively refreshed at [nowMillis], treating anything within
+ * [skewMillis] of expiry (or already expired, including the legacy
+ * "unknown expiry = 0" case) as due. Pure so the refresh *decision* is
+ * unit-testable without a live token endpoint.
+ */
+internal fun officialTokenNeedsRefresh(expiresAtMillis: Long, nowMillis: Long, skewMillis: Long): Boolean =
+    nowMillis >= expiresAtMillis - skewMillis
+
+/**
  * Orchestrates the official Tidal API's PKCE login end-to-end (Tidal
  * official-API migration, Task 1): builds the authorize URL for the caller
  * to open in a Custom Tab, validates + exchanges the redirect for tokens,
@@ -47,7 +57,11 @@ internal fun validateRedirect(redirect: Uri, expectedState: String?): Result<Str
  * API won't need to change when that lands, only [persist]/[storedSession]'s
  * internals.
  */
-class TidalOfficialSession(context: Context, private val client: OkHttpClient) {
+class TidalOfficialSession(
+    context: Context,
+    private val client: OkHttpClient,
+    private val clock: () -> Long = System::currentTimeMillis,
+) {
     private val appContext = context.applicationContext
     // The OFFICIAL developer-app client id (developer.tidal.com), NOT the
     // internal tidalapi client BuildConfig.TIDAL_CLIENT_ID that TidalAuth uses.
@@ -83,7 +97,7 @@ class TidalOfficialSession(context: Context, private val client: OkHttpClient) {
             val request = TidalOfficialAuth.buildTokenExchangeRequest(clientId, code, verifier)
             client.newCall(request).execute().use { resp ->
                 check(resp.isSuccessful) { "Token exchange failed: HTTP ${resp.code}" }
-                TidalOfficialAuth.parseTokenResponse(resp.body!!.string())
+                TidalOfficialAuth.parseTokenResponse(resp.body!!.string(), clock())
             }
         }
         pendingVerifier = null
@@ -94,7 +108,33 @@ class TidalOfficialSession(context: Context, private val client: OkHttpClient) {
     suspend fun storedSession(): TidalOfficialAuth.Session? {
         val prefs = appContext.tidalOfficialDataStore.data.first()
         val access = prefs[KEY_ACCESS] ?: return null
-        return TidalOfficialAuth.Session(access, prefs[KEY_REFRESH], 0L)
+        return TidalOfficialAuth.Session(access, prefs[KEY_REFRESH], prefs[KEY_EXPIRES]?.toLongOrNull() ?: 0L)
+    }
+
+    /**
+     * A non-expired access token for the official API, refreshing if within
+     * [REFRESH_SKEW_MS] of expiry. Returns null when there is no session or
+     * the refresh fails (the caller should then prompt re-login). This is the
+     * single accessor every metadata call goes through.
+     */
+    suspend fun validAccessToken(): String? {
+        val session = storedSession() ?: return null
+        if (!officialTokenNeedsRefresh(session.expiresAtMillis, clock(), REFRESH_SKEW_MS)) return session.accessToken
+        return refresh()?.accessToken
+    }
+
+    /** Refresh the access token; returns null when re-login is required. Mirrors [TidalAuth.refresh]. */
+    suspend fun refresh(): TidalOfficialAuth.Session? = withContext(Dispatchers.IO) {
+        val refreshToken = storedSession()?.refreshToken ?: return@withContext null
+        val request = TidalOfficialAuth.buildRefreshRequest(clientId, refreshToken)
+        client.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) return@withContext null
+            val parsed = TidalOfficialAuth.parseTokenResponse(resp.body!!.string(), clock())
+            // Tidal may omit the refresh token on refresh; keep the old one.
+            val merged = parsed.copy(refreshToken = parsed.refreshToken ?: refreshToken)
+            persist(merged)
+            merged
+        }
     }
 
     suspend fun logout() {
@@ -105,11 +145,14 @@ class TidalOfficialSession(context: Context, private val client: OkHttpClient) {
         appContext.tidalOfficialDataStore.edit {
             it[KEY_ACCESS] = session.accessToken
             session.refreshToken?.let { rt -> it[KEY_REFRESH] = rt }
+            it[KEY_EXPIRES] = session.expiresAtMillis.toString()
         }
     }
 
     companion object {
+        private const val REFRESH_SKEW_MS = 60_000L
         private val KEY_ACCESS = stringPreferencesKey("access_token")
         private val KEY_REFRESH = stringPreferencesKey("refresh_token")
+        private val KEY_EXPIRES = stringPreferencesKey("expires_at")
     }
 }

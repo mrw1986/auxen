@@ -100,16 +100,16 @@ class TidalOfficialAuthTest {
               "expires_in": 3600
             }
         """.trimIndent()
-        val token = TidalOfficialAuth.parseTokenResponse(body)
+        val token = TidalOfficialAuth.parseTokenResponse(body, nowMillis = 1_000_000L)
         assertEquals("at-123", token.accessToken)
         assertEquals("rt-456", token.refreshToken)
-        assertEquals(3600L, token.expiresInSeconds)
+        assertEquals(1_000_000L + 3_600_000L, token.expiresAtMillis)
     }
 
     @Test
     fun `parseTokenResponse tolerates a missing refresh_token, as a refresh response may omit it`() {
         val body = """{"access_token": "at-123", "token_type": "Bearer", "expires_in": 3600}"""
-        val token = TidalOfficialAuth.parseTokenResponse(body)
+        val token = TidalOfficialAuth.parseTokenResponse(body, nowMillis = 0L)
         assertEquals("at-123", token.accessToken)
         assertEquals(null, token.refreshToken)
     }
