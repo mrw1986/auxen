@@ -1,0 +1,75 @@
+# Tier-2 emulator smoke flow — runs on a real emulator only (not JVM/Robolectric).
+#
+# Purpose: catch a broken build that unit + Roborazzi tests can't. Every step
+# asserts something a real regression would break — app launch, full bottom-nav
+# navigation, on-device media loading, (the carry-forward from Task 2) the
+# new-playlist create path: an AlertDialog + OutlinedTextField that hangs under
+# Robolectric and is therefore JVM-unverifiable, and (the carry-forward from
+# branding Task 3 review) actually starting playback: PlaybackService.onCreate()
+# — and the DefaultMediaNotificationProvider/ic_stat_auxen wiring it sets up —
+# is never instantiated by a JVM unit test (MediaSessionService needs a real
+# Android runtime), so this flow's final step is the only thing that exercises
+# it at all. The CI workflow asserts the resulting media notification actually
+# posted via `adb shell dumpsys notification` right after this flow exits,
+# since Maestro's open-source CLI has no notification-shade/tray command of
+# its own (verified against the current command reference — no such command
+# exists; do not reintroduce an `openNotifications`-style step without
+# re-confirming it's real).
+#
+# CI prerequisites (see .github/workflows/android.yml → emulator-smoke):
+#   - READ_MEDIA_AUDIO + POST_NOTIFICATIONS granted via `adb shell pm grant`
+#   - /sdcard/Music/smoke-tone.mp3 pushed + `cmd media scan`ed so the local
+#     provider surfaces a track titled "Smoke Tone".
+appId: io.github.auxen
+---
+# App launches and the top-bar chrome renders.
+- launchApp
+- assertVisible: "Auxen"
+
+# Home is the start destination — the time-of-day greeting proves HomeScreen composed.
+- assertVisible:
+    text: "Good (morning|afternoon|evening)"
+
+# Bottom-nav navigation across the other tabs; each asserts screen-unique text.
+- tapOn: "Search"
+- assertVisible: "Search local + Tidal"
+- tapOn: "Collection"
+- assertVisible: "Playlists"
+
+# Library → Tracks: the pushed test tone must appear (media scan + READ_MEDIA_AUDIO).
+- tapOn: "Library"
+- tapOn: "Tracks"
+- assertVisible: "Smoke Tone"
+
+# New-playlist create path (JVM-unverifiable): long-press → Add to playlist →
+# New playlist… → type a name → Create.
+- longPressOn: "Smoke Tone"
+# Diagnostic: capture the display right after the gesture — distinguishes
+# "sheet never opened" from "sheet open but hierarchy can't see the dialog".
+# (Saves on the HOST relative to maestro's working directory.)
+- takeScreenshot: maestro-shots/after-longpress
+- assertVisible: "Add to playlist"
+- tapOn: "Add to playlist"
+- tapOn: "New playlist…"
+- assertVisible: "New playlist"    # AlertDialog title
+- tapOn: "Name"                    # focus the OutlinedTextField
+- inputText: "Smoke Playlist"
+- tapOn: "Create"
+
+# The new playlist now shows up under Collection → Playlists.
+- tapOn: "Collection"
+- tapOn: "Playlists"
+- assertVisible: "Smoke Playlist"
+
+# Runtime coverage for PlaybackService.onCreate()'s media-notification wiring
+# (see header comment). A plain tap — not the long-press used above — hits
+# AuxenTrackRow's combinedClickable onPlay and starts playback. "Pause"
+# asserts the mini-player's play/pause IconButton content description (see
+# MiniPlayerBar.kt) actually flipped, i.e. the PlaybackService session is
+# genuinely playing, not just that the tap registered. Deliberately the LAST
+# step: minimizes the gap between "playback started" and the CI workflow's
+# adb notification check running right after this flow exits.
+- tapOn: "Library"
+- tapOn: "Tracks"
+- tapOn: "Smoke Tone"
+- assertVisible: "Pause"

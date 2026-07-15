@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Auxen</string>
+    <string name="brand_name">AUXEN</string>
+    <string name="brand_tagline">UNORTHODOX AUDIO</string>
+
+    <!-- DSP-b Task 3: per-effect Equalizer screen sections. -->
+    <string name="fx_section_expand">Expand %1$s</string>
+    <string name="fx_section_collapse">Collapse %1$s</string>
+
+    <string name="fx_bass_boost_title">Bass boost</string>
+    <string name="fx_bass_boost_subtitle">Low-end lift, centered below the fundamentals.</string>
+    <string name="fx_bass_boost_freq_label">Frequency</string>
+    <string name="fx_bass_boost_gain_label">Gain</string>
+
+    <string name="fx_balance_title">Balance</string>
+    <string name="fx_balance_subtitle">Shift the mix left or right.</string>
+    <string name="fx_balance_left">L</string>
+    <string name="fx_balance_right">R</string>
+    <string name="fx_balance_center">Center</string>
+    <string name="fx_balance_percent_left">L %1$d%%</string>
+    <string name="fx_balance_percent_right">R %1$d%%</string>
+    <!-- Distinct from fx_balance_title: that's also the section switch's
+         contentDescription, and the two must not collide (they're separate
+         accessible nodes on the same screen). -->
+    <string name="fx_balance_slider_a11y_label">Balance amount</string>
+
+    <string name="fx_limiter_title">Limiter</string>
+    <string name="fx_limiter_subtitle">Soft-knee protection against clipping — on by default.</string>
+    <string name="fx_limiter_threshold_label">Threshold</string>
+    <string name="fx_limiter_release_label">Release</string>
+
+    <string name="fx_reverb_title">Reverb</string>
+    <string name="fx_reverb_subtitle">Adds a sense of physical space.</string>
+    <string name="fx_reverb_preset_none">None</string>
+    <string name="fx_reverb_preset_small_room">Small room</string>
+    <string name="fx_reverb_preset_medium_room">Medium room</string>
+    <string name="fx_reverb_preset_large_room">Large room</string>
+    <string name="fx_reverb_preset_medium_hall">Medium hall</string>
+    <string name="fx_reverb_preset_large_hall">Large hall</string>
+    <string name="fx_reverb_preset_plate">Plate</string>
+
+    <string name="fx_virtualizer_title">Virtualizer</string>
+    <string name="fx_virtualizer_subtitle">Widens stereo playback over headphones.</string>
+    <string name="fx_virtualizer_strength_label">Strength</string>
+
+    <string name="fx_volume_normalization_title">Volume normalization</string>
+    <string name="fx_volume_normalization_subtitle">ReplayGain — evens out loudness between tracks.</string>
+    <string name="fx_volume_normalization_mode_track">Track</string>
+    <string name="fx_volume_normalization_mode_album">Album</string>
+    <string name="fx_volume_normalization_preamp_label">Preamp</string>
+    <string name="fx_volume_normalization_fallback_label">Fallback gain</string>
+
+    <string name="fx_equalizer_title">Equalizer</string>
+
+    <!-- DSP-b final review: sleep timer sheet copy. -->
+    <string name="sleep_timer_title">Sleep timer</string>
+    <string name="sleep_timer_pause_after">Pause playback after</string>
+    <string name="sleep_timer_preset_minutes">%1$dm</string>
+    <string name="sleep_timer_finish_last_track">Finish last track</string>
+    <string name="sleep_timer_pausing_in">Pausing in %1$s</string>
+    <string name="sleep_timer_pausing_in_will_finish">Pausing in %1$s — will finish the playing track</string>
+    <string name="sleep_timer_pausing_after_track">Pausing after this track</string>
+    <string name="sleep_timer_cancel">Cancel timer</string>
+
+    <!-- AutoEq split, Task 2: "Tune for your headphones" is now its own
+         section, independent of the graphic Equalizer section below it. -->
+    <string name="autoeq_section_title">Tune for your headphones</string>
+    <string name="autoeq_section_subtitle">Headphone correction curve, applied before your manual EQ.</string>
+
+    <!-- Desktop-Parity Screens, sub-batch A, Task 1: Settings screen. -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_gear_a11y">Settings</string>
+
+    <string name="settings_appearance_title">Appearance</string>
+    <string name="settings_theme_mode_label">Theme</string>
+    <string name="settings_theme_mode_subtitle">Choose light, dark, or follow system</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_theme_light">Light</string>
+
+    <string name="settings_playback_title">Playback</string>
+    <string name="settings_bit_perfect_label">Bit-Perfect / Direct</string>
+    <string name="settings_bit_perfect_subtitle">Plays audio untouched at full resolution; bypasses all DSP/EQ</string>
+    <string name="settings_bit_perfect_bypass_note">Direct mode is on — the equalizer and all effects below are bypassed.</string>
+    <string name="settings_source_priority_label">Source priority</string>
+    <string name="settings_source_priority_subtitle">Choose which source to prefer when a track is available from both</string>
+    <string name="settings_source_priority_prefer_local">Prefer local</string>
+    <string name="settings_source_priority_prefer_local_desc">Play the local copy when the same track is also on Tidal</string>
+    <string name="settings_source_priority_prefer_tidal">Prefer Tidal</string>
+    <string name="settings_source_priority_prefer_tidal_desc">Stream from Tidal when the same track is also local</string>
+    <string name="settings_source_priority_prefer_quality">Prefer higher quality</string>
+    <string name="settings_source_priority_prefer_quality_desc">Automatically pick whichever version sounds best</string>
+    <string name="settings_source_priority_always_ask">Always ask</string>
+    <!-- Honest about current behavior: pickPreferredTrack(Matching.kt) returns
+         the local track as ALWAYS_ASK's default and documents that the
+         caller is responsible for prompting; PlayerViewModel.search()
+         doesn't do that yet, so this option is not yet different from
+         "Prefer local" in practice. Flagged to team-lead in the task report
+         rather than writing copy that promises unimplemented behavior. -->
+    <string name="settings_source_priority_always_ask_desc">Reserved for a future per-track prompt — currently behaves like Prefer local</string>
+
+    <string name="settings_about_title">About</string>
+    <string name="settings_about_version">Version %1$s</string>
+    <string name="settings_about_blurb">A premium music player for Tidal streaming and local media.</string>
+
+    <!-- Desktop-Parity Screens, sub-batch A, Task 2: Queue screen. -->
+    <string name="queue_title">Queue</string>
+    <string name="queue_track_count">%1$d tracks</string>
+    <string name="queue_clear">Clear queue</string>
+    <string name="queue_empty_title">Nothing queued</string>
+    <string name="queue_empty_message">Play something to start a queue.</string>
+    <string name="queue_now_playing_label">Now playing</string>
+    <string name="queue_remove_a11y">Remove %1$s from queue</string>
+    <string name="queue_drag_handle_a11y">Reorder %1$s</string>
+
+    <!-- Polish item 13: full-screen Now Playing controls. The shuffle /
+         repeat / favorite / sleep-timer toggles previously conveyed their
+         on/off state by color/tint only; these state-aware contentDescription
+         strings let a screen reader announce the current state. The remaining
+         labels extract the screen's other hardcoded user-facing text. -->
+    <string name="now_playing_nothing_playing">Nothing playing</string>
+    <string name="now_playing_back">Back</string>
+    <string name="now_playing_previous">Previous</string>
+    <string name="now_playing_next">Next</string>
+    <string name="now_playing_play">Play</string>
+    <string name="now_playing_pause">Pause</string>
+    <string name="now_playing_favorite_add">Add to favorites</string>
+    <string name="now_playing_favorite_remove">Remove from favorites</string>
+    <string name="now_playing_shuffle_on">Shuffle on</string>
+    <string name="now_playing_shuffle_off">Shuffle off</string>
+    <string name="now_playing_repeat_off">Repeat off</string>
+    <string name="now_playing_repeat_all">Repeat all</string>
+    <string name="now_playing_repeat_one">Repeat one</string>
+    <!-- Sleep-timer top-bar icon: reuses sleep_timer_title as the base label
+         and appends the "armed" state as a format string (so translators keep
+         control of the full phrase) when the timer is running. -->
+    <string name="now_playing_sleep_timer_armed">%1$s (armed)</string>
+
+    <!-- Polish P2: one consistent empty / no-results surface per screen.
+         Titles are titleMedium; subtitles are bodyMedium/onSurfaceVariant. -->
+    <string name="empty_library_tracks_title">No local music yet</string>
+    <string name="empty_library_tracks_subtitle">Grant storage access or add files to this device.</string>
+    <string name="empty_library_albums_title">No albums yet</string>
+    <string name="empty_library_albums_subtitle">Local albums appear here once you add music.</string>
+    <string name="empty_library_artists_title">No artists yet</string>
+    <string name="empty_library_artists_subtitle">Local artists appear here once you add music.</string>
+
+    <string name="empty_search_prompt_title">Search your library and Tidal</string>
+    <string name="empty_search_prompt_subtitle">Find tracks, albums, and artists across your music.</string>
+    <string name="empty_search_no_results_title">No results</string>
+    <string name="empty_search_no_results_subtitle">Try a different search or filter.</string>
+
+    <string name="empty_collection_tracks_title">No favorite tracks yet</string>
+    <string name="empty_collection_tracks_subtitle">Tap the heart on any track to add it here.</string>
+    <string name="empty_collection_albums_title">No favorite albums yet</string>
+    <string name="empty_collection_albums_subtitle">Favorite a track to see its album here.</string>
+    <string name="empty_collection_artists_title">No favorite artists yet</string>
+    <string name="empty_collection_artists_subtitle">Favorite a track to see its artist here.</string>
+    <string name="empty_collection_playlists_title">No playlists yet</string>
+    <string name="empty_collection_playlists_subtitle">Long-press any track and choose Add to Playlist.</string>
+
+    <string name="empty_album_tracks_title">No tracks</string>
+    <string name="empty_album_tracks_subtitle">This album has no playable tracks.</string>
+    <string name="empty_artist_tracks_title">No tracks</string>
+    <string name="empty_artist_tracks_subtitle">This artist has no playable tracks.</string>
+
+    <string name="empty_playlist_title">This playlist is empty</string>
+    <string name="empty_playlist_subtitle">Long-press any track and choose Add to Playlist.</string>
+
+    <string name="empty_home_title">Nothing here yet</string>
+    <string name="empty_home_subtitle">Play something from your Library or Search.</string>
+
+    <!-- Tidal official-API migration, Task 1: go/no-go streaming spike. -->
+    <string name="settings_advanced_title">Advanced</string>
+    <string name="settings_advanced_subtitle">Experimental features under evaluation.</string>
+    <string name="settings_tidal_official_link">Try official Tidal login (beta)</string>
+
+    <string name="tidal_official_title">Official Tidal API (beta)</string>
+    <string name="tidal_official_description">Additive spike — does not affect your existing Tidal login. Logs in via the official openapi.tidal.com API and checks whether full-length Hi-Res streaming works for this app\'s registration.</string>
+    <string name="tidal_official_login_button">Try official Tidal login (beta)</string>
+    <string name="tidal_official_track_id_label">Tidal track id</string>
+    <string name="tidal_official_probe_button">Run streaming probe</string>
+</resources>

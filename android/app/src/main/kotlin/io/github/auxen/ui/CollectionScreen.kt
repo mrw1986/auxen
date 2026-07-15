@@ -1,0 +1,280 @@
+package io.github.auxen.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.media3.common.util.UnstableApi
+import io.github.auxen.R
+import io.github.auxen.data.AlbumGroup
+import io.github.auxen.data.groupAlbums
+import io.github.auxen.data.groupArtists
+import io.github.auxen.model.Source
+import io.github.auxen.model.Track
+import io.github.auxen.ui.components.AlbumCard
+import io.github.auxen.ui.components.ArtistRow
+import io.github.auxen.ui.components.AuxenTrackRow
+import io.github.auxen.ui.components.EmptyState
+import io.github.auxen.ui.components.LoadingState
+import io.github.auxen.ui.components.TrackActionSheet
+import io.github.auxen.ui.theme.AuxenColors
+
+private val COLLECTION_TABS = listOf("Tracks", "Albums", "Artists", "Playlists")
+
+/**
+ * Collection — desktop CollectionView: favorited content in Tracks/Albums/
+ * Artists tabs plus Playlists, with the All/Tidal/Local source filter.
+ */
+@UnstableApi
+@Composable
+fun CollectionScreen(
+    viewModel: PlayerViewModel,
+    onOpenPlaylist: (Long) -> Unit,
+    onOpenAlbum: (AlbumGroup) -> Unit,
+    onOpenArtist: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val favorites by viewModel.favorites.collectAsState()
+    val favoriteKeys by viewModel.favoriteKeys.collectAsState()
+    val playlists by viewModel.playlists.collectAsState()
+    val filter by viewModel.collectionFilter.collectAsState()
+    val loading by viewModel.collectionLoading.collectAsState()
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var sheetTrack by remember { mutableStateOf<Track?>(null) }
+
+    fun matches(track: Track): Boolean = when (filter) {
+        "tidal" -> track.source == Source.TIDAL
+        "local" -> track.source == Source.LOCAL
+        else -> true
+    }
+    val filtered = favorites.filter(::matches)
+
+    Column(modifier = modifier.fillMaxSize()) {
+        SingleChoiceSegmentedButtonRow(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+            COLLECTION_TABS.forEachIndexed { index, label ->
+                SegmentedButton(
+                    selected = tab == index,
+                    onClick = { tab = index },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = COLLECTION_TABS.size),
+                    // Drop the leading selection-check icon: with four equal
+                    // segments its ~26dp eats the active tab's label width and
+                    // clips "Playlists"/"Artists" at ~320-360dp. Removing it lets
+                    // the active tab render at the same width the inactive tabs
+                    // already fit their full labels in.
+                    icon = {},
+                ) { Text(label) }
+            }
+        }
+        if (tab != 3) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf("all" to "All", "tidal" to "Tidal", "local" to "Local").forEach { (value, label) ->
+                    FilterChip(
+                        selected = filter == value,
+                        onClick = { viewModel.setCollectionFilter(value) },
+                        label = { Text(label) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            // Theme-aware accent: colorScheme.primary is the brand
+                            // amber in dark (== AmberPrimary) but the darker,
+                            // contrast-safe Amber600 in light; onPrimary is BgDeep
+                            // in both themes (polish P1, Fix 1).
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                    )
+                }
+            }
+        }
+
+        // Every tab renders the same centered EmptyState when its (filtered) list
+        // is empty — the Albums grid and Artists list previously had no empty
+        // state at all, so an empty or filtered-empty tab is now explained
+        // uniformly across all four (polish P2, Fix 12). While [loading] (the
+        // favorites/playlists DB reads still resolving) each tab shows a spinner
+        // instead, so the EmptyState never flashes before the data arrives
+        // (polish C2).
+        when (tab) {
+            0 -> if (loading && filtered.isEmpty()) {
+                LoadingState()
+            } else if (filtered.isEmpty()) {
+                EmptyState(
+                    icon = Icons.Filled.FavoriteBorder,
+                    title = stringResource(R.string.empty_collection_tracks_title),
+                    subtitle = stringResource(R.string.empty_collection_tracks_subtitle),
+                )
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(filtered, key = { "${it.source}:${it.sourceId}" }) { track ->
+                        AuxenTrackRow(
+                            track = track,
+                            isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+                            onPlay = { viewModel.play(track) },
+                            onToggleFavorite = { viewModel.toggleFavorite(track) },
+                            onLongPress = { sheetTrack = track },
+                            trailing = {
+                                IconButton(onClick = { viewModel.enqueue(track) }) {
+                                    Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = "Add to queue")
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+            1 -> {
+                val albums = groupAlbums(filtered)
+                if (loading && albums.isEmpty()) {
+                    LoadingState()
+                } else if (albums.isEmpty()) {
+                    EmptyState(
+                        icon = Icons.Filled.Album,
+                        title = stringResource(R.string.empty_collection_albums_title),
+                        subtitle = stringResource(R.string.empty_collection_albums_subtitle),
+                    )
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 150.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxSize().padding(16.dp),
+                    ) {
+                        items(albums, key = { "${it.album}|${it.albumArtist}" }) { album ->
+                            AlbumCard(
+                                title = album.album,
+                                artist = album.albumArtist,
+                                artUrl = album.artUrl,
+                                source = album.tracks.firstOrNull()?.source,
+                                onClick = { onOpenAlbum(album) },
+                                onPlay = { viewModel.playAll(album.tracks) },
+                            )
+                        }
+                    }
+                }
+            }
+            2 -> {
+                val artists = groupArtists(filtered)
+                if (loading && artists.isEmpty()) {
+                    LoadingState()
+                } else if (artists.isEmpty()) {
+                    EmptyState(
+                        icon = Icons.Filled.Person,
+                        title = stringResource(R.string.empty_collection_artists_title),
+                        subtitle = stringResource(R.string.empty_collection_artists_subtitle),
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        items(artists, key = { it.artist }) { artist ->
+                            ArtistRow(
+                                name = artist.artist,
+                                subtitle = "${artist.tracks.size} favorited",
+                                artUrl = artist.artUrl,
+                                onClick = { onOpenArtist(artist.artist) },
+                            )
+                        }
+                    }
+                }
+            }
+            else -> if (loading && playlists.isEmpty()) {
+                LoadingState()
+            } else if (playlists.isEmpty()) {
+                EmptyState(
+                    icon = Icons.Filled.QueueMusic,
+                    title = stringResource(R.string.empty_collection_playlists_title),
+                    subtitle = stringResource(R.string.empty_collection_playlists_subtitle),
+                )
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(playlists, key = { it.id }) { playlist ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenPlaylist(playlist.id) }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            // Parse once per color (not every recomposition); fall back
+                            // to the brand token, never a drifting literal. The 1dp
+                            // outline keeps pale user colors visible on the white
+                            // light-theme surface (polish P1, Fix 3).
+                            val dotColor = remember(playlist.color) {
+                                playlist.color
+                                    ?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
+                                    ?: AuxenColors.AmberPrimary
+                            }
+                            Box(
+                                Modifier
+                                    .size(14.dp)
+                                    .background(dotColor, CircleShape)
+                                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
+                            )
+                            Text(
+                                playlist.name,
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    sheetTrack?.let { track ->
+        TrackActionSheet(
+            track = track,
+            isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+            playlists = playlists,
+            onDismiss = { sheetTrack = null },
+            onPlay = { viewModel.play(track) },
+            onPlayNext = { viewModel.playNext(track) },
+            onEnqueue = { viewModel.enqueue(track) },
+            onToggleFavorite = { viewModel.toggleFavorite(track) },
+            onAddToPlaylist = { viewModel.addToPlaylist(track, it) },
+            onCreatePlaylist = { viewModel.createPlaylistAndAdd(track, it) },
+        )
+    }
+}

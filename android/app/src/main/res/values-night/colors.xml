@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark-mode overrides for values/colors.xml's window_background/splash_background
+         (both #FAF8F2 there); named so values-night/themes.xml can reference them the
+         same way values/themes.xml references the light values, instead of hardcoding
+         #0C0B0F twice (final-review fix round, Minor #6). -->
+    <color name="window_background">#0C0B0F</color>
+    <color name="splash_background">#0C0B0F</color>
+</resources>
