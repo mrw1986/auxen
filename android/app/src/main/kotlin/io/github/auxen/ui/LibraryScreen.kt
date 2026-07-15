@@ -54,6 +54,7 @@ import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.ArtistRow
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
+import io.github.auxen.ui.components.LoadingState
 import io.github.auxen.ui.components.TrackActionSheet
 
 private val TAB_LABELS = listOf("Albums", "Artists", "Tracks")
@@ -84,6 +85,7 @@ fun LibraryScreen(
     modifier: Modifier = Modifier,
 ) {
     val tracks by viewModel.localTracks.collectAsState()
+    val loading by viewModel.libraryLoading.collectAsState()
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val tab by viewModel.libraryTab.collectAsState()
@@ -153,8 +155,15 @@ fun LibraryScreen(
             }
         }
 
+        // Gate on [loading]: a spinner while the local scan runs (and there's
+        // nothing yet to show), the EmptyState only once loaded-and-empty, so
+        // the empty state never flashes before [loadLibrary] resolves. Guarded
+        // by `list.isEmpty()` so a reload with data already present keeps the
+        // content on screen instead of flashing a spinner over it.
         when (tab) {
-            0 -> if (albums.isEmpty()) {
+            0 -> if (loading && albums.isEmpty()) {
+                LoadingState()
+            } else if (albums.isEmpty()) {
                 EmptyState(
                     icon = Icons.Filled.Album,
                     title = stringResource(R.string.empty_library_albums_title),
@@ -179,7 +188,9 @@ fun LibraryScreen(
                     }
                 }
             }
-            1 -> if (artists.isEmpty()) {
+            1 -> if (loading && artists.isEmpty()) {
+                LoadingState()
+            } else if (artists.isEmpty()) {
                 EmptyState(
                     icon = Icons.Filled.Person,
                     title = stringResource(R.string.empty_library_artists_title),
@@ -197,7 +208,9 @@ fun LibraryScreen(
                     }
                 }
             }
-            else -> if (sortedTracks.isEmpty()) {
+            else -> if (loading && sortedTracks.isEmpty()) {
+                LoadingState()
+            } else if (sortedTracks.isEmpty()) {
                 EmptyState(
                     icon = Icons.Filled.MusicNote,
                     title = stringResource(R.string.empty_library_tracks_title),

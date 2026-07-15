@@ -56,6 +56,7 @@ import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.ArtistRow
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
+import io.github.auxen.ui.components.LoadingState
 import io.github.auxen.ui.components.TrackActionSheet
 import io.github.auxen.ui.theme.AuxenColors
 
@@ -78,6 +79,7 @@ fun CollectionScreen(
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val filter by viewModel.collectionFilter.collectAsState()
+    val loading by viewModel.collectionLoading.collectAsState()
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var sheetTrack by remember { mutableStateOf<Track?>(null) }
 
@@ -132,9 +134,14 @@ fun CollectionScreen(
         // Every tab renders the same centered EmptyState when its (filtered) list
         // is empty — the Albums grid and Artists list previously had no empty
         // state at all, so an empty or filtered-empty tab is now explained
-        // uniformly across all four (polish P2, Fix 12).
+        // uniformly across all four (polish P2, Fix 12). While [loading] (the
+        // favorites/playlists DB reads still resolving) each tab shows a spinner
+        // instead, so the EmptyState never flashes before the data arrives
+        // (polish C2).
         when (tab) {
-            0 -> if (filtered.isEmpty()) {
+            0 -> if (loading && filtered.isEmpty()) {
+                LoadingState()
+            } else if (filtered.isEmpty()) {
                 EmptyState(
                     icon = Icons.Filled.FavoriteBorder,
                     title = stringResource(R.string.empty_collection_tracks_title),
@@ -160,7 +167,9 @@ fun CollectionScreen(
             }
             1 -> {
                 val albums = groupAlbums(filtered)
-                if (albums.isEmpty()) {
+                if (loading && albums.isEmpty()) {
+                    LoadingState()
+                } else if (albums.isEmpty()) {
                     EmptyState(
                         icon = Icons.Filled.Album,
                         title = stringResource(R.string.empty_collection_albums_title),
@@ -188,7 +197,9 @@ fun CollectionScreen(
             }
             2 -> {
                 val artists = groupArtists(filtered)
-                if (artists.isEmpty()) {
+                if (loading && artists.isEmpty()) {
+                    LoadingState()
+                } else if (artists.isEmpty()) {
                     EmptyState(
                         icon = Icons.Filled.Person,
                         title = stringResource(R.string.empty_collection_artists_title),
@@ -207,7 +218,9 @@ fun CollectionScreen(
                     }
                 }
             }
-            else -> if (playlists.isEmpty()) {
+            else -> if (loading && playlists.isEmpty()) {
+                LoadingState()
+            } else if (playlists.isEmpty()) {
                 EmptyState(
                     icon = Icons.Filled.QueueMusic,
                     title = stringResource(R.string.empty_collection_playlists_title),

@@ -45,6 +45,7 @@ import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
+import io.github.auxen.ui.components.LoadingState
 import io.github.auxen.ui.components.SectionHeader
 import io.github.auxen.ui.components.TrackActionSheet
 import io.github.auxen.ui.theme.AuxenColors
@@ -65,6 +66,14 @@ fun ArtistDetailScreen(
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     var sheetTrack by remember { mutableStateOf<Track?>(null) }
+
+    // The track pool comes from the local scan ([libraryLoading]) and the
+    // favorites DB read ([collectionLoading]); until both resolve an unresolved
+    // artist would read as "no tracks", so show a spinner instead of the
+    // EmptyState while either is still in flight (polish C2).
+    val libraryLoading by viewModel.libraryLoading.collectAsState()
+    val collectionLoading by viewModel.collectionLoading.collectAsState()
+    val loading = libraryLoading || collectionLoading
 
     val pool = (localTracks + favorites).distinctBy { "${it.source}:${it.sourceId}" }
     val tracks = pool.filter { it.artist == artist || it.albumArtist == artist }
@@ -141,11 +150,15 @@ fun ArtistDetailScreen(
         }
         if (tracks.isEmpty()) {
             item {
-                EmptyState(
-                    icon = Icons.Filled.MusicNote,
-                    title = stringResource(R.string.empty_artist_tracks_title),
-                    subtitle = stringResource(R.string.empty_artist_tracks_subtitle),
-                )
+                if (loading) {
+                    LoadingState()
+                } else {
+                    EmptyState(
+                        icon = Icons.Filled.MusicNote,
+                        title = stringResource(R.string.empty_artist_tracks_title),
+                        subtitle = stringResource(R.string.empty_artist_tracks_subtitle),
+                    )
+                }
             }
         } else {
             item { SectionHeader("Tracks") }

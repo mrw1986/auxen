@@ -35,6 +35,7 @@ import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
+import io.github.auxen.ui.components.LoadingState
 import io.github.auxen.ui.components.SectionHeader
 import java.util.Calendar
 
@@ -57,6 +58,7 @@ fun HomeScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     val localTracks by viewModel.localTracks.collectAsState()
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
     val filter by viewModel.homeFilter.collectAsState()
+    val loading by viewModel.homeLoading.collectAsState()
     LaunchedEffect(Unit) {
         viewModel.loadLibrary()
         viewModel.refreshHome()
@@ -145,11 +147,18 @@ fun HomeScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
             }
         } else if (addedAlbums.isEmpty()) {
             item {
-                EmptyState(
-                    icon = Icons.Filled.MusicNote,
-                    title = stringResource(R.string.empty_home_title),
-                    subtitle = stringResource(R.string.empty_home_subtitle),
-                )
+                // Both sections empty: a spinner while the initial Home load
+                // runs, the EmptyState only once it has finished — so the empty
+                // state never flashes before [refreshHome] resolves.
+                if (loading) {
+                    LoadingState()
+                } else {
+                    EmptyState(
+                        icon = Icons.Filled.MusicNote,
+                        title = stringResource(R.string.empty_home_title),
+                        subtitle = stringResource(R.string.empty_home_subtitle),
+                    )
+                }
             }
         }
     }

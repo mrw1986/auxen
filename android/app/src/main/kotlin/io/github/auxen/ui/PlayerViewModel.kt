@@ -36,6 +36,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -73,6 +74,27 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     val searchResults = MutableStateFlow<List<Track>>(emptyList())
     var searchInFlight by mutableStateOf(false)
         private set
+
+    /**
+     * Per-surface async-load signals — the browse-screen analog of
+     * [searchInFlight] (polish C2). Each is true while that surface's load runs
+     * and false when it finishes (success OR failure), so a screen shows a
+     * spinner while loading and its `EmptyState` only once the load has
+     * completed and the list is genuinely empty — never a flash of "nothing
+     * here" before the data arrives.
+     *
+     * [libraryLoading] / [homeLoading] start `true` because Library and Home
+     * both kick off their load from a mount `LaunchedEffect` (Home is the start
+     * destination and `MainActivity` also runs [loadLibrary] from the
+     * permission callback), so the very first frame must show the spinner, not
+     * the empty state; [loadLibrary] / [refreshHome] flip them false when done
+     * (in a `finally`, so a failed/cancelled load never leaves a stuck spinner).
+     * [collectionLoading] starts `true` and flips false once the favorites +
+     * playlists DB flows first resolve (seeded in `init`).
+     */
+    val libraryLoading = MutableStateFlow(true)
+    val homeLoading = MutableStateFlow(true)
+    val collectionLoading = MutableStateFlow(true)
 
     val searchHistoryItems: StateFlow<List<String>> = Graph.library.searchHistory()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -303,10 +325,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private suspend fun loadRecentlyPlayed() {
+        runCatching { Graph.library.recentlyPlayed() }.onSuccess { recentlyPlayed.value = it }
+    }
+
     fun refreshRecentlyPlayed() {
-        viewModelScope.launch {
-            runCatching { Graph.library.recentlyPlayed() }.onSuccess { recentlyPlayed.value = it }
-        }
+        viewModelScope.launch { loadRecentlyPlayed() }
     }
 
     fun setHomeFilter(value: String) {
@@ -331,9 +355,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Refresh Home data: recently added (MediaStore) + recently played (DB). */
     fun refreshHome() {
-        refreshRecentlyPlayed()
         viewModelScope.launch {
-            runCatching { Graph.local.recentlyAdded() }.onSuccess { recentlyAdded.value = it }
+            homeLoading.value = true
+            try {
+                loadRecentlyPlayed()
+                runCatching { Graph.local.recentlyAdded() }.onSuccess { recentlyAdded.value = it }
+            } finally {
+                homeLoading.value = false
+            }
         }
     }
 
@@ -421,12 +450,30 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             if (Graph.tidal.restoreSession()) _tidalLogin.value = TidalLoginState.LoggedIn
         }
 
+        // Seed [collectionLoading]: resolve the favorites + playlists DB reads
+        // once so Collection shows a spinner (not its EmptyState) until they
+        // first emit. try/finally guarantees the flag clears even if a flow
+        // throws, so the spinner can never stick.
+        viewModelScope.launch {
+            try {
+                Graph.library.favorites().first()
+                Graph.library.playlists().first()
+            } finally {
+                collectionLoading.value = false
+            }
+        }
+
         restoreLibraryState()
     }
 
     fun loadLibrary() {
         viewModelScope.launch {
-            runCatching { Graph.local.allTracks() }.onSuccess { localTracks.value = it }
+            libraryLoading.value = true
+            try {
+                runCatching { Graph.local.allTracks() }.onSuccess { localTracks.value = it }
+            } finally {
+                libraryLoading.value = false
+            }
         }
     }
 

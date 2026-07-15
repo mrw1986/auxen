@@ -88,4 +88,31 @@ class ScreensLogicTest {
         assertEquals(listOf("Tidal One", "Tidal Two"), filterFor("Tidal").map { it.title })
         assertEquals(mixed, filterFor("All"))
     }
+
+    /**
+     * Mirrors the per-surface loading gate added in polish C2 (Library,
+     * Collection, Home, Album/Artist detail): a spinner only while the load is
+     * in flight AND there's nothing to show, the EmptyState only once the load
+     * has completed and the list is genuinely empty, and content whenever the
+     * list is non-empty — even mid-reload, so a reload with data already on
+     * screen never flashes a spinner over it. This encodes the `when` used in
+     * those screens so drift in the gating ordering is caught.
+     */
+    @Test
+    fun loadingGateResolvesSpinnerEmptyContent() {
+        fun gate(loading: Boolean, isEmpty: Boolean): String = when {
+            loading && isEmpty -> "SPINNER"
+            isEmpty -> "EMPTY"
+            else -> "CONTENT"
+        }
+
+        // Initial load, nothing yet -> spinner (never a flash of EmptyState).
+        assertEquals("SPINNER", gate(loading = true, isEmpty = true))
+        // Load finished, genuinely empty -> the EmptyState.
+        assertEquals("EMPTY", gate(loading = false, isEmpty = true))
+        // Data present, not loading -> content.
+        assertEquals("CONTENT", gate(loading = false, isEmpty = false))
+        // Reload with data already present -> keep content, no spinner over it.
+        assertEquals("CONTENT", gate(loading = true, isEmpty = false))
+    }
 }

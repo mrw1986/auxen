@@ -40,6 +40,7 @@ import io.github.auxen.data.groupAlbums
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
+import io.github.auxen.ui.components.LoadingState
 import io.github.auxen.ui.components.SourceBadge
 import io.github.auxen.ui.components.TrackActionSheet
 import io.github.auxen.ui.theme.AuxenColors
@@ -61,6 +62,14 @@ fun AlbumDetailScreen(
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     var sheetTrack by remember { mutableStateOf<Track?>(null) }
+
+    // The track pool comes from the local scan ([libraryLoading]) and the
+    // favorites DB read ([collectionLoading]); until both resolve an unresolved
+    // album would read as "no tracks", so show a spinner instead of the
+    // EmptyState while either is still in flight (polish C2).
+    val libraryLoading by viewModel.libraryLoading.collectAsState()
+    val collectionLoading by viewModel.collectionLoading.collectAsState()
+    val loading = libraryLoading || collectionLoading
 
     val pool = (localTracks + favorites).distinctBy { "${it.source}:${it.sourceId}" }
     val group = groupAlbums(pool).firstOrNull { it.album == album && it.albumArtist == artist }
@@ -126,11 +135,15 @@ fun AlbumDetailScreen(
         }
         if (tracks.isEmpty()) {
             item {
-                EmptyState(
-                    icon = Icons.Filled.Album,
-                    title = stringResource(R.string.empty_album_tracks_title),
-                    subtitle = stringResource(R.string.empty_album_tracks_subtitle),
-                )
+                if (loading) {
+                    LoadingState()
+                } else {
+                    EmptyState(
+                        icon = Icons.Filled.Album,
+                        title = stringResource(R.string.empty_album_tracks_title),
+                        subtitle = stringResource(R.string.empty_album_tracks_subtitle),
+                    )
+                }
             }
         }
         items(tracks, key = { "${it.source}:${it.sourceId}" }) { track ->
