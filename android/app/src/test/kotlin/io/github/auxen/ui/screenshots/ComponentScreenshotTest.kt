@@ -1,7 +1,5 @@
 package io.github.auxen.ui.screenshots
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,9 +10,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
@@ -31,6 +30,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -46,15 +46,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.github.takahirom.roborazzi.captureRoboImage
 import io.github.auxen.R
 import io.github.auxen.db.PlaylistEntity
@@ -75,6 +74,7 @@ import io.github.auxen.ui.BandSlider
 import io.github.auxen.ui.QueueContent
 import io.github.auxen.ui.SettingsContent
 import io.github.auxen.ui.components.AlbumCard
+import io.github.auxen.ui.components.ArtworkImage
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.BalanceSection
 import io.github.auxen.ui.components.BassBoostSection
@@ -93,7 +93,6 @@ import io.github.auxen.ui.components.VolumeNormalizationSection
 import io.github.auxen.ui.components.formatDuration
 import io.github.auxen.ui.testutil.TEST_DEVICE
 import io.github.auxen.ui.testutil.auxenScreenshotName
-import io.github.auxen.ui.theme.AuxenColors
 import io.github.auxen.ui.theme.AuxenTheme
 import io.github.auxen.ui.theme.Fraunces
 import org.junit.Rule
@@ -234,12 +233,19 @@ import org.robolectric.annotation.GraphicsMode
  * **Action-sheet drift trap, checked:** none of these twenty new surfaces
  * render a `ModalBottomSheet`, an open `DropdownMenu`, or any other
  * animated-entrance overlay that could fail to settle under Robolectric (see
- * the action-sheet surface note above). `FxSectionCard`'s expand/collapse is
- * a plain `if (expanded) { … }` conditional — no `AnimatedVisibility`, no
- * transition to wait out — and `fx-reverb-*`/`fx-equalizer-*` capture their
- * preset dropdown/menu in its default CLOSED state (just the trigger
- * button), never opened. All twenty render fully synchronously on first
- * composition, same as every other non-action-sheet surface in this file.
+ * the action-sheet surface note above). `FxSectionCard`'s expand/collapse IS
+ * animated now — the body via `AnimatedVisibility`, the chevron via
+ * `animateFloatAsState` — but that animation never actually RUNS in any of
+ * these goldens: each renders the card in a FIXED state (`expanded` is a
+ * constant, never toggled mid-capture), so both animators are seeded with
+ * `initial == target` and have nothing to move. They settle on frame 0 — the
+ * `AnimatedVisibility` shows/hides its body immediately when first composed at
+ * its target visibility, and the chevron's rotation starts already at its
+ * target angle — so there is no in-flight transition for Robolectric to wait
+ * out. `fx-reverb-*`/`fx-equalizer-*` likewise capture their preset
+ * dropdown/menu in its default CLOSED state (just the trigger button), never
+ * opened. All twenty render fully synchronously on first composition, same as
+ * every other non-action-sheet surface in this file.
  *
  * ## "All sections collapsed" EqualizerScreen composition (DSP-b Task 4; AutoEq split, Task 2)
  * `equalizer-all-sections-collapsed-*` assembles the real per-section
@@ -536,8 +542,13 @@ class ComponentScreenshotTest {
                         onClick = {},
                         label = { Text(label) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = AuxenColors.AmberPrimary,
-                            selectedLabelColor = AuxenColors.BgDeep,
+                            // Match production's selected FilterChip (HomeScreen.kt /
+                            // CollectionScreen.kt): theme-aware colorScheme.primary is
+                            // the brand amber in dark (== AmberPrimary) and the
+                            // contrast-safe Amber600 in light; onPrimary is BgDeep in
+                            // both themes (polish P1, Fix 1).
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
                         ),
                     )
                 }
@@ -594,50 +605,66 @@ class ComponentScreenshotTest {
 
     @Composable
     private fun MiniPlayerControlsPreview() {
-        // Matches MiniPlayerBar.kt's own Surface(tonalElevation = 4.dp) wrapper
-        // (final-review fix round, Minor #3) -- without it this preview was
-        // rendering on a flat surface the real bar never uses.
+        // Matches MiniPlayerBar.kt's own Surface(tonalElevation = 4.dp) { Column { … } }
+        // wrapper (final-review fix round, Minor #3; polish C1): the Column stacks
+        // the controls row above the hairline progress line, exactly as the real
+        // bar does when durationMs > 0.
         Surface(tonalElevation = 4.dp) {
-            Row(
-                modifier = Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                AsyncImage(
-                    // A null model + Coil's empty placeholder renders fully
-                    // transparent (confirmed against the existing track-row
-                    // goldens: the art area is solid background-color, invisible
-                    // regardless of clip shape) — a visible fill here is required
-                    // for the 6dp radius this golden exists to pin to actually
-                    // show up in the pixel diff.
-                    model = null,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF808080)),
-                )
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Nightcall", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                    Text(
-                        "Kavinsky",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                    )
-                }
-                IconButton(
-                    onClick = {},
-                    colors = IconButtonDefaults.iconButtonColors(
-                        containerColor = AuxenColors.AmberPrimary,
-                        contentColor = AuxenColors.BgDeep,
-                    ),
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = "Play")
+                    // Shared art slot, exactly as MiniPlayerBar.kt now uses it: a
+                    // null model leaves Coil's painter empty, so ArtworkImage fills
+                    // the rounded slot with surfaceVariant behind a centered album
+                    // glyph. That placeholder glyph is the point of this pin (the
+                    // real bar shows it until art decodes), so it must be the
+                    // captured pixels — not a hand-rolled flat gray fill.
+                    ArtworkImage(
+                        model = null,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(6.dp)),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Nightcall", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Text(
+                            "Kavinsky",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                    IconButton(
+                        onClick = {},
+                        colors = IconButtonDefaults.iconButtonColors(
+                            // Match MiniPlayerBar.kt: theme-aware primary/onPrimary,
+                            // the same accent as the progress indicator below (polish
+                            // P1, Fix 1) — not the old hardcoded amber.
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                    ) {
+                        Icon(Icons.Filled.PlayArrow, contentDescription = "Play")
+                    }
+                    IconButton(onClick = {}) {
+                        Icon(Icons.Filled.SkipNext, contentDescription = "Next")
+                    }
                 }
-                IconButton(onClick = {}) {
-                    Icon(Icons.Filled.SkipNext, contentDescription = "Next")
-                }
+                // MiniPlayerBar.kt renders this hairline progress line below the
+                // controls whenever durationMs > 0 (always, during live playback).
+                // A fixed 0.35 fraction pins it deterministically; primary matches
+                // the play button so the bar's two accents stay one color.
+                LinearProgressIndicator(
+                    progress = { 0.35f },
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    modifier = Modifier.fillMaxWidth().height(2.dp),
+                    drawStopIndicator = {},
+                )
             }
         }
     }
@@ -878,7 +905,9 @@ class ComponentScreenshotTest {
                 onSelectProfile = {},
                 onClearActive = {},
             )
-            Button(onClick = {}) { Text("Import custom profile…") }
+            // Match EqualizerScreen.kt: importing a custom profile is the outlined
+            // secondary action, not a filled CTA — the bundled database is the path.
+            OutlinedButton(onClick = {}) { Text("Import custom profile…") }
             Text(
                 "Powered by AutoEq (MIT) — github.com/jaakkopasanen/AutoEq",
                 style = MaterialTheme.typography.bodySmall,
@@ -915,13 +944,29 @@ class ComponentScreenshotTest {
         ) {
             Text("Active profile: Rock", style = MaterialTheme.typography.bodyMedium)
             Text("Preamp: -6.0 dB", style = MaterialTheme.typography.bodySmall)
-            OutlinedButton(onClick = {}) { Text("Presets") }
+            // Match EqualizerScreen.kt's preset control: an OutlinedButton reading
+            // as a menu trigger — label left-aligned at a stable min width with a
+            // trailing dropdown caret (the DropdownMenu it opens stays CLOSED here,
+            // so nothing further renders) — not a plain filled Button.
+            OutlinedButton(onClick = {}, modifier = Modifier.widthIn(min = 180.dp)) {
+                Text("Presets", modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+            }
+            // All 10 bands share the row's width via weight(1f), no horizontal
+            // scroll — exactly as EqualizerScreen.kt now lays them out. fillMaxWidth
+            // binds the row to the test device's 411dp, so the ten weighted cells
+            // have a bounded width to divide.
             Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 gains.forEachIndexed { index, gain ->
-                    BandSlider(label = EqState.BAND_LABELS[index], gainDb = gain, onChange = {})
+                    BandSlider(
+                        label = EqState.BAND_LABELS[index],
+                        gainDb = gain,
+                        onChange = {},
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
         }
