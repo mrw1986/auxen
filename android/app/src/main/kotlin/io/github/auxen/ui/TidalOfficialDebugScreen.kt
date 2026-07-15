@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.media3.common.util.UnstableApi
@@ -40,8 +41,10 @@ import io.github.auxen.R
 @Composable
 fun TidalOfficialDebugScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     val status by viewModel.tidalOfficialStatus.collectAsState()
+    val metadataStatus by viewModel.tidalMetadataStatus.collectAsState()
     val context = LocalContext.current
     var trackId by remember { mutableStateOf("") }
+    var artistId by remember { mutableStateOf("") }
 
     Column(
         modifier = modifier
@@ -82,6 +85,33 @@ fun TidalOfficialDebugScreen(viewModel: PlayerViewModel, modifier: Modifier = Mo
 
         status?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+        }
+
+        HorizontalDivider()
+
+        // Metadata probe (Tidal metadata-layer Foundation, Slice 0): proves the
+        // official-API read path end-to-end (validAccessToken -> getArtist ->
+        // compound projection). The metadata analogue of the streaming probe.
+        OutlinedTextField(
+            value = artistId,
+            onValueChange = { artistId = it },
+            label = { Text(stringResource(R.string.tidal_official_artist_id_label)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = { viewModel.runTidalMetadataProbe(artistId.trim()) },
+            enabled = artistId.isNotBlank(),
+        ) {
+            Text(stringResource(R.string.tidal_official_metadata_button))
+        }
+
+        metadataStatus?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                modifier = Modifier.padding(top = 8.dp),
+            )
         }
     }
 }

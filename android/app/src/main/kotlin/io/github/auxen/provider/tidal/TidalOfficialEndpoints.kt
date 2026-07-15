@@ -49,4 +49,18 @@ object TidalOfficialEndpoints {
             .build()
         return authed(url, accessToken)
     }
+
+    /**
+     * `GET /artists/{id}` with `?include=...` (JSON:API compound document)
+     * so biography/similarArtists/albums come back in one call. `countryCode`
+     * is optional per the spec (only `id` is required) but supplied for
+     * correct regional catalog results.
+     */
+    fun artistRequest(id: String, accessToken: String, include: List<String>, countryCode: String? = null): Request {
+        val url = "$BASE/artists/$id".toHttpUrl().newBuilder()
+            .apply { countryCode?.let { addQueryParameter("countryCode", it) } }
+            .apply { include.forEach { addQueryParameter("include", it) } }
+            .build()
+        return authed(url, accessToken)
+    }
 }

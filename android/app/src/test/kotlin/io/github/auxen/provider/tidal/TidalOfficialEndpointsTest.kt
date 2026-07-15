@@ -53,4 +53,33 @@ class TidalOfficialEndpointsTest {
         assertEquals(listOf("FLAC_HIRES"), url.queryParameterValues("formats"))
         assertNull("trackFiles has no manifestType param", url.queryParameter("manifestType"))
     }
+
+    @Test
+    fun `artist request carries every include and the country code`() {
+        val request = TidalOfficialEndpoints.artistRequest(
+            id = "100",
+            accessToken = "tok-123",
+            include = listOf("biography", "similarArtists", "albums"),
+            countryCode = "US",
+        )
+        val url = request.url
+        assertEquals("/v2/artists/100", url.encodedPath)
+        assertEquals(listOf("biography", "similarArtists", "albums"), url.queryParameterValues("include"))
+        assertEquals("US", url.queryParameter("countryCode"))
+        assertEquals("Bearer tok-123", request.header("Authorization"))
+        assertEquals("application/vnd.api+json", request.header("Accept"))
+    }
+
+    @Test
+    fun `artist request omits the country code when not supplied`() {
+        val request = TidalOfficialEndpoints.artistRequest(
+            id = "100",
+            accessToken = "tok-123",
+            include = listOf("albums"),
+        )
+        val url = request.url
+        assertEquals("/v2/artists/100", url.encodedPath)
+        assertNull("countryCode is optional per the spec", url.queryParameter("countryCode"))
+        assertEquals(listOf("albums"), url.queryParameterValues("include"))
+    }
 }

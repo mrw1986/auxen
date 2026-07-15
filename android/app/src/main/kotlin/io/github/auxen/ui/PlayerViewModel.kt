@@ -37,6 +37,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
@@ -260,6 +261,32 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 tidalOfficialStatus.value = formatTidalStreamingProbeResult(withPlayback)
                 Log.i("AuxenTidalOfficial", formatTidalStreamingProbeResult(withPlayback))
             }
+        }
+    }
+
+    /**
+     * The metadata analogue of [tidalOfficialStatus]: the official-API
+     * artist-metadata probe's visible readout (Tidal metadata-layer
+     * Foundation, Slice 0) -- null until [runTidalMetadataProbe] has run.
+     */
+    private val _tidalMetadataStatus = MutableStateFlow<String?>(null)
+    val tidalMetadataStatus: StateFlow<String?> = _tidalMetadataStatus.asStateFlow()
+
+    /** Debug/probe: fetch an artist's official-API metadata overview and render it as a status string. */
+    fun runTidalMetadataProbe(artistId: String) {
+        viewModelScope.launch {
+            _tidalMetadataStatus.value = "Fetching artist $artistId…"
+            _tidalMetadataStatus.value = Graph.tidalMetadata.artistOverview(artistId.trim()).fold(
+                onSuccess = { o ->
+                    buildString {
+                        appendLine("Artist: ${o.name} (id ${o.id})")
+                        appendLine("Biography: ${o.biography?.take(160) ?: "—"}")
+                        appendLine("Similar (${o.similarArtistNames.size}): ${o.similarArtistNames.take(5).joinToString()}")
+                        appendLine("Albums (${o.albumTitles.size}): ${o.albumTitles.take(5).joinToString()}")
+                    }
+                },
+                onFailure = { "Metadata probe failed: ${it.message}" },
+            )
         }
     }
 

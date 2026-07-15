@@ -181,4 +181,6 @@
     <string name="tidal_official_login_button">Try official Tidal login (beta)</string>
     <string name="tidal_official_track_id_label">Tidal track id</string>
     <string name="tidal_official_probe_button">Run streaming probe</string>
+    <string name="tidal_official_artist_id_label">Tidal artist id</string>
+    <string name="tidal_official_metadata_button">Fetch artist metadata</string>
 </resources>
