@@ -63,4 +63,12 @@ object TidalOfficialEndpoints {
             .build()
         return authed(url, accessToken)
     }
+
+    /**
+     * `GET /users/{id}` — pass `id = "me"` for the authenticated user's
+     * resource (spec convention). THE single source of the numeric user id for
+     * any user/collection-scoped call (see [TidalMetadataRepository.currentUserId]).
+     */
+    fun userRequest(id: String, accessToken: String): Request =
+        authed("$BASE/users/$id".toHttpUrl(), accessToken)
 }

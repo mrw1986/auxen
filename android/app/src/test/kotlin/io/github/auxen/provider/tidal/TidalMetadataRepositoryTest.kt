@@ -54,6 +54,20 @@ class TidalMetadataRepositoryTest {
     }
 
     @Test
+    fun `userIdFrom returns the primary user resource id`() {
+        val doc = """
+            { "data": { "id": "987654", "type": "users",
+              "attributes": { "username": "matt", "country": "US" } } }
+        """.trimIndent()
+        assertEquals("987654", userIdFrom(json.decodeFromString(doc), json))
+    }
+
+    @Test
+    fun `userIdFrom returns null when there is no primary user`() {
+        assertNull(userIdFrom(json.decodeFromString("""{ "data": [] }"""), json))
+    }
+
+    @Test
     fun `artistRequest carries every include and the country code`() {
         val req = TidalOfficialEndpoints.artistRequest(
             id = "100", accessToken = "tok",

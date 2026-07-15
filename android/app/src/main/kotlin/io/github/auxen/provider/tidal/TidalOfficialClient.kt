@@ -37,6 +37,10 @@ class TidalOfficialClient(private val client: OkHttpClient) {
         countryCode: String? = null,
     ): Result<TidalDocument> = execute(TidalOfficialEndpoints.artistRequest(id, accessToken, include, countryCode))
 
+    /** Fetch a user as a JSON:API compound document (`id = "me"` for the current user). */
+    suspend fun getUser(id: String, accessToken: String): Result<TidalDocument> =
+        execute(TidalOfficialEndpoints.userRequest(id, accessToken))
+
     private suspend inline fun <reified T> execute(request: Request): Result<T> = withContext(Dispatchers.IO) {
         runCatching {
             client.newCall(request).execute().use { resp ->

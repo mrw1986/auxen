@@ -53,6 +53,10 @@ fun artistOverviewFrom(doc: TidalDocument, json: Json): ArtistOverview? {
     )
 }
 
+/** The current user's id (which is also their userCollection id), from `GET /users/me`. Pure. */
+fun userIdFrom(doc: TidalDocument, json: Json): String? =
+    TidalDocumentView(doc, json).primary?.id
+
 /**
  * The seam every official-API metadata feature (enrichment/collection/
  * discovery) goes through. Wraps token refresh ([TidalOfficialSession.
@@ -79,6 +83,28 @@ class TidalMetadataRepository(
         return client.getArtist(artistId, token, ARTIST_INCLUDE, countryCode).mapCatching { doc ->
             artistOverviewFrom(doc, json) ?: error("Artist $artistId not found")
         }
+    }
+
+    // The current user's numeric id (also their userCollection id), resolved
+    // once via /users/me and cached for the process lifetime (cleared implicitly
+    // on process death). THE single source of the user id for any user/
+    // collection-scoped call — Slice 2's resolveCollectionId() delegates here.
+    @Volatile private var cachedUserId: String? = null
+
+    /**
+     * The current user's id via `GET /users/me` (JSON:API `data.id`), cached
+     * in-memory. Returns null when not logged in to the official API or the id
+     * cannot be resolved (the caller should surface "sign in"). This is the
+     * single accessor every user/collection-scoped call goes through.
+     */
+    suspend fun currentUserId(): String? {
+        cachedUserId?.let { return it }
+        val token = session.validAccessToken() ?: return null
+        val id = client.getUser("me", token)
+            .mapCatching { userIdFrom(it, json) ?: error("No user id in /users/me response") }
+            .getOrNull()
+        if (id != null) cachedUserId = id
+        return id
     }
 
     companion object {

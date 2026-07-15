@@ -71,6 +71,14 @@ class TidalOfficialEndpointsTest {
     }
 
     @Test
+    fun `user request hits users me with the bearer token`() {
+        val request = TidalOfficialEndpoints.userRequest(id = "me", accessToken = "tok-123")
+        assertEquals("https://openapi.tidal.com/v2/users/me", request.url.toString())
+        assertEquals("Bearer tok-123", request.header("Authorization"))
+        assertEquals("application/vnd.api+json", request.header("Accept"))
+    }
+
+    @Test
     fun `artist request omits the country code when not supplied`() {
         val request = TidalOfficialEndpoints.artistRequest(
             id = "100",
