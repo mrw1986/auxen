@@ -329,10 +329,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         runCatching { Graph.library.recentlyPlayed() }.onSuccess { recentlyPlayed.value = it }
     }
 
-    fun refreshRecentlyPlayed() {
-        viewModelScope.launch { loadRecentlyPlayed() }
-    }
-
     fun setHomeFilter(value: String) {
         homeFilter.value = value
         viewModelScope.launch { runCatching { Graph.library.setSetting("home_filter", value) } }
