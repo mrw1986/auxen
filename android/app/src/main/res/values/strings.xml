@@ -3,7 +3,6 @@
     <string name="app_name">Auxen</string>
     <string name="brand_name">AUXEN</string>
     <string name="brand_tagline">UNORTHODOX AUDIO</string>
-    <string name="empty_home_flavor">Feed the ox — play something to get started.</string>
 
     <!-- DSP-b Task 3: per-effect Equalizer screen sections. -->
     <string name="fx_section_expand">Expand %1$s</string>

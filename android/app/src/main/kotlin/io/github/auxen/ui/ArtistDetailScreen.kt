@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Button
@@ -33,16 +34,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
-import coil.compose.AsyncImage
 import io.github.auxen.R
 import io.github.auxen.data.AlbumGroup
 import io.github.auxen.data.groupAlbums
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AlbumCard
+import io.github.auxen.ui.components.ArtworkImage
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.LoadingState
@@ -85,10 +85,11 @@ fun ArtistDetailScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                AsyncImage(
+                ArtworkImage(
                     model = tracks.firstNotNullOfOrNull { it.albumArtUrl },
                     contentDescription = null,
-                    contentScale = ContentScale.Crop,
+                    glyph = Icons.Filled.Person,
+                    glyphSize = 40.dp,
                     modifier = Modifier.size(96.dp).clip(CircleShape),
                 )
                 Spacer(Modifier.width(16.dp))

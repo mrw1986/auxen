@@ -50,7 +50,6 @@ import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.SectionHeader
 import io.github.auxen.ui.components.TrackActionSheet
-import io.github.auxen.ui.theme.AuxenColors
 import kotlinx.coroutines.delay
 
 private val TYPE_FILTERS = listOf("All", "Local", "Tidal")
@@ -173,8 +172,8 @@ fun SearchScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                         onClick = { typeFilter = filter },
                         label = { Text(filter) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = AuxenColors.AmberPrimary,
-                            selectedLabelColor = AuxenColors.BgDeep,
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
                         ),
                     )
                 }

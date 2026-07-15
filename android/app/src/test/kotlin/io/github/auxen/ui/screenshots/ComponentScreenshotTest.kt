@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
@@ -154,8 +155,9 @@ import org.robolectric.annotation.GraphicsMode
  * equalizer/account action icons, rather than standalone. This pins the
  * actual on-screen treatment (sizing/centering next to the actions), which
  * the standalone `brand-block-*` goldens above don't exercise.
- * `top-bar-brand-suppressed-*` pins the account-route variant, where
- * `MainActivity` renders an empty title lambda (icon-only bar) instead.
+ * `top-bar-account-back-*` pins the pushed account-route variant, where
+ * `MainActivity` renders a back-arrow navigation icon and a static "Account"
+ * title with none of the tab-level actions instead.
  *
  * ## Selection-states surface — the theme-parity fix's own regression pin
  * The `selection-states-*` goldens capture a `NavigationBar`, a selected +
@@ -473,19 +475,19 @@ class ComponentScreenshotTest {
     fun topBarBrand_dark() = captureComponent("top-bar-brand-dark", darkTheme = true) { TopBarBrandPreview() }
 
     @Test
-    fun topBarBrandSuppressed_light() = captureComponent("top-bar-brand-suppressed-light", darkTheme = false) {
-        TopBarBrandPreview(showTitle = false)
+    fun topBarAccountBack_light() = captureComponent("top-bar-account-back-light", darkTheme = false) {
+        AccountBackBarPreview()
     }
 
     @Test
-    fun topBarBrandSuppressed_dark() = captureComponent("top-bar-brand-suppressed-dark", darkTheme = true) {
-        TopBarBrandPreview(showTitle = false)
+    fun topBarAccountBack_dark() = captureComponent("top-bar-account-back-dark", darkTheme = true) {
+        AccountBackBarPreview()
     }
 
     @Composable
-    private fun TopBarBrandPreview(showTitle: Boolean = true) {
+    private fun TopBarBrandPreview() {
         CenterAlignedTopAppBar(
-            title = { if (showTitle) BrandBlock(compact = true) },
+            title = { BrandBlock(compact = true) },
             actions = {
                 IconButton(onClick = {}) {
                     Icon(Icons.Filled.Equalizer, contentDescription = "Equalizer")
@@ -494,6 +496,22 @@ class ComponentScreenshotTest {
                     Icon(Icons.Filled.Person, contentDescription = "Account")
                 }
             },
+        )
+    }
+
+    // Reproduces MainActivity.kt's pushed-overlay top bar for the account route
+    // (item 7): a back-arrow navigation icon + the static "Account" title, with
+    // none of the tab-level actions — replacing the earlier icon-only
+    // brand-suppressed bar, which no live screen renders anymore.
+    @Composable
+    private fun AccountBackBarPreview() {
+        CenterAlignedTopAppBar(
+            navigationIcon = {
+                IconButton(onClick = {}) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+            },
+            title = { Text("Account") },
         )
     }
 

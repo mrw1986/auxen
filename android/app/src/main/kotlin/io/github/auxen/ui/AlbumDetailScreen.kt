@@ -30,14 +30,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
-import coil.compose.AsyncImage
 import io.github.auxen.R
 import io.github.auxen.data.groupAlbums
 import io.github.auxen.model.Track
+import io.github.auxen.ui.components.ArtworkImage
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.LoadingState
@@ -78,10 +77,10 @@ fun AlbumDetailScreen(
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                AsyncImage(
+                ArtworkImage(
                     model = group?.artUrl,
                     contentDescription = null,
-                    contentScale = ContentScale.Crop,
+                    glyphSize = 48.dp,
                     modifier = Modifier.size(140.dp).clip(RoundedCornerShape(10.dp)),
                 )
                 Spacer(Modifier.width(16.dp))
