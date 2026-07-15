@@ -88,6 +88,10 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    // Adaptive navigation: WindowWidthSizeClass drives the bottom-bar (compact)
+    // vs. navigation-rail (medium/expanded, i.e. tablet/unfolded foldable)
+    // switch in MainActivity. BOM-managed alongside material3 itself.
+    implementation(libs.androidx.compose.material3.windowSizeClass)
     implementation(libs.androidx.compose.material.icons)
     implementation(libs.androidx.navigation.compose)
 

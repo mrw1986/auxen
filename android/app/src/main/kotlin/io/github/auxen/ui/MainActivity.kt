@@ -11,9 +11,14 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -31,9 +36,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
+import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
+import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -63,6 +73,14 @@ private val TAB_ROUTES = setOf("home", "library", "search", "collection")
 private val OVERLAY_ROUTES = setOf("equalizer", "account", "settings", "queue", "tidal-official-debug")
 
 /**
+ * Comfortable reading width for the main content on medium/expanded widths
+ * (unfolded foldable, tablet). Content is capped to this and centered so it
+ * doesn't stretch edge-to-edge on wide screens; on compact widths (folded
+ * phone) content stays full width and this cap never engages.
+ */
+private val MAX_CONTENT_WIDTH = 840.dp
+
+/**
  * Short, static label for the context-aware back top bar on detail/overlay
  * routes. Route strings keep their argument placeholders (e.g.
  * `album/{album}/{artist}`) so they classify by pattern, not by filled value;
@@ -85,6 +103,7 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: PlayerViewModel by viewModels()
 
+    @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -96,10 +115,14 @@ class MainActivity : ComponentActivity() {
         permissionLauncher.launch(requiredPermissions())
 
         setContent {
+            // Computed from the current window; recomposes on configuration
+            // changes (including foldable fold/unfold, which resizes the
+            // window), so the nav layout adapts live between phone and tablet.
+            val windowSizeClass = calculateWindowSizeClass(this)
             val themeMode by viewModel.themeMode.collectAsState()
             val darkTheme = resolveDarkTheme(themeMode, systemDark = isSystemInDarkTheme())
             io.github.auxen.ui.theme.AuxenTheme(darkTheme = darkTheme) {
-                MainScreen(viewModel)
+                MainScreen(viewModel, widthSizeClass = windowSizeClass.widthSizeClass)
             }
         }
 
@@ -133,10 +156,10 @@ class MainActivity : ComponentActivity() {
     }.toTypedArray()
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3WindowSizeClassApi::class)
 @UnstableApi
 @Composable
-private fun MainScreen(viewModel: PlayerViewModel) {
+private fun MainScreen(viewModel: PlayerViewModel, widthSizeClass: WindowWidthSizeClass) {
     val navController = rememberNavController()
     val destinations = listOf(
         Destination("home", "Home") { Icon(Icons.Filled.Home, contentDescription = null) },
@@ -146,6 +169,27 @@ private fun MainScreen(viewModel: PlayerViewModel) {
     )
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
+
+    // Compact width (folded phone / narrow) keeps the bottom NavigationBar;
+    // medium/expanded (unfolded foldable, tablet) moves nav to a leading
+    // NavigationRail in the content area instead.
+    val useRail = widthSizeClass != WindowWidthSizeClass.Compact
+
+    // Shared tab navigation, used identically by the bottom bar and the rail so
+    // a tab tap behaves the same in either layout: pop any global overlay first
+    // (so a tab's saved state never captures one — restoring such state made
+    // tab taps appear dead), then navigate with the same
+    // saveState/launchSingleTop/restoreState back-stack handling.
+    val onSelectTab: (String) -> Unit = { route ->
+        while (navController.currentDestination?.route in OVERLAY_ROUTES) {
+            navController.popBackStack()
+        }
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -215,98 +259,124 @@ private fun MainScreen(viewModel: PlayerViewModel) {
                         }
                     }
                     MiniPlayerBar(viewModel, onOpen = { navController.navigate("nowplaying") })
-                    NavigationBar {
-                        destinations.forEach { dest ->
-                            NavigationBarItem(
-                                selected = currentRoute == dest.route,
-                                onClick = {
-                                    // Equalizer/Account are global overlays pushed from the top
-                                    // bar; pop them first so a tab's saved state never captures
-                                    // them (restoring such state made tab taps appear dead).
-                                    while (navController.currentDestination?.route in OVERLAY_ROUTES) {
-                                        navController.popBackStack()
-                                    }
-                                    navController.navigate(dest.route) {
-                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                icon = dest.icon,
-                                label = { Text(dest.label) },
-                            )
+                    // Bottom NavigationBar only on compact width; medium/expanded
+                    // widths use the leading NavigationRail in the content area
+                    // (the MiniPlayerBar above stays a full-width bottom bar in
+                    // both layouts). Tab taps use the same onSelectTab as the rail.
+                    if (!useRail) {
+                        NavigationBar {
+                            destinations.forEach { dest ->
+                                NavigationBarItem(
+                                    selected = currentRoute == dest.route,
+                                    onClick = { onSelectTab(dest.route) },
+                                    icon = dest.icon,
+                                    label = { Text(dest.label) },
+                                )
+                            }
                         }
                     }
                 }
             }
         },
     ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = "home",
-            modifier = Modifier.padding(innerPadding),
-        ) {
-            composable("home") { HomeScreen(viewModel) }
-            composable("library") {
-                LibraryScreen(
-                    viewModel,
-                    onOpenAlbum = { album ->
-                        navController.navigate("album/${Uri.encode(album.album)}/${Uri.encode(album.albumArtist)}")
+        // Show the rail (and cap content width) on medium/expanded widths,
+        // except on Now Playing, which hides all global chrome and manages its
+        // own full-bleed layout. The NavHost stays at a single call site inside
+        // the Box so toggling the rail (e.g. fold/unfold) never tears it down.
+        val showRail = useRail && currentRoute != "nowplaying"
+        Row(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            if (showRail) {
+                // Insets already consumed by the Scaffold's innerPadding above,
+                // so the rail adds none of its own (avoids double padding).
+                NavigationRail(windowInsets = WindowInsets(0, 0, 0, 0)) {
+                    destinations.forEach { dest ->
+                        NavigationRailItem(
+                            selected = currentRoute == dest.route,
+                            onClick = { onSelectTab(dest.route) },
+                            icon = dest.icon,
+                            label = { Text(dest.label) },
+                        )
+                    }
+                }
+            }
+            Box(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                NavHost(
+                    navController = navController,
+                    startDestination = "home",
+                    // Wide screens: cap to a comfortable reading width, centered
+                    // by the Box. Compact/Now Playing: full width.
+                    modifier = if (showRail) {
+                        Modifier.fillMaxHeight().widthIn(max = MAX_CONTENT_WIDTH)
+                    } else {
+                        Modifier.fillMaxSize()
                     },
-                    onOpenArtist = { artist -> navController.navigate("artist/${Uri.encode(artist)}") },
-                )
-            }
-            composable("album/{album}/{artist}") { backStack ->
-                AlbumDetailScreen(
-                    viewModel,
-                    album = backStack.arguments?.getString("album").orEmpty(),
-                    artist = backStack.arguments?.getString("artist").orEmpty(),
-                    onOpenArtist = { artist -> navController.navigate("artist/${Uri.encode(artist)}") },
-                )
-            }
-            composable("artist/{artist}") { backStack ->
-                ArtistDetailScreen(
-                    viewModel,
-                    artist = backStack.arguments?.getString("artist").orEmpty(),
-                    onOpenAlbum = { album ->
-                        navController.navigate("album/${Uri.encode(album.album)}/${Uri.encode(album.albumArtist)}")
-                    },
-                )
-            }
-            composable("search") { SearchScreen(viewModel) }
-            composable("collection") {
-                CollectionScreen(
-                    viewModel,
-                    onOpenPlaylist = { id -> navController.navigate("playlist/$id") },
-                    onOpenAlbum = { album ->
-                        navController.navigate("album/${Uri.encode(album.album)}/${Uri.encode(album.albumArtist)}")
-                    },
-                    onOpenArtist = { artist -> navController.navigate("artist/${Uri.encode(artist)}") },
-                )
-            }
-            composable("playlist/{playlistId}") { backStack ->
-                PlaylistDetailScreen(
-                    viewModel,
-                    playlistId = backStack.arguments?.getString("playlistId")?.toLongOrNull() ?: -1L,
-                    onBack = { navController.popBackStack() },
-                )
-            }
-            composable("equalizer") { EqualizerScreen() }
-            composable("settings") {
-                SettingsScreen(
-                    viewModel,
-                    onOpenTidalOfficialDebug = { navController.navigate("tidal-official-debug") { launchSingleTop = true } },
-                )
-            }
-            composable("tidal-official-debug") { TidalOfficialDebugScreen(viewModel) }
-            composable("queue") { QueueScreen(viewModel) }
-            composable("account") { AccountScreen(viewModel) }
-            composable("nowplaying") {
-                NowPlayingScreen(
-                    viewModel,
-                    onBack = { navController.popBackStack() },
-                    onOpenQueue = { navController.navigate("queue") { launchSingleTop = true } },
-                )
+                ) {
+                    composable("home") { HomeScreen(viewModel) }
+                    composable("library") {
+                        LibraryScreen(
+                            viewModel,
+                            onOpenAlbum = { album ->
+                                navController.navigate("album/${Uri.encode(album.album)}/${Uri.encode(album.albumArtist)}")
+                            },
+                            onOpenArtist = { artist -> navController.navigate("artist/${Uri.encode(artist)}") },
+                        )
+                    }
+                    composable("album/{album}/{artist}") { backStack ->
+                        AlbumDetailScreen(
+                            viewModel,
+                            album = backStack.arguments?.getString("album").orEmpty(),
+                            artist = backStack.arguments?.getString("artist").orEmpty(),
+                            onOpenArtist = { artist -> navController.navigate("artist/${Uri.encode(artist)}") },
+                        )
+                    }
+                    composable("artist/{artist}") { backStack ->
+                        ArtistDetailScreen(
+                            viewModel,
+                            artist = backStack.arguments?.getString("artist").orEmpty(),
+                            onOpenAlbum = { album ->
+                                navController.navigate("album/${Uri.encode(album.album)}/${Uri.encode(album.albumArtist)}")
+                            },
+                        )
+                    }
+                    composable("search") { SearchScreen(viewModel) }
+                    composable("collection") {
+                        CollectionScreen(
+                            viewModel,
+                            onOpenPlaylist = { id -> navController.navigate("playlist/$id") },
+                            onOpenAlbum = { album ->
+                                navController.navigate("album/${Uri.encode(album.album)}/${Uri.encode(album.albumArtist)}")
+                            },
+                            onOpenArtist = { artist -> navController.navigate("artist/${Uri.encode(artist)}") },
+                        )
+                    }
+                    composable("playlist/{playlistId}") { backStack ->
+                        PlaylistDetailScreen(
+                            viewModel,
+                            playlistId = backStack.arguments?.getString("playlistId")?.toLongOrNull() ?: -1L,
+                            onBack = { navController.popBackStack() },
+                        )
+                    }
+                    composable("equalizer") { EqualizerScreen() }
+                    composable("settings") {
+                        SettingsScreen(
+                            viewModel,
+                            onOpenTidalOfficialDebug = { navController.navigate("tidal-official-debug") { launchSingleTop = true } },
+                        )
+                    }
+                    composable("tidal-official-debug") { TidalOfficialDebugScreen(viewModel) }
+                    composable("queue") { QueueScreen(viewModel) }
+                    composable("account") { AccountScreen(viewModel) }
+                    composable("nowplaying") {
+                        NowPlayingScreen(
+                            viewModel,
+                            onBack = { navController.popBackStack() },
+                            onOpenQueue = { navController.navigate("queue") { launchSingleTop = true } },
+                        )
+                    }
+                }
             }
         }
     }
