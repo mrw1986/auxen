@@ -10,14 +10,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -51,11 +54,14 @@ import io.github.auxen.ui.theme.ThemeMode
 fun SettingsScreen(viewModel: PlayerViewModel, onOpenTidalOfficialDebug: () -> Unit, modifier: Modifier = Modifier) {
     val themeMode by viewModel.themeMode.collectAsState()
     val sourcePriority by viewModel.sourcePriority.collectAsState()
+    val bitPerfect by viewModel.bitPerfect.collectAsState()
     SettingsContent(
         themeMode = themeMode,
         onThemeModeChange = viewModel::setThemeMode,
         sourcePriority = sourcePriority,
         onSourcePriorityChange = viewModel::setSourcePriority,
+        bitPerfect = bitPerfect,
+        onBitPerfectChange = viewModel::setBitPerfect,
         onOpenTidalOfficialDebug = onOpenTidalOfficialDebug,
         modifier = modifier,
     )
@@ -68,6 +74,8 @@ internal fun SettingsContent(
     onThemeModeChange: (ThemeMode) -> Unit,
     sourcePriority: SourcePriority,
     onSourcePriorityChange: (SourcePriority) -> Unit,
+    bitPerfect: Boolean = false,
+    onBitPerfectChange: (Boolean) -> Unit = {},
     onOpenTidalOfficialDebug: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -101,6 +109,10 @@ internal fun SettingsContent(
         }
 
         SettingsSectionCard(title = stringResource(R.string.settings_playback_title)) {
+            BitPerfectRow(enabled = bitPerfect, onChange = onBitPerfectChange)
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
             Text(stringResource(R.string.settings_source_priority_label), style = MaterialTheme.typography.titleMedium)
             Text(
                 stringResource(R.string.settings_source_priority_subtitle),
@@ -142,6 +154,40 @@ internal fun SettingsContent(
                 Text(stringResource(R.string.settings_tidal_official_link))
             }
         }
+    }
+}
+
+/**
+ * The Bit-Perfect / Direct toggle row: a label + one-line explanation on the
+ * left, a [Switch] on the right. When ON, the audio is played untouched at full
+ * resolution and the whole DSP/EQ chain is bypassed (see
+ * [io.github.auxen.dsp.BitPerfectController]); the Equalizer screen shows a
+ * matching "bypassed" banner. The whole row toggles, with the switch mirroring
+ * state (standard Compose switch-row pattern).
+ */
+@Composable
+private fun BitPerfectRow(enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(value = enabled, onValueChange = onChange, role = Role.Switch)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                stringResource(R.string.settings_bit_perfect_label),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                stringResource(R.string.settings_bit_perfect_subtitle),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        // onCheckedChange = null: the enclosing Row's toggleable() owns the
+        // click and the merged a11y node (standard Compose switch-row pattern).
+        Switch(checked = enabled, onCheckedChange = null, modifier = Modifier.padding(start = 12.dp))
     }
 }
 

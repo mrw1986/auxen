@@ -59,6 +59,7 @@ import io.github.auxen.R
 import io.github.auxen.dsp.AudioFxController
 import io.github.auxen.dsp.AutoEqController
 import io.github.auxen.dsp.AutoEqProfile
+import io.github.auxen.dsp.BitPerfectController
 import io.github.auxen.dsp.EqController
 import io.github.auxen.dsp.EqState
 import io.github.auxen.ui.components.BalanceSection
@@ -102,6 +103,10 @@ private const val KEY_AUTOEQ_CUSTOM_TEXT = "autoeq_custom_text"
 fun EqualizerScreen(modifier: Modifier = Modifier) {
     val eqState by EqController.state.collectAsState()
     val autoEqState by AutoEqController.state.collectAsState()
+    // Bit-Perfect / Direct mode bypasses this entire screen's DSP chain (see
+    // BitPerfectController) -- surface that clearly with a banner so the
+    // controls below don't look broken when they have no audible effect.
+    val bitPerfect by BitPerfectController.enabled.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repo = Graph.autoEq
@@ -205,6 +210,24 @@ fun EqualizerScreen(modifier: Modifier = Modifier) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        // Direct-mode banner: when Bit-Perfect is on, every section below is
+        // bypassed by the audio sink, so say so up front (the toggle itself
+        // lives in Settings > Playback).
+        if (bitPerfect) {
+            Surface(
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    stringResource(R.string.settings_bit_perfect_bypass_note),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
+        }
+
         // "Tune for your headphones" section: the AutoEq picker, wired to its
         // own controller and switch (AutoEq split, Task 2, item 1). FIRST in
         // the list -- correction is meant to be applied before the graphic EQ

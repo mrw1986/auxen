@@ -40,6 +40,7 @@ import io.github.auxen.dsp.AudioFxController
 import io.github.auxen.dsp.AutoEqController
 import io.github.auxen.dsp.BalanceProcessor
 import io.github.auxen.dsp.BassBoostProcessor
+import io.github.auxen.dsp.BitPerfectController
 import io.github.auxen.dsp.EncodingRestorerProcessor
 import io.github.auxen.dsp.EqController
 import io.github.auxen.dsp.LimiterProcessor
@@ -57,6 +58,7 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -109,6 +111,23 @@ class PlaybackService : MediaSessionService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainScope = MainScope()
     private var queueSaveJob: Job? = null
+
+    /**
+     * The ReplayGain router for the CURRENTLY-live player. Recreated by
+     * [buildPlayer] (it wraps that player's own [ReplayGainProcessor] instance)
+     * and read by the main [Player.Listener] that [configurePlayer] installs.
+     * A field, not a local, so a Bit-Perfect rebuild's fresh router reaches the
+     * new player's listener.
+     */
+    private var rgGainRouter: RgGainRouter? = null
+
+    /**
+     * The Bit-Perfect mode the live player was built with. Seeded in [onCreate]
+     * from [BitPerfectController.enabled] and updated on every rebuild, so the
+     * observer in [observeBitPerfect] only rebuilds when the mode actually flips
+     * (never on the initial replayed value).
+     */
+    private var currentBitPerfect = false
 
     /** Last expiry-recovery attempt (elapsedRealtime), bounding the 4xx retry path. */
     private var lastExpiryRecoveryAtMillis = 0L
@@ -183,62 +202,16 @@ class PlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
 
-        val eqProcessor = ParametricEqProcessor()
-        EqController.attachProcessor(eqProcessor)
-
-        // Headphone correction (AutoEq) is its own stage now, independent of
-        // the graphic EQ above -- a second ParametricEqProcessor instance,
-        // attached to AutoEqController instead (AutoEq split, Task 1).
-        val autoEqProcessor = ParametricEqProcessor()
-        AutoEqController.attachProcessor(autoEqProcessor)
-
-        val replayGainProcessor = ReplayGainProcessor()
-        val bassBoostProcessor = BassBoostProcessor()
-        val balanceProcessor = BalanceProcessor()
-        val limiterProcessor = LimiterProcessor()
-        AudioFxController.attachReplayGain { state -> replayGainProcessor.updateState(state) }
-        AudioFxController.attachBassBoost { state -> bassBoostProcessor.updateState(state) }
-        AudioFxController.attachBalance { state -> balanceProcessor.updateState(state) }
-        AudioFxController.attachLimiter { state -> limiterProcessor.updateState(state) }
-        val rgGainRouter = RgGainRouter(serviceScope, replayGainProcessor)
-
-        val dataSourceFactory = ResolvingDataSource.Factory(
-            DefaultDataSource.Factory(this),
-            TidalUriResolver(Graph.resolver),
-        )
-
-        val renderersFactory = EqRenderersFactory(
-            this,
-            replayGainProcessor,
-            autoEqProcessor,
-            eqProcessor,
-            bassBoostProcessor,
-            balanceProcessor,
-            limiterProcessor,
-        )
-        val player = ExoPlayer.Builder(this, renderersFactory)
-            .setMediaSourceFactory(
-                DefaultMediaSourceFactory(dataSourceFactory)
-                    .setLoadErrorHandlingPolicy(AuxenLoadErrorPolicy()),
-            )
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(C.USAGE_MEDIA)
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                    .build(),
-                /* handleAudioFocus = */ true,
-            )
-            .setHandleAudioBecomingNoisy(true)
-            .setWakeMode(C.WAKE_MODE_NETWORK)
-            .build()
-
-        // Platform effects (below the in-process chain): attach here (after
-        // `player` exists, since reverb's route needs player.setAuxEffectInfo)
-        // so a settings change reaches whatever reverb/virtualizer instance
-        // currently exists, null-safely no-op'ing before the first one is
-        // built by rebuildSessionEffects (right after this).
-        AudioFxController.attachReverb { state -> applyReverb(state, player) }
-        AudioFxController.attachVirtualizer { state -> applyVirtualizer(state) }
+        // Build the initial player for whatever Bit-Perfect mode has been
+        // restored so far. BitPerfectController's DataStore restore is async, so
+        // this may still read the default (false) even when the persisted value
+        // is true; observeBitPerfect() below rebuilds if the settled value ends
+        // up differing -- exactly the same "restore lands after the fact" shape
+        // the effect controllers already have (they push restored state into
+        // their attached appliers once DataStore settles).
+        val bitPerfect = BitPerfectController.enabled.value
+        currentBitPerfect = bitPerfect
+        val player = buildPlayer(bitPerfect)
 
         // Sleep timer: collectLatest re-launches (cancelling any in-flight
         // delay) every time SleepTimerController's state changes, so a
@@ -295,6 +268,137 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
+        // Attach the platform effects, the main Player.Listener, and the
+        // audio-session-id kick -- all re-runnable per player, so a Bit-Perfect
+        // rebuild can re-wire a fresh player identically (see configurePlayer).
+        configurePlayer(player)
+
+        val sessionActivity = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+        mediaSession = MediaSession.Builder(this, player)
+            .setSessionActivity(sessionActivity)
+            .setCallback(AuxenSessionCallback())
+            .build()
+
+        setMediaNotificationProvider(
+            DefaultMediaNotificationProvider(this).apply {
+                setSmallIcon(R.drawable.ic_stat_auxen)
+            },
+        )
+
+        // Rebuild the player live whenever the Bit-Perfect mode flips (and to
+        // pick up the DataStore-restored value if it settles to something other
+        // than what the initial build used above).
+        observeBitPerfect()
+
+        // Restore the persisted queue paused: the user decides when to hit
+        // play, and no Tidal stream resolution happens until they do.
+        mainScope.launch {
+            val saved = withContext(Dispatchers.IO) { runCatching { Graph.queueStore.load() }.getOrNull() }
+                ?: return@launch
+            // Reference the LIVE session player, not the initial local, so a
+            // Bit-Perfect rebuild that swapped the player in the meantime can't
+            // leave us writing the queue into a released instance.
+            val p = mediaSession?.player ?: return@launch
+            if (p.mediaItemCount > 0) return@launch // a controller (or a rebuild) beat us to it
+            p.setMediaItems(saved.tracks.map(Graph::mediaItemFor), saved.index, saved.positionMs)
+            // No prepare(): stream resolution stays lazy until the user plays.
+        }
+    }
+
+    /**
+     * Builds a fully-wired [ExoPlayer] for the given [bitPerfect] mode: a fresh
+     * DSP processor set, every effect controller (re-)attached to those fresh
+     * instances, the ReplayGain router, and an [EqRenderersFactory] configured
+     * for [bitPerfect]. Does NOT install the main [Player.Listener], platform
+     * effects, or session id -- that is [configurePlayer]'s job, run right after
+     * this on both the initial build and every rebuild.
+     *
+     * Every controller `attachX`/`attachProcessor` REPLACES its previous
+     * applier/processor (single-applier design -- see [AudioFxController]/
+     * [EqController] KDoc), so a rebuild's fresh processors cleanly orphan the
+     * released player's processors instead of both being driven at once.
+     */
+    private fun buildPlayer(bitPerfect: Boolean): ExoPlayer {
+        val eqProcessor = ParametricEqProcessor()
+        EqController.attachProcessor(eqProcessor)
+
+        // Headphone correction (AutoEq) is its own stage now, independent of
+        // the graphic EQ above -- a second ParametricEqProcessor instance,
+        // attached to AutoEqController instead (AutoEq split, Task 1).
+        val autoEqProcessor = ParametricEqProcessor()
+        AutoEqController.attachProcessor(autoEqProcessor)
+
+        val replayGainProcessor = ReplayGainProcessor()
+        val bassBoostProcessor = BassBoostProcessor()
+        val balanceProcessor = BalanceProcessor()
+        val limiterProcessor = LimiterProcessor()
+        AudioFxController.attachReplayGain { state -> replayGainProcessor.updateState(state) }
+        AudioFxController.attachBassBoost { state -> bassBoostProcessor.updateState(state) }
+        AudioFxController.attachBalance { state -> balanceProcessor.updateState(state) }
+        AudioFxController.attachLimiter { state -> limiterProcessor.updateState(state) }
+        rgGainRouter = RgGainRouter(serviceScope, replayGainProcessor)
+
+        val dataSourceFactory = ResolvingDataSource.Factory(
+            DefaultDataSource.Factory(this),
+            TidalUriResolver(Graph.resolver),
+        )
+
+        val renderersFactory = EqRenderersFactory(
+            this,
+            replayGainProcessor,
+            autoEqProcessor,
+            eqProcessor,
+            bassBoostProcessor,
+            balanceProcessor,
+            limiterProcessor,
+            bitPerfect,
+        )
+        return ExoPlayer.Builder(this, renderersFactory)
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(dataSourceFactory)
+                    .setLoadErrorHandlingPolicy(AuxenLoadErrorPolicy()),
+            )
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .build(),
+                /* handleAudioFocus = */ true,
+            )
+            .setHandleAudioBecomingNoisy(true)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
+            .build()
+    }
+
+    /**
+     * Wires everything that must be attached AFTER an [ExoPlayer] is built --
+     * identical for the initial player and every Bit-Perfect rebuild: the
+     * platform reverb/virtualizer appliers (routed to THIS player), the main
+     * [Player.Listener], and the `setAudioSessionId(UNSET)` kick that fires
+     * `onAudioSessionIdChanged` -> [rebuildSessionEffects]. Each `attachX`
+     * REPLACES the previous player's applier (single-applier design), so
+     * re-running this for a new player cleanly re-points the platform effects
+     * and the RG router at it.
+     */
+    private fun configurePlayer(player: ExoPlayer) {
+        // The RG router built alongside THIS player in buildPlayer (captured as
+        // a local so the listener below closes over a stable, non-null value).
+        val router = rgGainRouter
+
+        // Platform effects (below the in-process chain): attach here (after
+        // `player` exists, since reverb's route needs player.setAuxEffectInfo)
+        // so a settings change reaches whatever reverb/virtualizer instance
+        // currently exists, null-safely no-op'ing before the first one is
+        // built by rebuildSessionEffects (right after this).
+        AudioFxController.attachReverb { state -> applyReverb(state, player) }
+        AudioFxController.attachVirtualizer { state -> applyVirtualizer(state) }
+
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 pendingPlayMediaId = mediaItem?.mediaId
@@ -304,7 +408,7 @@ class PlaybackService : MediaSessionService() {
                 maybeRecordPendingPlay(player)
                 scheduleQueueSave(player)
                 preResolveUpcoming(player)
-                rgGainRouter.route(mediaItem?.mediaId, player.playWhenReady)
+                router?.route(mediaItem?.mediaId, player.playWhenReady)
                 checkSleepTimerPause(player)
                 // Belt-and-suspenders: the AudioTrack (and therefore the
                 // platform effects attached to its session) can be recreated
@@ -364,7 +468,7 @@ class PlaybackService : MediaSessionService() {
                     // still paused (see RgGainRouter's "Lazy resolution"
                     // KDoc) -- this is the belt half of the belt-and-
                     // suspenders pair with onPlayWhenReadyChanged below.
-                    rgGainRouter.route(player.currentMediaItem?.mediaId, player.playWhenReady)
+                    router?.route(player.currentMediaItem?.mediaId, player.playWhenReady)
                     // On-device diagnostic (platform effects fix,
                     // user-confirmed device report, 2026-07-13): playback
                     // actually starting is the moment the user would notice
@@ -380,7 +484,7 @@ class PlaybackService : MediaSessionService() {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (playWhenReady) {
                     preResolveUpcoming(player)
-                    rgGainRouter.route(player.currentMediaItem?.mediaId, playWhenReady)
+                    router?.route(player.currentMediaItem?.mediaId, playWhenReady)
                 }
             }
 
@@ -466,34 +570,77 @@ class PlaybackService : MediaSessionService() {
         // Do not "simplify" this back to reading player.audioSessionId
         // directly: that was the original bug.
         player.setAudioSessionId(C.AUDIO_SESSION_ID_UNSET)
+    }
 
-        val sessionActivity = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-
-        mediaSession = MediaSession.Builder(this, player)
-            .setSessionActivity(sessionActivity)
-            .setCallback(AuxenSessionCallback())
-            .build()
-
-        setMediaNotificationProvider(
-            DefaultMediaNotificationProvider(this).apply {
-                setSmallIcon(R.drawable.ic_stat_auxen)
-            },
-        )
-
-        // Restore the persisted queue paused: the user decides when to hit
-        // play, and no Tidal stream resolution happens until they do.
+    /**
+     * Observes [BitPerfectController.enabled] and rebuilds the player whenever
+     * the mode flips. Collected on [mainScope] (the main thread) because
+     * ExoPlayer must only be touched from the thread that built it; the initial
+     * replayed value equals [currentBitPerfect], so it never triggers a
+     * spurious first rebuild.
+     */
+    private fun observeBitPerfect() {
         mainScope.launch {
-            val saved = withContext(Dispatchers.IO) { runCatching { Graph.queueStore.load() }.getOrNull() }
-                ?: return@launch
-            if (player.mediaItemCount > 0) return@launch // a controller beat us to it
-            player.setMediaItems(saved.tracks.map(Graph::mediaItemFor), saved.index, saved.positionMs)
-            // No prepare(): stream resolution stays lazy until the user plays.
+            BitPerfectController.enabled.collect { desired ->
+                if (desired != currentBitPerfect) {
+                    currentBitPerfect = desired
+                    rebuildPlayerForBitPerfect(desired)
+                }
+            }
         }
+    }
+
+    /**
+     * Rebuilds the ExoPlayer for a new [bitPerfect] mode. `setEnableFloatOutput`
+     * is fixed at sink construction, so switching modes requires a fresh player.
+     * A brief audible gap here is acceptable -- this is a deliberate settings
+     * action, not a hot path.
+     *
+     * Captures the live queue/position/flags, builds a new player with the new
+     * mode, swaps it into the (surviving) [MediaSession] -- so notification,
+     * lockscreen controls, and connected [androidx.media3.session.MediaController]s
+     * all keep working across the swap (Media3 supports `MediaSession.setPlayer`)
+     * -- re-wires it via [configurePlayer], then releases the old player.
+     */
+    private fun rebuildPlayerForBitPerfect(bitPerfect: Boolean) {
+        val session = mediaSession ?: return
+        val old = session.player as? ExoPlayer ?: return
+
+        val items = (0 until old.mediaItemCount).map { old.getMediaItemAt(it) }
+        val startIndex = old.currentMediaItemIndex.coerceAtLeast(0)
+        val startPositionMs = old.currentPosition.coerceAtLeast(0)
+        val playWhenReady = old.playWhenReady
+        val repeatMode = old.repeatMode
+        val shuffle = old.shuffleModeEnabled
+        // Preserve the lazy-resolution contract (see the queue-restore comment
+        // in onCreate): a paused, never-prepared restored queue (STATE_IDLE and
+        // not intending to play) must NOT be prepared here, or merely toggling
+        // Bit-Perfect would kick off Tidal stream resolution the user never
+        // asked for. Prepare only if the old player was already past IDLE or
+        // playback is actually intended.
+        val shouldPrepare = old.playbackState != Player.STATE_IDLE || playWhenReady
+
+        val newPlayer = buildPlayer(bitPerfect)
+        if (items.isNotEmpty()) {
+            newPlayer.setMediaItems(items, startIndex, startPositionMs)
+            if (shouldPrepare) newPlayer.prepare()
+        }
+        newPlayer.playWhenReady = playWhenReady
+        newPlayer.repeatMode = repeatMode
+        newPlayer.shuffleModeEnabled = shuffle
+
+        // Swap first so connected controllers (the UI) re-bind to the new
+        // player before the old one is torn down; the MediaSession itself (and
+        // thus the notification/controls) survives.
+        session.player = newPlayer
+        configurePlayer(newPlayer)
+
+        // The old player's platform effects were already released inside
+        // configurePlayer(newPlayer)'s rebuildSessionEffects (it releases the
+        // reverb/virtualizer fields before building the new session's). Clear
+        // its aux route defensively, then release it.
+        runCatching { old.clearAuxEffectInfo() }
+        old.release()
     }
 
     /** Snapshot the queue's Tracks from each item's metadata extras. */
@@ -927,7 +1074,38 @@ internal fun buildDspProcessorChain(
     encodingRestorerProcessor,
 )
 
-/** Renderers factory that injects the full DSP chain into a float-output audio sink. */
+/**
+ * The single Bit-Perfect -> float-output mapping, extracted as a pure function
+ * so the invariant can be unit-tested without constructing a real audio sink
+ * ([io.github.auxen.playback.BitPerfectFloatOutputTest]).
+ *
+ * - `false` (default, Bit-Perfect OFF): request INTEGER output. In Media3
+ *   1.5.1, `DefaultAudioSink` inserts the app AudioProcessor chain ONLY on its
+ *   integer path, so the WHOLE DSP chain (EQ, AutoEq, bass, balance, limiter,
+ *   ReplayGain) runs and output is 16-bit. This is the shipping behaviour and
+ *   MUST remain the default -- float-on silently skips `setAudioProcessors`
+ *   entirely, which was the "DSP does nothing" bug (dead on all routes for
+ *   float/hi-res sources). The integer path reduces hi-res to 16-bit before the
+ *   chain; each processor accepts 16-bit input (see their onConfigure) and
+ *   upconverts to float internally for headroom, and EncodingRestorerProcessor
+ *   converts back to 16-bit at the tail -- so this design already outputs
+ *   16-bit and loses nothing by running integer.
+ * - `true` (Bit-Perfect / Direct ON): request FLOAT output. The float path
+ *   delivers the untouched hi-res stream straight to the AudioTrack AND, by the
+ *   very same Media3 quirk above, skips the processor chain -- so ALL DSP is
+ *   auto-bypassed. Exactly a purist "direct" mode: full resolution, nothing
+ *   applied. (True float-through WITH DSP would need a custom/forked AudioSink
+ *   -- a tracked follow-up.)
+ */
+internal fun bitPerfectEnablesFloatOutput(bitPerfect: Boolean): Boolean = bitPerfect
+
+/**
+ * Renderers factory that injects the full DSP chain into the audio sink. When
+ * [bitPerfect] is false (default) the sink runs its integer path and the chain
+ * is active; when true it requests float output, which delivers untouched
+ * hi-res to the AudioTrack and (in Media3 1.5.1) auto-bypasses the chain. See
+ * [bitPerfectEnablesFloatOutput].
+ */
 @UnstableApi
 private class EqRenderersFactory(
     context: Context,
@@ -937,6 +1115,7 @@ private class EqRenderersFactory(
     private val bassBoostProcessor: BassBoostProcessor,
     private val balanceProcessor: BalanceProcessor,
     private val limiterProcessor: LimiterProcessor,
+    private val bitPerfect: Boolean,
 ) : DefaultRenderersFactory(context) {
 
     override fun buildAudioSink(
@@ -944,23 +1123,16 @@ private class EqRenderersFactory(
         enableFloatOutput: Boolean,
         enableAudioTrackPlaybackParams: Boolean,
     ): AudioSink = DefaultAudioSink.Builder(context)
-        // MUST stay false. In Media3 1.5.1, DefaultAudioSink inserts the app
-        // AudioProcessor chain ONLY on its integer path -- the float-output path
-        // skips setAudioProcessors entirely, silently bypassing the WHOLE DSP
-        // chain (EQ, AutoEq, bass, balance, limiter, ReplayGain) for any source
-        // that decodes to float. That was the "DSP does nothing" bug (dead on all
-        // routes for float/hi-res sources; ParametricEqProcessor's KDoc already
-        // noted it). The integer path reduces hi-res to 16-bit before the chain;
-        // each processor accepts 16-bit input (see their onConfigure) and
-        // upconverts to float internally for headroom, and EncodingRestorer-
-        // Processor converts back to 16-bit at the tail -- so this design already
-        // outputs 16-bit and loses nothing by running integer. (True float-through
-        // WITH DSP would require a custom/forked AudioSink -- a tracked follow-up.)
-        // Chain order is LAW (see ParametricEqProcessor's KDoc) -- ReplayGain
-        // first so a quiet track's boost has the same downstream headroom as
-        // everything else, Limiter last-but-one so it's the one stage
-        // allowed to clamp, catching whatever upstream boosts produced.
-        .setEnableFloatOutput(false)
+        // false (default) = integer path, DSP chain ACTIVE, 16-bit out (the
+        // shipping behaviour -- do NOT regress it; float-on skips the chain,
+        // which was the "DSP does nothing" bug). true = Bit-Perfect / Direct:
+        // float passthrough, ALL DSP auto-bypassed by Media3. Chain order is LAW
+        // (see ParametricEqProcessor's KDoc) -- ReplayGain first so a quiet
+        // track's boost has the same downstream headroom as everything else,
+        // Limiter last-but-one so it's the one stage allowed to clamp, catching
+        // whatever upstream boosts produced. The chain below is still installed
+        // in both modes; Media3 simply ignores it on the float path.
+        .setEnableFloatOutput(bitPerfectEnablesFloatOutput(bitPerfect))
         .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
         .setAudioProcessors(
             buildDspProcessorChain(

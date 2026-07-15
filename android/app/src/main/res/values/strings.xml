@@ -80,6 +80,9 @@
     <string name="settings_theme_light">Light</string>
 
     <string name="settings_playback_title">Playback</string>
+    <string name="settings_bit_perfect_label">Bit-Perfect / Direct</string>
+    <string name="settings_bit_perfect_subtitle">Plays audio untouched at full resolution; bypasses all DSP/EQ</string>
+    <string name="settings_bit_perfect_bypass_note">Direct mode is on — the equalizer and all effects below are bypassed.</string>
     <string name="settings_source_priority_label">Source priority</string>
     <string name="settings_source_priority_subtitle">Choose which source to prefer when a track is available from both</string>
     <string name="settings_source_priority_prefer_local">Prefer local</string>

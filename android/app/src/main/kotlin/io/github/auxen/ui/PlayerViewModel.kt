@@ -22,6 +22,7 @@ import com.google.common.util.concurrent.MoreExecutors
 import io.github.auxen.Graph
 import io.github.auxen.data.LibrarySort
 import io.github.auxen.db.PlaylistEntity
+import io.github.auxen.dsp.BitPerfectController
 import io.github.auxen.matching.DuplicateResolver
 import io.github.auxen.model.QueueEntry
 import io.github.auxen.model.SourcePriority
@@ -185,6 +186,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun clearQueue() {
         controller?.clearMediaItems()
     }
+
+    /**
+     * Bit-Perfect / Direct playback mode (Settings screen). Unlike [themeMode]/
+     * [sourcePriority], this is NOT restored/persisted through the VM: it is a
+     * DSP-pipeline setting owned by [BitPerfectController] (its own DataStore,
+     * initialized in `AuxenApp`), so the UI and the `PlaybackService` observe
+     * the exact same StateFlow. The VM just re-exposes it and forwards writes.
+     */
+    val bitPerfect: StateFlow<Boolean> = BitPerfectController.enabled
+
+    /** Toggle Bit-Perfect / Direct mode. The service rebuilds its player on change. */
+    fun setBitPerfect(enabled: Boolean) = BitPerfectController.setEnabled(enabled)
 
     /** Appearance choice, persisted under `color_scheme` (Settings screen). */
     val themeMode = MutableStateFlow(ThemeMode.SYSTEM)

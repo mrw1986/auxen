@@ -1040,10 +1040,12 @@ class ComponentScreenshotTest {
     // --- Settings screen (Desktop-Parity Screens, sub-batch A, Task 1) ---
     // Captures SettingsContent, the stateless body SettingsScreen delegates
     // to (same split as AutoEqPickerResults/TrackActionSheetContent) --
-    // takes plain themeMode/sourcePriority params, no live PlayerViewModel
-    // needed. Dark selected, Prefer Tidal selected -- neither is either
-    // enum's first entry, so a regression that silently fell back to the
-    // first option would be visible in the pixel diff.
+    // takes plain themeMode/sourcePriority/bitPerfect params, no live
+    // PlayerViewModel needed. Dark selected, Prefer Tidal selected, and
+    // Bit-Perfect ON -- none is its option's default (SYSTEM / PREFER_QUALITY
+    // / false), so a regression that silently fell back to the default would
+    // be visible in the pixel diff. Bit-Perfect ON also pins the switch's
+    // checked state and the Playback-section divider above source priority.
 
     @Test
     fun settingsScreen_light() = captureComponent("settings-screen-light", darkTheme = false) { SettingsPreview() }
@@ -1058,6 +1060,8 @@ class ComponentScreenshotTest {
             onThemeModeChange = {},
             sourcePriority = SourcePriority.PREFER_TIDAL,
             onSourcePriorityChange = {},
+            bitPerfect = true,
+            onBitPerfectChange = {},
         )
     }
 

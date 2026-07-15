@@ -15,6 +15,7 @@ import io.github.auxen.db.AuxenDatabase
 import io.github.auxen.dsp.AudioFxController
 import io.github.auxen.dsp.AutoEqController
 import io.github.auxen.dsp.AutoEqRepository
+import io.github.auxen.dsp.BitPerfectController
 import io.github.auxen.dsp.EqController
 import io.github.auxen.model.QueueEntry
 import io.github.auxen.model.Source
@@ -53,6 +54,11 @@ class AuxenApp : Application() {
         // state, not defaults from a race (AutoEq split, Task 1).
         AutoEqController.initialize(this)
         AudioFxController.initialize(this)
+        // Bit-Perfect / Direct playback toggle: a DataStore-backed boolean the
+        // PlaybackService observes to rebuild its player with float-passthrough
+        // (DSP-bypassed) or the integer DSP path. Independent of every effect
+        // controller above — it owns no AudioProcessor of its own.
+        BitPerfectController.initialize(this)
         restoreAutoEqProfile()
     }
 
