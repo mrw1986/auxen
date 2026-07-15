@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
@@ -55,8 +56,29 @@ import io.github.auxen.ui.theme.resolveDarkTheme
 /** A bottom-nav tab: its route, label, and icon. */
 private data class Destination(val route: String, val label: String, val icon: @Composable () -> Unit)
 
+/** The four primary bottom-nav destinations that show the brand top bar. */
+private val TAB_ROUTES = setOf("home", "library", "search", "collection")
+
 /** Global overlay routes pushed from the top bar, outside the tab back stacks. */
 private val OVERLAY_ROUTES = setOf("equalizer", "account", "settings", "queue", "tidal-official-debug")
+
+/**
+ * Short, static label for the context-aware back top bar on detail/overlay
+ * routes. Route strings keep their argument placeholders (e.g.
+ * `album/{album}/{artist}`) so they classify by pattern, not by filled value;
+ * the entity name is shown in each screen's own content header, not here.
+ */
+private fun topBarTitle(route: String?): String = when (route) {
+    "album/{album}/{artist}" -> "Album"
+    "artist/{artist}" -> "Artist"
+    "playlist/{playlistId}" -> "Playlist"
+    "settings" -> "Settings"
+    "queue" -> "Queue"
+    "equalizer" -> "Equalizer"
+    "account" -> "Account"
+    "tidal-official-debug" -> "Tidal Debug"
+    else -> ""
+}
 
 @UnstableApi
 class MainActivity : ComponentActivity() {
@@ -127,25 +149,45 @@ private fun MainScreen(viewModel: PlayerViewModel) {
 
     Scaffold(
         topBar = {
-            if (currentRoute != "nowplaying") {
-                CenterAlignedTopAppBar(
-                    // The top bar is the Android analog of the desktop sidebar
-                    // brand block; suppressed on "account", which shows its own
-                    // full BrandBlock at the top of its content instead, so the
-                    // brand appears exactly once per screen.
-                    title = { if (currentRoute != "account") BrandBlock(compact = true) },
-                    actions = {
-                        IconButton(onClick = { navController.navigate("equalizer") { launchSingleTop = true } }) {
-                            Icon(Icons.Filled.Equalizer, contentDescription = "Equalizer")
-                        }
-                        IconButton(onClick = { navController.navigate("settings") { launchSingleTop = true } }) {
-                            Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings_gear_a11y))
-                        }
-                        IconButton(onClick = { navController.navigate("account") { launchSingleTop = true } }) {
-                            Icon(Icons.Filled.Person, contentDescription = "Account")
-                        }
-                    },
-                )
+            when {
+                // Now Playing has its own in-screen top bar with a back arrow.
+                currentRoute == "nowplaying" -> Unit
+                // Primary bottom-nav tabs (and the initial null route before the
+                // start destination resolves): brand block + global overlay
+                // actions. The top bar is the Android analog of the desktop
+                // sidebar brand block.
+                currentRoute == null || currentRoute in TAB_ROUTES -> {
+                    CenterAlignedTopAppBar(
+                        title = { BrandBlock(compact = true) },
+                        actions = {
+                            IconButton(onClick = { navController.navigate("equalizer") { launchSingleTop = true } }) {
+                                Icon(Icons.Filled.Equalizer, contentDescription = "Equalizer")
+                            }
+                            IconButton(onClick = { navController.navigate("settings") { launchSingleTop = true } }) {
+                                Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings_gear_a11y))
+                            }
+                            IconButton(onClick = { navController.navigate("account") { launchSingleTop = true } }) {
+                                Icon(Icons.Filled.Person, contentDescription = "Account")
+                            }
+                        },
+                    )
+                }
+                // Detail (album/artist/playlist) + overlay (settings/queue/
+                // equalizer/account/tidal-debug) screens are pushed onto a tab's
+                // back stack: give them a persistent back affordance and a short
+                // static route label, and none of the tab-level actions -- they
+                // don't belong on a pushed screen, and each screen already shows
+                // the entity name in its own content header.
+                else -> {
+                    CenterAlignedTopAppBar(
+                        navigationIcon = {
+                            IconButton(onClick = { navController.popBackStack() }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            }
+                        },
+                        title = { Text(topBarTitle(currentRoute)) },
+                    )
+                }
             }
         },
         bottomBar = {
@@ -219,7 +261,6 @@ private fun MainScreen(viewModel: PlayerViewModel) {
                     viewModel,
                     album = backStack.arguments?.getString("album").orEmpty(),
                     artist = backStack.arguments?.getString("artist").orEmpty(),
-                    onBack = { navController.popBackStack() },
                     onOpenArtist = { artist -> navController.navigate("artist/${Uri.encode(artist)}") },
                 )
             }
@@ -227,7 +268,6 @@ private fun MainScreen(viewModel: PlayerViewModel) {
                 ArtistDetailScreen(
                     viewModel,
                     artist = backStack.arguments?.getString("artist").orEmpty(),
-                    onBack = { navController.popBackStack() },
                     onOpenAlbum = { album ->
                         navController.navigate("album/${Uri.encode(album.album)}/${Uri.encode(album.albumArtist)}")
                     },

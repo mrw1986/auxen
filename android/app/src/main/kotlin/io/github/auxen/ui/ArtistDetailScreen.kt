@@ -15,14 +15,12 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -60,7 +58,6 @@ import io.github.auxen.ui.theme.AuxenColors
 fun ArtistDetailScreen(
     viewModel: PlayerViewModel,
     artist: String,
-    onBack: () -> Unit,
     onOpenAlbum: (AlbumGroup) -> Unit,
 ) {
     val localTracks by viewModel.localTracks.collectAsState()
@@ -74,11 +71,6 @@ fun ArtistDetailScreen(
     val albums = groupAlbums(tracks)
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
-        item {
-            IconButton(onClick = onBack, modifier = Modifier.padding(4.dp)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
-        }
         item {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),

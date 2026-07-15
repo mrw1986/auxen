@@ -13,14 +13,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -56,7 +54,6 @@ fun AlbumDetailScreen(
     viewModel: PlayerViewModel,
     album: String,
     artist: String,
-    onBack: () -> Unit,
     onOpenArtist: (String) -> Unit,
 ) {
     val localTracks by viewModel.localTracks.collectAsState()
@@ -70,11 +67,6 @@ fun AlbumDetailScreen(
     val tracks = group?.tracks ?: emptyList()
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
-        item {
-            IconButton(onClick = onBack, modifier = Modifier.padding(4.dp)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
-        }
         item {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                 AsyncImage(
