@@ -8,6 +8,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import io.github.auxen.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 
@@ -41,6 +43,16 @@ internal fun validateRedirect(redirect: Uri, expectedState: String?): Result<Str
  */
 internal fun officialTokenNeedsRefresh(expiresAtMillis: Long, nowMillis: Long, skewMillis: Long): Boolean =
     nowMillis >= expiresAtMillis - skewMillis
+
+/**
+ * The access token to keep using when a proactive refresh FAILED: we refresh
+ * `REFRESH_SKEW_MS` *early*, so a token inside the skew window is usually still
+ * valid for real. Returns the token when it has genuinely not expired at
+ * [nowMillis], else null (re-login required). Pure so "a transient refresh
+ * failure must not read as a logout" is testable without a token endpoint.
+ */
+internal fun tokenAfterFailedRefresh(accessToken: String, expiresAtMillis: Long, nowMillis: Long): String? =
+    accessToken.takeIf { nowMillis < expiresAtMillis }
 
 /**
  * Orchestrates the official Tidal API's PKCE login end-to-end (Tidal
@@ -111,20 +123,39 @@ class TidalOfficialSession(
         return TidalOfficialAuth.Session(access, prefs[KEY_REFRESH], prefs[KEY_EXPIRES]?.toLongOrNull() ?: 0L)
     }
 
+    private val refreshMutex = Mutex()
+
     /**
      * A non-expired access token for the official API, refreshing if within
-     * [REFRESH_SKEW_MS] of expiry. Returns null when there is no session or
-     * the refresh fails (the caller should then prompt re-login). This is the
-     * single accessor every metadata call goes through.
+     * [REFRESH_SKEW_MS] of expiry. Returns null when there is no session or the
+     * token is genuinely expired and cannot be refreshed (the caller should then
+     * prompt re-login). This is the single accessor every metadata call goes through.
+     *
+     * Refresh is single-flight: concurrent callers queue on [refreshMutex] and the
+     * later ones re-read the store, so exactly one token-endpoint POST happens per
+     * expiry (Tidal may rotate the refresh token, so a concurrent second refresh
+     * could otherwise invalidate the session).
      */
     suspend fun validAccessToken(): String? {
         val session = storedSession() ?: return null
         if (!officialTokenNeedsRefresh(session.expiresAtMillis, clock(), REFRESH_SKEW_MS)) return session.accessToken
-        return refresh()?.accessToken
+        return refreshMutex.withLock {
+            // Re-read under the lock: a caller ahead of us may already have refreshed.
+            val current = storedSession() ?: return@withLock null
+            if (!officialTokenNeedsRefresh(current.expiresAtMillis, clock(), REFRESH_SKEW_MS)) {
+                return@withLock current.accessToken
+            }
+            refreshLocked()?.accessToken
+                ?: tokenAfterFailedRefresh(current.accessToken, current.expiresAtMillis, clock())
+        }
     }
 
     /** Refresh the access token; returns null when re-login is required. Mirrors [TidalAuth.refresh]. */
-    suspend fun refresh(): TidalOfficialAuth.Session? = withContext(Dispatchers.IO) {
+    suspend fun refresh(): TidalOfficialAuth.Session? = refreshMutex.withLock { refreshLocked() }
+
+    // The refresh body itself. Callers MUST already hold refreshMutex -- Mutex is
+    // NOT reentrant, so this must never take the lock itself.
+    private suspend fun refreshLocked(): TidalOfficialAuth.Session? = withContext(Dispatchers.IO) {
         val refreshToken = storedSession()?.refreshToken ?: return@withContext null
         val request = TidalOfficialAuth.buildRefreshRequest(clientId, refreshToken)
         client.newCall(request).execute().use { resp ->

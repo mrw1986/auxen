@@ -1,5 +1,7 @@
 package io.github.auxen.provider.tidal
 
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -99,21 +101,30 @@ class TidalMetadataRepository(
     // on process death). THE single source of the user id for any user/
     // collection-scoped call — Slice 2's resolveCollectionId() delegates here.
     @Volatile private var cachedUserId: String? = null
+    private val userIdMutex = Mutex()
 
     /**
      * The current user's id via `GET /users/me` (JSON:API `data.id`), cached
      * in-memory. Returns null when not logged in to the official API or the id
      * cannot be resolved (the caller should surface "sign in"). This is the
      * single accessor every user/collection-scoped call goes through.
+     *
+     * Double-checked under [userIdMutex] so concurrent first-callers resolve it
+     * once rather than each hitting `/users/me`; [cachedUserId] stays `@Volatile`
+     * because the fast path reads it outside the lock.
      */
     suspend fun currentUserId(): String? {
         cachedUserId?.let { return it }
-        val token = session.validAccessToken() ?: return null
-        val id = client.getUser("me", token)
-            .mapCatching { userIdFrom(it, json) ?: error("No user id in /users/me response") }
-            .getOrNull()
-        if (id != null) cachedUserId = id
-        return id
+        return userIdMutex.withLock {
+            // Re-check under the lock: a caller ahead of us may already have resolved it.
+            cachedUserId?.let { return@withLock it }
+            val token = session.validAccessToken() ?: return@withLock null
+            val id = client.getUser("me", token)
+                .mapCatching { userIdFrom(it, json) ?: error("No user id in /users/me response") }
+                .getOrNull()
+            if (id != null) cachedUserId = id
+            id
+        }
     }
 
     companion object {
