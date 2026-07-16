@@ -96,4 +96,58 @@ class TidalJsonApiTest {
         val view = TidalDocumentView(json.decodeFromString(doc), json)
         assertNull(view.primary!!.decodeAttributes<Name>(json))
     }
+
+    @Serializable data class ItemMeta(val trackNumber: Int? = null, val volumeNumber: Int? = null)
+
+    /** An album's `items`, where JSON:API puts per-linkage `meta` beside `{type,id}`. */
+    private val albumItemsDoc = """
+        {
+          "data": { "id": "10", "type": "albums",
+            "relationships": { "items": { "data": [
+              { "id": "t1", "type": "tracks", "meta": { "trackNumber": 4, "volumeNumber": 2 } },
+              { "id": "t2", "type": "tracks" }
+            ] } } },
+          "included": [
+            { "id": "t1", "type": "tracks", "attributes": { "title": "With Meta" } },
+            { "id": "t2", "type": "tracks", "attributes": { "title": "No Meta" } }
+          ]
+        }
+    """.trimIndent()
+
+    @Test
+    fun `relatedWithMeta exposes each linkage's meta alongside the resolved resource`() {
+        val view = TidalDocumentView(json.decodeFromString(albumItemsDoc), json)
+        val items = view.relatedWithMeta(view.primary!!, "items")
+        assertEquals(listOf("With Meta", "No Meta"), items.map { it.resource.decodeAttributes<Title>(json)?.title })
+        val meta = items.first().decodeMeta<ItemMeta>(json)
+        assertEquals(4, meta?.trackNumber)
+        assertEquals(2, meta?.volumeNumber)
+    }
+
+    @Test
+    fun `decodeMeta returns null when the linkage carries no meta`() {
+        val view = TidalDocumentView(json.decodeFromString(albumItemsDoc), json)
+        val items = view.relatedWithMeta(view.primary!!, "items")
+        assertNull(items[1].meta)
+        assertNull(items[1].decodeMeta<ItemMeta>(json))
+    }
+
+    /**
+     * Regression guard: the index is keyed by [TidalResourceId], which is built
+     * from meta-less `included` resources. If `meta` were ever added as a field
+     * there, data-class equality would compare it and a meta-carrying linkage
+     * would resolve to nothing — silently emptying every album tracklist.
+     */
+    @Test
+    fun `related resolves linkage that carries meta`() {
+        val view = TidalDocumentView(json.decodeFromString(albumItemsDoc), json)
+        val items = view.related(view.primary!!, "items")
+        assertEquals(listOf("t1", "t2"), items.map { it.id })
+    }
+
+    @Test
+    fun `relatedWithMeta yields empty for a missing relationship`() {
+        val view = TidalDocumentView(json.decodeFromString(artistDoc), json)
+        assertTrue(view.relatedWithMeta(view.primary!!, "doesNotExist").isEmpty())
+    }
 }

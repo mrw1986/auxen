@@ -2,6 +2,7 @@ package io.github.auxen.provider.tidal
 
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
@@ -52,6 +53,22 @@ data class TidalArtistDetail(
     val artworkUrl: String?,
     val similarArtists: List<ArtistLink>,
 )
+
+/**
+ * The `meta` an album's `items` linkage carries per resource identifier (field
+ * names verbatim from the cached spec's `Albums_Items_Resource_Identifier_Meta`,
+ * which marks both `required`).
+ *
+ * This is the ONLY source of real track numbering: `Tracks_Attributes` carries
+ * no track number, and these values sit on the LINKAGE, not on the track
+ * resource — which is why [albumDetailFrom] reads items via
+ * [TidalDocumentView.relatedWithMeta]. Both fields stay nullable/defaulted like
+ * every other DTO here; a meta-less document falls back to linkage position.
+ * (`itemCursor` is the third spec field, deliberately unmodelled: paging is
+ * Slice 2's, and nothing here reads it.)
+ */
+@Serializable
+data class AlbumItemMeta(val trackNumber: Int? = null, val volumeNumber: Int? = null)
 
 /** Full album detail: header art + metadata + ordered tracklist + similar albums. */
 data class TidalAlbumDetail(
@@ -193,21 +210,32 @@ fun biographyTextFrom(doc: TidalDocument, json: Json): String? =
         ?.takeIf { it.isNotBlank() }
 
 /**
- * Pure projection: compound album [TidalDocument] → [TidalAlbumDetail]. The
- * `items` relationship IS the tracklist; linkage order is the track order, so
- * each item is numbered by position (`Tracks_Attributes` carries no track
- * number — verified in the cached spec). Returns null when there is no primary
- * album.
+ * Pure projection: compound album [TidalDocument] → [TidalAlbumDetail]. Returns
+ * null when there is no primary album.
  *
- * **Positional numbering is single-volume-correct only.** The spec's
- * `Albums_Items_Resource_Identifier` carries the true `meta.trackNumber` /
- * `meta.volumeNumber` on the LINKAGE, but [TidalDocumentView.related] resolves
- * linkage to [TidalResource]s and drops `meta` — surfacing it would mean
- * changing the Foundation's `TidalJsonApi.kt` seam, which is outside this
- * slice. So a 2-volume album numbers 1..22 here rather than 1..12 then 1..10.
- * That is a known, deliberate limitation of Slice 1, not an oversight: if you
- * are here to fix per-volume numbering, the fix is a `relatedWithMeta` on the
- * document view, not a change to this function's loop.
+ * **The `items` linkage is not simply "the tracklist"**, and two spec facts
+ * shape how it is read:
+ *
+ * 1. **It can contain videos.**
+ *    `AlbumsItemsRelationshipUpdateOperation_Payload_Data.type` is
+ *    `enum: ["tracks", "videos"]`, so a deluxe edition may legitimately list
+ *    video items. They are filtered out. Projecting one through [trackFrom]
+ *    would mint a `Track(source = TIDAL, sourceId = <video id>)` whose
+ *    `auxen://tidal/<id>` resolves against the internal-v1 TRACK stream
+ *    endpoint and simply fails when tapped; Auxen has no video surface, so a
+ *    silently-unplayable row is strictly worse than an absent one. If a video
+ *    surface ever arrives, it wants its own projection and its own list — not a
+ *    `Track` that lies about what it is.
+ * 2. **The track numbers live on the LINKAGE, not the resource.**
+ *    `Tracks_Attributes` carries no track number; `Albums_Items_Resource_-
+ *    Identifier_Meta` carries `trackNumber`/`volumeNumber` and marks both
+ *    `required` — hence [TidalDocumentView.relatedWithMeta] here. Reading them
+ *    is what makes a 2-volume album number 1..12 then 1..10 rather than 1..22,
+ *    and what populates `discNumber` at all. Linkage position (`i + 1`) stays
+ *    the fallback for a meta-less document, which is single-volume-correct.
+ *
+ * Linkage order is preserved as the display order — `meta` supplies the
+ * numbering, never the sort.
  */
 fun albumDetailFrom(doc: TidalDocument, json: Json, artworkTargetPx: Int): TidalAlbumDetail? {
     val view = TidalDocumentView(doc, json)
@@ -226,10 +254,13 @@ fun albumDetailFrom(doc: TidalDocument, json: Json, artworkTargetPx: Int): Tidal
         releaseYear = releaseYearOf(a?.releaseDate),
         explicit = a?.explicit ?: false,
         artworkUrl = artworkUrl,
-        tracks = view.related(album, "items").mapIndexed { i, res ->
-            trackFrom(res, json, artistName = artistName, albumTitle = title, artworkUrl = artworkUrl)
-                .copy(trackNumber = i + 1)
-        },
+        tracks = view.relatedWithMeta(album, "items")
+            .filter { it.resource.type == "tracks" }
+            .mapIndexed { i, item ->
+                val meta = item.decodeMeta<AlbumItemMeta>(json)
+                trackFrom(item.resource, json, artistName = artistName, albumTitle = title, artworkUrl = artworkUrl)
+                    .copy(trackNumber = meta?.trackNumber ?: (i + 1), discNumber = meta?.volumeNumber)
+            },
         similarAlbums = view.related(album, "similarAlbums").map { albumSummaryFrom(it, view, json, artworkTargetPx) },
     )
 }
