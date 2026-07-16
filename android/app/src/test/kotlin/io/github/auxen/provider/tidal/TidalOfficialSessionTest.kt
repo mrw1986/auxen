@@ -140,6 +140,12 @@ class TidalOfficialSessionTest {
      * body, so nothing opens a socket (no live HTTP, no MockWebServer dep).
      * Counts only `grant_type=refresh_token` POSTs -- the initial exchange that
      * seeds the session goes through the same client.
+     *
+     * The seeded and refreshed responses carry *different* placeholder values so
+     * assertions can tell WHICH one a caller ended up holding: a caller that
+     * queued on the mutex must come back with the refreshed value, proving it
+     * re-read the store under the lock rather than returning the stale value it
+     * read before queueing.
      */
     private class CannedTokenTransport : Interceptor {
         val refreshCalls = AtomicInteger(0)
@@ -153,7 +159,9 @@ class TidalOfficialSessionTest {
             // refresh long-lived, so a caller that queued on the mutex re-reads
             // a fresh session and does NOT refresh a second time.
             val expiresIn = if (isRefresh) 3600 else 30
-            val body = """{"access_token":"a","refresh_token":"r","token_type":"Bearer","expires_in":$expiresIn}"""
+            val access = if (isRefresh) REFRESHED else SEEDED
+            val body =
+                """{"access_token":"$access","refresh_token":"$access-r","token_type":"Bearer","expires_in":$expiresIn}"""
             return Response.Builder()
                 .request(request)
                 .protocol(Protocol.HTTP_1_1)
@@ -161,6 +169,12 @@ class TidalOfficialSessionTest {
                 .message("OK")
                 .body(body.toResponseBody("application/json".toMediaType()))
                 .build()
+        }
+
+        companion object {
+            /** Throwaway placeholders, not tokens -- distinct so callers are distinguishable. */
+            const val SEEDED = "seeded-placeholder"
+            const val REFRESHED = "refreshed-placeholder"
         }
     }
 
@@ -190,9 +204,18 @@ class TidalOfficialSessionTest {
         }
 
         // Tidal may rotate the refresh token, so a second concurrent refresh could
-        // POST an already-consumed one and break the session.
+        // POST an already-consumed one and break the session. This is THE
+        // single-flight proof: without the mutex both callers reach the endpoint.
         assertEquals("refresh must be single-flight", 1, transport.refreshCalls.get())
         assertEquals("both callers get a token", 2, tokens.filterNotNull().size)
-        assertEquals("and it is the same token", 1, tokens.toSet().size)
+        // Both must hold the REFRESHED value: the one caller that queued on the
+        // mutex has to re-read the store under the lock, not hand back the stale
+        // pre-lock read. (Distinct canned values make this assertion real -- with
+        // one shared canned value it could not fail.)
+        assertEquals(
+            "both callers end on the refreshed token",
+            listOf(CannedTokenTransport.REFRESHED, CannedTokenTransport.REFRESHED),
+            tokens,
+        )
     }
 }
