@@ -121,6 +121,15 @@ class TidalMetadataRepository(
         return Result.success(projected.copy(biography = bio))
     }
 
+    /** Full album detail: metadata, ordered tracklist, cover art, similar albums. */
+    suspend fun albumDetail(albumId: String): Result<TidalAlbumDetail> {
+        val token = session.validAccessToken()
+            ?: return Result.failure(IllegalStateException("Not logged in to the official Tidal API"))
+        return client.getAlbum(albumId, token, ALBUM_DETAIL_INCLUDE, countryCode).mapCatching { doc ->
+            albumDetailFrom(doc, json, ARTWORK_TARGET_PX) ?: error("Album $albumId not found")
+        }
+    }
+
     /** Resolve the artist + album ids (and isrc) for a Tidal track — the detail-fetch entry point. */
     suspend fun trackRelations(trackId: String): Result<TrackRelations> {
         val token = session.validAccessToken()
@@ -181,6 +190,13 @@ class TidalMetadataRepository(
 
         /** The relationship endpoint's own include — without it the document has a `{type,id}` and no bio text. */
         val BIOGRAPHY_INCLUDE = listOf("biography")
+
+        // The four relationships the album page renders, all real per the spec's
+        // Albums_Relationships. Unlike the artist's `albums`/`tracks`, `items` IS
+        // the album's authoritative tracklist (a bounded, ordered list), so the
+        // include is the right mechanism here.
+        val ALBUM_DETAIL_INCLUDE = listOf("items", "artists", "coverArt", "similarAlbums")
+
         const val ARTWORK_TARGET_PX = 640
     }
 }

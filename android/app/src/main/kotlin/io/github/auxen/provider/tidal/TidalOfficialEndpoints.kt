@@ -104,6 +104,20 @@ object TidalOfficialEndpoints {
         return authed(url, accessToken)
     }
 
+    /** `GET /albums/{id}` with `?include=...` (items/artists/coverArt/similarAlbums). `countryCode` optional per spec. */
+    fun albumRequest(
+        id: String,
+        accessToken: String,
+        include: List<String> = emptyList(),
+        countryCode: String? = null,
+    ): Request {
+        val url = "$BASE/albums/$id".toHttpUrl().newBuilder()
+            .apply { countryCode?.let { addQueryParameter("countryCode", it) } }
+            .apply { include.forEach { addQueryParameter("include", it) } }
+            .build()
+        return authed(url, accessToken)
+    }
+
     /**
      * `GET /users/{id}` — pass `id = "me"` for the authenticated user's
      * resource (spec convention). THE single source of the numeric user id for

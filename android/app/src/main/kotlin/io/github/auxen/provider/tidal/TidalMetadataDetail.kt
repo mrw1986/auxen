@@ -53,6 +53,20 @@ data class TidalArtistDetail(
     val similarArtists: List<ArtistLink>,
 )
 
+/** Full album detail: header art + metadata + ordered tracklist + similar albums. */
+data class TidalAlbumDetail(
+    val id: String,
+    val title: String,
+    val artistName: String,
+    val artistId: String?,
+    val albumType: String?,
+    val releaseYear: Int?,
+    val explicit: Boolean,
+    val artworkUrl: String?,
+    val tracks: List<Track>,
+    val similarAlbums: List<AlbumSummary>,
+)
+
 /** Best-fit artwork URL for [resource]'s named artwork [relationship], or null when not included/absent. */
 internal fun TidalDocumentView.artworkUrlFor(
     resource: TidalResource,
@@ -177,6 +191,48 @@ fun biographyTextFrom(doc: TidalDocument, json: Json): String? =
         ?.decodeAttributes<ArtistBiographyAttributes>(json)
         ?.text
         ?.takeIf { it.isNotBlank() }
+
+/**
+ * Pure projection: compound album [TidalDocument] → [TidalAlbumDetail]. The
+ * `items` relationship IS the tracklist; linkage order is the track order, so
+ * each item is numbered by position (`Tracks_Attributes` carries no track
+ * number — verified in the cached spec). Returns null when there is no primary
+ * album.
+ *
+ * **Positional numbering is single-volume-correct only.** The spec's
+ * `Albums_Items_Resource_Identifier` carries the true `meta.trackNumber` /
+ * `meta.volumeNumber` on the LINKAGE, but [TidalDocumentView.related] resolves
+ * linkage to [TidalResource]s and drops `meta` — surfacing it would mean
+ * changing the Foundation's `TidalJsonApi.kt` seam, which is outside this
+ * slice. So a 2-volume album numbers 1..22 here rather than 1..12 then 1..10.
+ * That is a known, deliberate limitation of Slice 1, not an oversight: if you
+ * are here to fix per-volume numbering, the fix is a `relatedWithMeta` on the
+ * document view, not a change to this function's loop.
+ */
+fun albumDetailFrom(doc: TidalDocument, json: Json, artworkTargetPx: Int): TidalAlbumDetail? {
+    val view = TidalDocumentView(doc, json)
+    val album = view.primary ?: return null
+    val a = album.decodeAttributes<AlbumAttributes>(json)
+    val title = a?.title.orEmpty()
+    val artistRes = view.related(album, "artists").firstOrNull()
+    val artistName = artistRes?.decodeAttributes<ArtistAttributes>(json)?.name.orEmpty()
+    val artworkUrl = view.artworkUrlFor(album, "coverArt", json, artworkTargetPx)
+    return TidalAlbumDetail(
+        id = album.id,
+        title = title,
+        artistName = artistName,
+        artistId = artistRes?.id,
+        albumType = a?.albumType,
+        releaseYear = releaseYearOf(a?.releaseDate),
+        explicit = a?.explicit ?: false,
+        artworkUrl = artworkUrl,
+        tracks = view.related(album, "items").mapIndexed { i, res ->
+            trackFrom(res, json, artistName = artistName, albumTitle = title, artworkUrl = artworkUrl)
+                .copy(trackNumber = i + 1)
+        },
+        similarAlbums = view.related(album, "similarAlbums").map { albumSummaryFrom(it, view, json, artworkTargetPx) },
+    )
+}
 
 /**
  * The Tidal-only half of the artist discography: every [remote] album whose

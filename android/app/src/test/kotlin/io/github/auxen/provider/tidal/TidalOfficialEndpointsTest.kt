@@ -107,6 +107,19 @@ class TidalOfficialEndpointsTest {
     }
 
     @Test
+    fun `album request carries include params and the country code`() {
+        val request = TidalOfficialEndpoints.albumRequest(
+            id = "9876", accessToken = "tok-123",
+            include = listOf("items", "artists", "coverArt", "similarAlbums"), countryCode = "GB",
+        )
+        val url = request.url
+        assertEquals("/v2/albums/9876", url.encodedPath)
+        assertEquals(listOf("items", "artists", "coverArt", "similarAlbums"), url.queryParameterValues("include"))
+        assertEquals("GB", url.queryParameter("countryCode"))
+        assertEquals("Bearer tok-123", request.header("Authorization"))
+    }
+
+    @Test
     fun `artist request omits the country code when not supplied`() {
         val request = TidalOfficialEndpoints.artistRequest(
             id = "100",
