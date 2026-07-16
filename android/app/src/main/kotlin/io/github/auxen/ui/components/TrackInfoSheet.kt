@@ -59,7 +59,13 @@ internal fun TrackInfoSheetContent(detail: TidalTrackDetail?, loading: Boolean) 
             .padding(horizontal = 24.dp, vertical = 8.dp)
             .verticalScroll(rememberScrollState()),
     ) {
-        Text(detail?.title ?: "Track info", style = MaterialTheme.typography.titleMedium)
+        // `?.takeIf { it.isNotBlank() }`, not a bare elvis: TidalTrackDetail.title
+        // is a non-null String projected with `.orEmpty()`
+        // (TidalMetadataDetail.kt:354), so a document whose title attribute is
+        // absent/blank resolves to "" and a bare elvis would never fire — leaving
+        // an EMPTY header instead of the placeholder. Same trap, same fix as the
+        // album header (AlbumDetailScreen.kt:111).
+        Text(detail?.title?.takeIf { it.isNotBlank() } ?: "Track info", style = MaterialTheme.typography.titleMedium)
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
         if (detail == null) {
             if (loading) LoadingState() else Text("No details available.")
@@ -81,8 +87,12 @@ internal fun TrackInfoSheetContent(detail: TidalTrackDetail?, loading: Boolean) 
                         modifier = Modifier.padding(bottom = 6.dp),
                     )
                 }
+                // Inside the block, not after it: this Spacer separates Credits
+                // FROM Lyrics, so a track with no credits must not pay for it —
+                // otherwise its "Lyrics" header sits 12dp lower than the divider
+                // intends, for no reason a reader could see.
+                Spacer(Modifier.height(12.dp))
             }
-            Spacer(Modifier.height(12.dp))
             Text("Lyrics", style = MaterialTheme.typography.titleSmall)
             Text(
                 // Plain text when there is any; otherwise say which of the two

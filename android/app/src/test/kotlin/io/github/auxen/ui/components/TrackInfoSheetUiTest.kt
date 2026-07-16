@@ -1,11 +1,19 @@
 package io.github.auxen.ui.components
 
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
 import io.github.auxen.provider.tidal.TidalTrackDetail
 import io.github.auxen.provider.tidal.TrackCredit
 import io.github.auxen.ui.testutil.TEST_DEVICE
 import io.github.auxen.ui.theme.AuxenTheme
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -23,13 +31,18 @@ import org.robolectric.annotation.Config
  * window whose animated entrance never settles under Robolectric. The stateless
  * `Column` renders in the main composition and asserts reproducibly.
  *
- * ## Why the `loading` branch is not covered here
+ * ## The `loading` branch IS covered — see [showLoading]
  * `loading && detail == null` renders [LoadingState], whose
- * `CircularProgressIndicator` is an INDEFINITE animation — it never leaves the
- * clock without awaiters, so `waitForIdle()` (which every node query runs
- * internally) would never settle and would throw `AppNotIdleException`. No test
- * in this repo renders a spinner for exactly that reason. That branch closes on
- * the task's on-device checkpoint, per the plan's Global Constraints.
+ * `CircularProgressIndicator` is an INDEFINITE animation, so the auto-advancing
+ * default clock never idles and `waitForIdle()` (which every node query runs
+ * internally) throws `AppNotIdleException`. Stopping the clock with
+ * `mainClock.autoAdvance = false` before `setContent` renders it deterministically
+ * at frame 0 — see [showLoading]'s KDoc for why the repo's two standing
+ * `autoAdvance` cautions do not apply to this shape.
+ *
+ * What still closes on-device (and cannot be pinned here) is the branch's *live*
+ * behaviour: that a real failed fetch flips `loading` false so the sheet settles
+ * on the notice. The static frames on both sides of that flip are pinned here.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = TEST_DEVICE)
@@ -61,6 +74,34 @@ class TrackInfoSheetUiTest {
             }
         }
         compose.waitForIdle()
+    }
+
+    /**
+     * The `loading && detail == null` branch, which [show] cannot render.
+     *
+     * [LoadingState]'s `CircularProgressIndicator` is an INDEFINITE animation:
+     * it always leaves an awaiter on the clock, so the auto-advancing default
+     * never reaches idle and `waitForIdle()` — which every node query runs
+     * internally — throws `AppNotIdleException`. Pinning `autoAdvance = false`
+     * BEFORE `setContent` stops the clock driving that animation, so composition
+     * and layout settle and the queries resolve against a spinner frozen at
+     * frame 0.
+     *
+     * Note the two `autoAdvance = false` cautions elsewhere in this repo do not
+     * apply here, and are worth distinguishing rather than pattern-matching:
+     * `TrackActionSheetUiTest`'s AlertDialog+OutlinedTextField never idles for a
+     * different root cause (it fails inside `setContent` itself, before any
+     * clock manipulation can help), and `FxSectionsDebounceFlushTest` needs
+     * `waitForIdle()` to process a disposal that a stopped clock would withhold.
+     * This test asserts on a static frame and awaits nothing.
+     */
+    private fun showLoading() {
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            AuxenTheme(darkTheme = true) {
+                TrackInfoSheetContent(detail = null, loading = true)
+            }
+        }
     }
 
     @Test
@@ -116,5 +157,47 @@ class TrackInfoSheetUiTest {
         compose.onNodeWithText("Track info").assertExists()
         compose.onNodeWithText("No details available.").assertExists()
         compose.onNodeWithText("Lyrics").assertDoesNotExist()
+    }
+
+    @Test
+    fun blankTitleFallsBackToThePlaceholderHeader() {
+        // `title` is projected with `.orEmpty()`, so an absent title attribute
+        // arrives as "" on a perfectly resolved document — a bare elvis would
+        // render an empty header. Pins the `?.takeIf { it.isNotBlank() }`.
+        show(detail().copy(title = ""))
+
+        compose.onNodeWithText("Track info").assertExists()
+    }
+
+    @Test
+    fun loadingWithNoDetailShowsTheSpinnerAndNotTheFallbackNotice() {
+        // The branch the on-device checkpoint would otherwise be the ONLY
+        // evidence for. Two things are pinned:
+        //  1. loading && detail == null renders the spinner and NOT
+        //     "No details available." — i.e. a failure settling on the notice
+        //     (settledWithNoDetailShowsTheFallbackNotice) is a real transition,
+        //     not a state the sheet was already in.
+        //  2. LoadingState's `fillMaxSize()` sits inside a `verticalScroll`ed
+        //     Column here — an UNBOUNDED-height context, unlike the bounded
+        //     `fillMaxSize()` Columns it was written for. `fillMaxHeight` no-ops
+        //     when `!constraints.hasBoundedHeight`, so the Box wraps its content
+        //     instead of blowing the scroll content up to Constraints.Infinity.
+        //     The height assert is what would catch that regressing.
+        showLoading()
+
+        compose.onNode(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.ProgressBarRangeInfo,
+                ProgressBarRangeInfo.Indeterminate,
+            ),
+        ).assertExists()
+        compose.onNodeWithText("Track info").assertExists()
+        compose.onNodeWithText("No details available.").assertDoesNotExist()
+        // Title + divider + a wrapped 40dp spinner in 32dp padding is ~150dp.
+        // An unbounded-height leak would measure orders of magnitude past this.
+        // (Compose 1.7.6's bounds API has assertHeightIsAtLeast/EqualTo but no
+        // AtMost, hence the explicit bounds read.)
+        val height = compose.onRoot().getUnclippedBoundsInRoot().height
+        assertTrue("spinner frame measured $height — fillMaxSize leaked", height < 600.dp)
     }
 }
