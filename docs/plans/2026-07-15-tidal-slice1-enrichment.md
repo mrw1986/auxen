@@ -2430,6 +2430,8 @@ Consumes `loadAlbumDetail`/`albumDetail` added in Task 6. Compose; closes on-dev
 
 **Files:**
 - Modify: `android/app/src/main/kotlin/io/github/auxen/ui/AlbumDetailScreen.kt`
+- Modify: `android/app/src/main/kotlin/io/github/auxen/ui/MainActivity.kt` — the album composable's call site: pass the `tidalAlbumId` nav arg and the widened `onOpenArtist`. (This is not new scope: Step 4's commit block below always staged it, and the screen's param list cannot change without it. The Files list had simply omitted it.)
+- Modify: `android/app/src/main/kotlin/io/github/auxen/ui/PlayerViewModel.kt` — **accepted scope extension (review round 1).** `loadAlbumDetail`'s early return must clear `albumDetailLoading`; without it the flag stays `true` forever on "Tidal album in flight → back → local-only album", because the cancelled job's `finally` is key-guarded and its key has already been superseded. Task 6 authored that function, but **Task 7 is the first consumer of the flag** and the only task that can expose the bug, so the one-line fix lands here rather than reopening a closed task. Accepted in `be46073` rather than split out; see the Task 7 report, Concern 1.
 
 **Interfaces:**
 - Consumes: `PlayerViewModel.albumDetail`, `.loadAlbumDetail`; `onOpenArtist: (name, tidalArtistId) -> Unit`, `tidalAlbumId: String?` (from Task 6 nav).
@@ -2469,7 +2471,8 @@ Locally-built APK: open a Tidal-backed album (e.g. from the enriched artist disc
 
 ```bash
 git add android/app/src/main/kotlin/io/github/auxen/ui/AlbumDetailScreen.kt \
-        android/app/src/main/kotlin/io/github/auxen/ui/MainActivity.kt
+        android/app/src/main/kotlin/io/github/auxen/ui/MainActivity.kt \
+        android/app/src/main/kotlin/io/github/auxen/ui/PlayerViewModel.kt
 git commit -m "feat(android): remote-backed album detail (metadata, full tracklist, cover art)
 
 AlbumDetailScreen overlays the official-API album document — real cover

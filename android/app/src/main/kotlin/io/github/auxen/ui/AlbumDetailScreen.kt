@@ -189,9 +189,12 @@ fun AlbumDetailScreen(
                 // is no local list here to block, and `loading` is untouched).
                 // Without it a Tidal-only album reads "no tracks" for the whole
                 // remote round-trip, since the local `loading` is already false.
-                // The finally in loadAlbumDetail always clears this, so an album
-                // genuinely not on Tidal still settles to EmptyState rather than
-                // a stuck spinner.
+                // [PlayerViewModel.loadAlbumDetail] clears this flag on EVERY
+                // exit, so the spinner always settles: the launched job's
+                // `finally`, AND its early return, which is the path an album
+                // genuinely not on Tidal takes — no job is launched for it, so
+                // there is no `finally` to clear it and the early return must
+                // (and does) do it itself. Keep those two in sync with this.
                 if (loading || albumDetailLoading) {
                     LoadingState()
                 } else {
