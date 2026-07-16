@@ -81,6 +81,30 @@ object TidalOfficialEndpoints {
     }
 
     /**
+     * `GET /artists/{id}/relationships/biography` — the biography fallback.
+     *
+     * Probed on-device 2026-07-16: `GET /artists/8405?include=biography` came
+     * back with an EMPTY biography, so the bio does not reliably arrive in the
+     * artist document's `included`. This endpoint is the direct fetch. Per the
+     * spec its params are `id`, `countryCode`, `include` (example: `biography`),
+     * and it answers `Artists_Single_Relationship_Data_Document` — `data` is a
+     * bare `{type,id}` identifier, so **`?include=biography` is load-bearing**:
+     * without it the response carries no bio text at all.
+     */
+    fun artistBiographyRequest(
+        id: String,
+        accessToken: String,
+        include: List<String> = emptyList(),
+        countryCode: String? = null,
+    ): Request {
+        val url = "$BASE/artists/$id/relationships/biography".toHttpUrl().newBuilder()
+            .apply { countryCode?.let { addQueryParameter("countryCode", it) } }
+            .apply { include.forEach { addQueryParameter("include", it) } }
+            .build()
+        return authed(url, accessToken)
+    }
+
+    /**
      * `GET /users/{id}` — pass `id = "me"` for the authenticated user's
      * resource (spec convention). THE single source of the numeric user id for
      * any user/collection-scoped call (see [TidalMetadataRepository.currentUserId]).

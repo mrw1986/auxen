@@ -92,6 +92,21 @@ class TidalOfficialEndpointsTest {
     }
 
     @Test
+    fun `artist biography relationship request carries the include and country code`() {
+        val request = TidalOfficialEndpoints.artistBiographyRequest(
+            id = "8405", accessToken = "tok-123",
+            include = listOf("biography"), countryCode = "US",
+        )
+        val url = request.url
+        assertEquals("/v2/artists/8405/relationships/biography", url.encodedPath)
+        // Without ?include=biography the response carries only a {type,id}
+        // identifier and no bio text — the include is load-bearing, not cosmetic.
+        assertEquals(listOf("biography"), url.queryParameterValues("include"))
+        assertEquals("US", url.queryParameter("countryCode"))
+        assertEquals("Bearer tok-123", request.header("Authorization"))
+    }
+
+    @Test
     fun `artist request omits the country code when not supplied`() {
         val request = TidalOfficialEndpoints.artistRequest(
             id = "100",

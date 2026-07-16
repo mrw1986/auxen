@@ -45,6 +45,14 @@ class TidalOfficialClient(private val client: OkHttpClient) {
         countryCode: String? = null,
     ): Result<TidalDocument> = execute(TidalOfficialEndpoints.artistRequest(id, accessToken, include, countryCode))
 
+    /** Fetch an artist's biography relationship document (see [TidalOfficialEndpoints.artistBiographyRequest]). */
+    suspend fun getArtistBiography(
+        id: String,
+        accessToken: String,
+        include: List<String>,
+        countryCode: String? = null,
+    ): Result<TidalDocument> = execute(TidalOfficialEndpoints.artistBiographyRequest(id, accessToken, include, countryCode))
+
     /** Fetch a user as a JSON:API compound document (`id = "me"` for the current user). */
     suspend fun getUser(id: String, accessToken: String): Result<TidalDocument> =
         execute(TidalOfficialEndpoints.userRequest(id, accessToken))

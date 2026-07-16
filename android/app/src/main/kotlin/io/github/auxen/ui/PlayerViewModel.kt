@@ -313,16 +313,72 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             val artistName = rel.artistId?.let { repo.artistOverview(it).getOrNull()?.name }
+            // Slice 1 Task 3: prove the artist id official-v2 just handed us is
+            // ALSO accepted by internal-v1, which is where the discography, the
+            // top tracks and the by-name id resolution all come from (official
+            // v2's ?include= returns an arbitrary page). Names/titles/ids only —
+            // never a token, never a full request URL.
+            val artistId = rel.artistId
+            val discography = artistId?.let { Graph.tidal.artistAlbums(it) }.orEmpty()
+            val top = artistId?.let { Graph.tidal.artistTopTracks(it) }.orEmpty()
+            // Decision 4, both directions: the real name must resolve, and a
+            // near-miss must resolve to NOTHING rather than to a nearby artist.
+            val exactHit = artistName?.let { Graph.tidal.searchArtistIdExact(it) }
+            val nearMissName = artistName?.let { "$it Zzz" }
+            val nearMissHit = nearMissName?.let { Graph.tidal.searchArtistIdExact(it) }
             _tidalIdProbeStatus.value = buildString {
                 appendLine("Track id $id resolves on the official v2 API (same catalog id).")
                 appendLine("ISRC: ${rel.isrc ?: "—"}")
-                appendLine("Artist: ${artistName ?: "—"} (id ${rel.artistId ?: "—"})")
+                appendLine("Artist: ${artistName ?: "—"} (id ${artistId ?: "—"})")
                 appendLine("Album id: ${rel.albumId ?: "—"}")
                 appendLine(
-                    if (rel.artistId != null && rel.albumId != null) {
+                    if (artistId != null && rel.albumId != null) {
                         "PASS — the internal-v1 track id is the same catalog id the official v2 API accepts."
                     } else {
                         "PARTIAL — track resolved but a relationship was missing; inspect the ids above."
+                    },
+                )
+                appendLine()
+                appendLine("Discography (internal-v1 artists/$artistId/albums?limit=50): ${discography.size}")
+                discography.take(8).forEach { appendLine("  • ${it.title} (${it.albumType ?: "—"}, ${it.releaseYear ?: "—"})") }
+                appendLine(
+                    if (discography.isEmpty()) {
+                        "FAIL — internal-v1 returned no albums for artist id $artistId. Either the " +
+                            "official-v2 artist id is NOT an internal-v1 artist id, or you are not logged in " +
+                            "on the internal-v1 path (Account → Log in to Tidal). Task 3's discography " +
+                            "depends on this — do not build Task 6 until it passes."
+                    } else {
+                        "PASS — the official-v2 artist id is accepted by internal-v1."
+                    },
+                )
+                appendLine()
+                appendLine("Top tracks (internal-v1 artists/$artistId/toptracks?limit=50): ${top.size}")
+                top.take(8).forEach { appendLine("  • ${it.title}") }
+                appendLine(
+                    if (top.isEmpty()) {
+                        "FAIL — internal-v1 returned no top tracks for artist id $artistId. Task 3's " +
+                            "top-tracks section depends on this — do not build Task 6 until it passes."
+                    } else {
+                        "PASS — toptracks answered. EYEBALL THE ORDER: it must read like the artist's " +
+                            "best-known songs, not an arbitrary page of remixes/B-sides."
+                    },
+                )
+                appendLine()
+                appendLine("Exact-match search for \"${artistName ?: "—"}\": id ${exactHit ?: "null"}")
+                appendLine("Near-miss search for \"${nearMissName ?: "—"}\": id ${nearMissHit ?: "null"}")
+                appendLine(
+                    when {
+                        exactHit == null ->
+                            "FAIL — the exact name did not resolve. Decision 4's fallback would never fire; " +
+                                "check the internal-v1 login and the `types=artists` param."
+                        nearMissHit != null ->
+                            "FAIL — a NEAR-MISS resolved to id $nearMissHit. artistIdFromSearch is matching " +
+                                "fuzzily; it must require an exact case-insensitive name match. This is the " +
+                                "desktop bug we are here to NOT ship."
+                        exactHit != artistId ->
+                            "PARTIAL — the exact name resolved to $exactHit but the track's artist id is " +
+                                "$artistId. Two artists share this name; inspect before relying on the fallback."
+                        else -> "PASS — exact name resolves to the same artist id; a near-miss resolves to nothing."
                     },
                 )
             }
