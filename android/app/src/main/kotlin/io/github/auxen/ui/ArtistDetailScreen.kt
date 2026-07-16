@@ -99,6 +99,7 @@ fun ArtistDetailScreen(
     val detail by viewModel.artistDetail.collectAsState()
     val remoteAlbums by viewModel.artistAlbums.collectAsState()
     val topTracks by viewModel.artistTopTracks.collectAsState()
+    val artistDetailLoading by viewModel.artistDetailLoading.collectAsState()
     // The seed MUST be a track whose PRIMARY artist is this screen's artist.
     // `tracks` is filtered on `it.artist == artist || it.albumArtist == artist`,
     // and trackRelations takes related(track,"artists").first() — the primary
@@ -270,7 +271,17 @@ fun ArtistDetailScreen(
         // but a full merged one, and must render the list rather than "no tracks".
         if (displayTracks.isEmpty()) {
             item {
-                if (loading) {
+                // `artistDetailLoading` may spin the EMPTY list — never the
+                // populated one (we are inside displayTracks.isEmpty(), so there
+                // is no local list here to block, and `loading` is untouched).
+                // Without it a Tidal-only artist (a similar-artist tap) reads
+                // "no tracks" for the whole remote round-trip, since the local
+                // `loading` is already false — and that round-trip is the slow
+                // path, because an empty biography forces a second sequential
+                // fetch. The finally in loadArtistDetail always clears this, so
+                // an artist genuinely not on Tidal still settles to EmptyState
+                // rather than a stuck spinner.
+                if (loading || artistDetailLoading) {
                     LoadingState()
                 } else {
                     EmptyState(

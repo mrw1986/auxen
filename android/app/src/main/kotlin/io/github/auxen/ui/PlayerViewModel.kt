@@ -411,10 +411,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     val artistTopTracks = MutableStateFlow<List<Track>>(emptyList())
     val artistDetailLoading = MutableStateFlow(false)
     private var artistDetailKey: String? = null
+    private var artistDetailJob: Job? = null
 
     val albumDetail = MutableStateFlow<io.github.auxen.provider.tidal.TidalAlbumDetail?>(null)
     val albumDetailLoading = MutableStateFlow(false)
     private var albumDetailKey: String? = null
+    private var albumDetailJob: Job? = null
 
     /**
      * Load remote artist enrichment. Resolves the artist id through the chain in
@@ -437,49 +439,85 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
      * The official artist document and the two internal-v1 lists are fetched off
      * ONE resolved id and each is allowed to fail on its own: a missing
      * discography must not cost us the biography, and vice versa.
+     *
+     * **Why every write is guarded on [key] and not just by `cancel()`** — do not
+     * "simplify" these checks away. `cancel()` alone cannot stop a superseded
+     * load dead, because the internal-v1 provider wraps its network reads in
+     * `runCatching { get(...) }` (e.g. `TidalProvider.artistAlbums`), and
+     * `runCatching` catches `Throwable` — **including the `CancellationException`
+     * that cancellation delivers**. A cancelled loader therefore resumes with
+     * `emptyList()` in hand and runs on until its next REAL suspension point; a
+     * `MutableStateFlow` write is not one. Without the [key] guard it would still
+     * clobber the winner's discography with an empty list and clear the winner's
+     * spinner early. The guard is the actual correctness mechanism; `cancel()` is
+     * the optimisation that stops the wasted request.
      */
     fun loadArtistDetail(artistName: String, tidalArtistId: String?, seedTidalTrackId: String?) {
         val key = "$artistName|$tidalArtistId|$seedTidalTrackId"
         if (key == artistDetailKey) return
         artistDetailKey = key
+        // Cancel the load this one supersedes. An artist page legitimately calls
+        // this TWICE for the same artist: once while the local library is still
+        // loading (seedTidalTrackId = null, so the id resolves via the exact-name
+        // search) and again when the seed lands (resolving precisely via
+        // trackRelations). Those are two different keys, so both run — and
+        // LaunchedEffect restarting cancels only ITS OWN coroutine, never the
+        // viewModelScope job below. Unguarded, the two race and whichever network
+        // round-trip lands LAST wins: for two Tidal artists sharing an exact
+        // name, that is the WRONG artist's bio on the page. Same cancel-and-
+        // relaunch idiom as searchDebounceJob/loginJob.
+        artistDetailJob?.cancel()
         artistDetail.value = null
         artistAlbums.value = emptyList()
         artistTopTracks.value = emptyList()
-        viewModelScope.launch {
+        artistDetailJob = viewModelScope.launch {
             artistDetailLoading.value = true
             try {
                 val artistId = tidalArtistId
                     ?: seedTidalTrackId?.let { Graph.tidalMetadata.trackRelations(it).getOrNull()?.artistId }
                     ?: Graph.tidal.searchArtistIdExact(artistName)
                     ?: return@launch
-                Graph.tidalMetadata.artistDetail(artistId).onSuccess { artistDetail.value = it }
+                Graph.tidalMetadata.artistDetail(artistId).onSuccess {
+                    if (artistDetailKey == key) artistDetail.value = it
+                }
                 // Internal-v1, per the artist-lists decision. Neither throws
                 // (both return empty on any failure), so neither can take down
                 // the official detail resolved just above, nor each other.
-                artistAlbums.value = Graph.tidal.artistAlbums(artistId)
-                artistTopTracks.value = Graph.tidal.artistTopTracks(artistId)
+                // Published one at a time, in this order, so the discography row
+                // appears as soon as it lands instead of waiting on top tracks.
+                val albums = Graph.tidal.artistAlbums(artistId)
+                if (artistDetailKey == key) artistAlbums.value = albums
+                val top = Graph.tidal.artistTopTracks(artistId)
+                if (artistDetailKey == key) artistTopTracks.value = top
             } finally {
-                artistDetailLoading.value = false
+                if (artistDetailKey == key) artistDetailLoading.value = false
             }
         }
     }
 
-    /** Load remote album enrichment. Symmetric to [loadArtistDetail]; consumed by AlbumDetailScreen (Task 7). */
+    /**
+     * Load remote album enrichment. Symmetric to [loadArtistDetail]; consumed by
+     * AlbumDetailScreen (Task 7) — including its cancel-and-key-guard, which is
+     * load-bearing for exactly the same reason and is documented there.
+     */
     fun loadAlbumDetail(album: String, artist: String, tidalAlbumId: String?, seedTidalTrackId: String?) {
         val key = "$album|$artist|$tidalAlbumId|$seedTidalTrackId"
         if (key == albumDetailKey) return
         albumDetailKey = key
+        albumDetailJob?.cancel()
         albumDetail.value = null
         if (tidalAlbumId == null && seedTidalTrackId == null) return
-        viewModelScope.launch {
+        albumDetailJob = viewModelScope.launch {
             albumDetailLoading.value = true
             try {
                 val albumId = tidalAlbumId
                     ?: Graph.tidalMetadata.trackRelations(seedTidalTrackId!!).getOrNull()?.albumId
                     ?: return@launch
-                Graph.tidalMetadata.albumDetail(albumId).onSuccess { albumDetail.value = it }
+                Graph.tidalMetadata.albumDetail(albumId).onSuccess {
+                    if (albumDetailKey == key) albumDetail.value = it
+                }
             } finally {
-                albumDetailLoading.value = false
+                if (albumDetailKey == key) albumDetailLoading.value = false
             }
         }
     }
