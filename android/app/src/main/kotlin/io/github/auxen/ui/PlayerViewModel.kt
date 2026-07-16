@@ -385,6 +385,105 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---- Slice 1: official-API detail enrichment (overlays local grouping) ----
+    val artistDetail = MutableStateFlow<io.github.auxen.provider.tidal.TidalArtistDetail?>(null)
+
+    /**
+     * The artist discography, from INTERNAL-v1 (`artists/{id}/albums`) — a
+     * separate flow from [artistDetail] because it is a separate API and a
+     * separate call. [io.github.auxen.provider.tidal.TidalMetadataRepository]'s
+     * constructor is frozen and holds no internal-v1 provider, so this
+     * composition happens here, not there. Empty means "no discography" (not
+     * logged in to internal-v1, unknown artist, or the call failed) — the row
+     * simply falls back to local albums.
+     */
+    val artistAlbums = MutableStateFlow<List<io.github.auxen.provider.tidal.AlbumSummary>>(emptyList())
+
+    /**
+     * The artist's top tracks in POPULARITY order, from INTERNAL-v1
+     * (`artists/{id}/toptracks`) — same reasoning as [artistAlbums]: separate
+     * API, separate call, composed here because the repository cannot reach the
+     * internal-v1 provider. Empty means "no top tracks", and the screen then
+     * shows the plain local track list exactly as it does today
+     * ([io.github.auxen.provider.tidal.mergeArtistTracks] returns the local list
+     * untouched on an empty top-tracks list).
+     */
+    val artistTopTracks = MutableStateFlow<List<Track>>(emptyList())
+    val artistDetailLoading = MutableStateFlow(false)
+    private var artistDetailKey: String? = null
+
+    val albumDetail = MutableStateFlow<io.github.auxen.provider.tidal.TidalAlbumDetail?>(null)
+    val albumDetailLoading = MutableStateFlow(false)
+    private var albumDetailKey: String? = null
+
+    /**
+     * Load remote artist enrichment. Resolves the artist id through the chain in
+     * the plan's *Artist-id resolution*, then fans out to the reads. Keyed so a
+     * recomposition/re-navigation to the same artist does not refetch.
+     *
+     * The id chain, in order — first hit wins:
+     *  1. [tidalArtistId] — already known (a similar-artist tap).
+     *  2. [seedTidalTrackId] → `trackRelations` → artistId (gate-proven, precise).
+     *  3. `searchArtistIdExact(artistName)` — internal-v1, EXACT name match only.
+     *  4. null → no remote enrichment; the screen renders exactly as today.
+     *
+     * Step 3 also catches the case where a seed exists but `trackRelations`
+     * fails, which is why it is an elvis fallthrough rather than an else-branch.
+     *
+     * There is deliberately **no early return** for "no id and no seed": that
+     * artist is exactly who step 3 exists for. `searchArtistIdExact` is one
+     * request, only on artist-page open, and the key guard stops it repeating.
+     *
+     * The official artist document and the two internal-v1 lists are fetched off
+     * ONE resolved id and each is allowed to fail on its own: a missing
+     * discography must not cost us the biography, and vice versa.
+     */
+    fun loadArtistDetail(artistName: String, tidalArtistId: String?, seedTidalTrackId: String?) {
+        val key = "$artistName|$tidalArtistId|$seedTidalTrackId"
+        if (key == artistDetailKey) return
+        artistDetailKey = key
+        artistDetail.value = null
+        artistAlbums.value = emptyList()
+        artistTopTracks.value = emptyList()
+        viewModelScope.launch {
+            artistDetailLoading.value = true
+            try {
+                val artistId = tidalArtistId
+                    ?: seedTidalTrackId?.let { Graph.tidalMetadata.trackRelations(it).getOrNull()?.artistId }
+                    ?: Graph.tidal.searchArtistIdExact(artistName)
+                    ?: return@launch
+                Graph.tidalMetadata.artistDetail(artistId).onSuccess { artistDetail.value = it }
+                // Internal-v1, per the artist-lists decision. Neither throws
+                // (both return empty on any failure), so neither can take down
+                // the official detail resolved just above, nor each other.
+                artistAlbums.value = Graph.tidal.artistAlbums(artistId)
+                artistTopTracks.value = Graph.tidal.artistTopTracks(artistId)
+            } finally {
+                artistDetailLoading.value = false
+            }
+        }
+    }
+
+    /** Load remote album enrichment. Symmetric to [loadArtistDetail]; consumed by AlbumDetailScreen (Task 7). */
+    fun loadAlbumDetail(album: String, artist: String, tidalAlbumId: String?, seedTidalTrackId: String?) {
+        val key = "$album|$artist|$tidalAlbumId|$seedTidalTrackId"
+        if (key == albumDetailKey) return
+        albumDetailKey = key
+        albumDetail.value = null
+        if (tidalAlbumId == null && seedTidalTrackId == null) return
+        viewModelScope.launch {
+            albumDetailLoading.value = true
+            try {
+                val albumId = tidalAlbumId
+                    ?: Graph.tidalMetadata.trackRelations(seedTidalTrackId!!).getOrNull()?.albumId
+                    ?: return@launch
+                Graph.tidalMetadata.albumDetail(albumId).onSuccess { albumDetail.value = it }
+            } finally {
+                albumDetailLoading.value = false
+            }
+        }
+    }
+
     private fun libraryTabName(index: Int) = when (index) {
         0 -> "albums"
         1 -> "artists"

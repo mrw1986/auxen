@@ -58,6 +58,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import io.github.auxen.R
 import io.github.auxen.ui.components.BrandBlock
 import io.github.auxen.ui.components.MiniPlayerBar
@@ -87,8 +88,8 @@ private val MAX_CONTENT_WIDTH = 840.dp
  * the entity name is shown in each screen's own content header, not here.
  */
 private fun topBarTitle(route: String?): String = when (route) {
-    "album/{album}/{artist}" -> "Album"
-    "artist/{artist}" -> "Artist"
+    "album/{album}/{artist}?tidalAlbumId={tidalAlbumId}" -> "Album"
+    "artist/{artist}?tidalArtistId={tidalArtistId}" -> "Artist"
     "playlist/{playlistId}" -> "Playlist"
     "settings" -> "Settings"
     "queue" -> "Queue"
@@ -169,6 +170,16 @@ private fun MainScreen(viewModel: PlayerViewModel, widthSizeClass: WindowWidthSi
     )
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
+
+    // Detail routes carry an OPTIONAL Tidal catalog id (Slice 1 enrichment):
+    // present when we already know it (a discography/similar-artist drill-in),
+    // absent for ordinary local navigation, which behaves exactly as before.
+    // Ids are numeric catalog strings, so only the free-text name segments need
+    // encoding.
+    fun artistRoute(name: String, tidalArtistId: String? = null): String =
+        "artist/${Uri.encode(name)}" + (tidalArtistId?.let { "?tidalArtistId=$it" } ?: "")
+    fun albumRoute(album: String, artist: String, tidalAlbumId: String? = null): String =
+        "album/${Uri.encode(album)}/${Uri.encode(artist)}" + (tidalAlbumId?.let { "?tidalAlbumId=$it" } ?: "")
 
     // Compact width (folded phone / narrow) keeps the bottom NavigationBar;
     // medium/expanded (unfolded foldable, tablet) moves nav to a leading
@@ -318,27 +329,33 @@ private fun MainScreen(viewModel: PlayerViewModel, widthSizeClass: WindowWidthSi
                     composable("library") {
                         LibraryScreen(
                             viewModel,
-                            onOpenAlbum = { album ->
-                                navController.navigate("album/${Uri.encode(album.album)}/${Uri.encode(album.albumArtist)}")
-                            },
-                            onOpenArtist = { artist -> navController.navigate("artist/${Uri.encode(artist)}") },
+                            onOpenAlbum = { album -> navController.navigate(albumRoute(album.album, album.albumArtist)) },
+                            onOpenArtist = { artist -> navController.navigate(artistRoute(artist)) },
                         )
                     }
-                    composable("album/{album}/{artist}") { backStack ->
+                    composable(
+                        "album/{album}/{artist}?tidalAlbumId={tidalAlbumId}",
+                        arguments = listOf(navArgument("tidalAlbumId") { nullable = true; defaultValue = null }),
+                    ) { backStack ->
                         AlbumDetailScreen(
                             viewModel,
                             album = backStack.arguments?.getString("album").orEmpty(),
                             artist = backStack.arguments?.getString("artist").orEmpty(),
-                            onOpenArtist = { artist -> navController.navigate("artist/${Uri.encode(artist)}") },
+                            onOpenArtist = { artist -> navController.navigate(artistRoute(artist)) },
                         )
                     }
-                    composable("artist/{artist}") { backStack ->
+                    composable(
+                        "artist/{artist}?tidalArtistId={tidalArtistId}",
+                        arguments = listOf(navArgument("tidalArtistId") { nullable = true; defaultValue = null }),
+                    ) { backStack ->
                         ArtistDetailScreen(
                             viewModel,
                             artist = backStack.arguments?.getString("artist").orEmpty(),
-                            onOpenAlbum = { album ->
-                                navController.navigate("album/${Uri.encode(album.album)}/${Uri.encode(album.albumArtist)}")
+                            tidalArtistId = backStack.arguments?.getString("tidalArtistId"),
+                            onOpenAlbum = { album, artist, tidalAlbumId ->
+                                navController.navigate(albumRoute(album, artist, tidalAlbumId))
                             },
+                            onOpenArtist = { name, id -> navController.navigate(artistRoute(name, id)) },
                         )
                     }
                     composable("search") { SearchScreen(viewModel) }
@@ -346,10 +363,8 @@ private fun MainScreen(viewModel: PlayerViewModel, widthSizeClass: WindowWidthSi
                         CollectionScreen(
                             viewModel,
                             onOpenPlaylist = { id -> navController.navigate("playlist/$id") },
-                            onOpenAlbum = { album ->
-                                navController.navigate("album/${Uri.encode(album.album)}/${Uri.encode(album.albumArtist)}")
-                            },
-                            onOpenArtist = { artist -> navController.navigate("artist/${Uri.encode(artist)}") },
+                            onOpenAlbum = { album -> navController.navigate(albumRoute(album.album, album.albumArtist)) },
+                            onOpenArtist = { artist -> navController.navigate(artistRoute(artist)) },
                         )
                     }
                     composable("playlist/{playlistId}") { backStack ->
