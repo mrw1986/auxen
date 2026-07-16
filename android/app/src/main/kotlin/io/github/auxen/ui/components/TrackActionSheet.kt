@@ -14,6 +14,7 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.AlertDialog
@@ -37,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import io.github.auxen.db.PlaylistEntity
+import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.ui.theme.AuxenColors
 
@@ -44,6 +46,10 @@ import io.github.auxen.ui.theme.AuxenColors
  * Long-press action sheet — the mobile substitute for the desktop
  * TrackContextMenu (Play / Play Next / Add to Queue / Favorite /
  * Add to Playlist / New Playlist).
+ *
+ * [onShowInfo] is optional: a host that has nowhere to show the credits/lyrics
+ * sheet simply omits it and the action is not offered (see
+ * [TrackActionSheetContent]).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,6 +64,7 @@ fun TrackActionSheet(
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: (Long) -> Unit,
     onCreatePlaylist: (String) -> Unit,
+    onShowInfo: (() -> Unit)? = null,
 ) {
     var showPlaylists by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
@@ -77,6 +84,9 @@ fun TrackActionSheet(
             onAddToPlaylist = { id -> onAddToPlaylist(id); onDismiss() },
             onShowPlaylists = { showPlaylists = true },
             onNewPlaylist = { showNameDialog = true },
+            // Dismiss FIRST, then open the info sheet: two stacked
+            // ModalBottomSheets would otherwise contend for the same surface.
+            onShowInfo = onShowInfo?.let { { it(); onDismiss() } },
         )
     }
 
@@ -128,6 +138,7 @@ internal fun TrackActionSheetContent(
     onAddToPlaylist: (Long) -> Unit,
     onShowPlaylists: () -> Unit,
     onNewPlaylist: () -> Unit,
+    onShowInfo: (() -> Unit)? = null,
 ) {
     Column(modifier = Modifier.padding(bottom = 24.dp)) {
         Text(
@@ -158,6 +169,15 @@ internal fun TrackActionSheetContent(
                 },
             ) { onToggleFavorite() }
             SheetAction("Add to playlist", { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) }) { onShowPlaylists() }
+            // Tidal only, and only when the host can actually show the sheet.
+            // Credits and lyrics come from the official metadata API keyed on the
+            // track's CATALOG id, so there is nothing to fetch for a local
+            // MediaStore track — offering the action would open an empty sheet.
+            // The null-handler half of the gate is also what keeps the
+            // `action-sheet-*` goldens (a TIDAL fixture, no handler) stable.
+            if (track.source == Source.TIDAL && onShowInfo != null) {
+                SheetAction("Credits & lyrics", { Icon(Icons.Filled.Info, null) }) { onShowInfo() }
+            }
         } else {
             SheetAction("New playlist…", { Icon(Icons.Filled.Add, null) }) { onNewPlaylist() }
             playlists.forEach { playlist ->

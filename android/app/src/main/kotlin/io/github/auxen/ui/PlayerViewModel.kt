@@ -536,6 +536,54 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    val trackDetail = MutableStateFlow<io.github.auxen.provider.tidal.TidalTrackDetail?>(null)
+    val trackDetailLoading = MutableStateFlow(false)
+    private var trackDetailToken = 0L
+    private var trackDetailJob: Job? = null
+
+    /**
+     * Load credits + lyrics for a Tidal track (its sourceId IS the catalog id —
+     * no resolution needed).
+     *
+     * **The token guard is the same stale-write mechanism [loadArtistDetail] and
+     * [loadAlbumDetail] document at length**, and it is load-bearing here for the
+     * same reason: the info sheet is opened per-track, so long-pressing track A,
+     * dismissing mid-flight and opening track B leaves A's request in the air. If
+     * A lands last, its `onSuccess` would clobber B's — and since the sheet reads
+     * its header from [TidalTrackDetail.title], the user would sit on a sheet
+     * showing A's title, A's credits and A's lyrics with no way to tell it is
+     * stale except to notice the title. Cancelling A helps (unlike the
+     * internal-v1 reads, `Graph.tidalMetadata.trackDetail` lets a
+     * `CancellationException` propagate — `mapCatching` never sees it, because
+     * the client's own `withContext` rethrows on the way out), but cancellation
+     * is not instantaneous and A's `finally` still races B's spinner. The guard
+     * is what actually settles both.
+     *
+     * **A monotonic token, not the siblings' string key** — deliberately. Their
+     * key doubles as a dedup ("same artist → don't refetch"); this load must NOT
+     * dedup, because [clearTrackDetail] empties the flow on every dismiss, so
+     * re-opening the SAME track has to refetch or the sheet would stay blank
+     * forever. The token identifies the newest load and nothing else.
+     */
+    fun loadTrackDetail(track: Track) {
+        trackDetail.value = null
+        if (!track.isTidal) return
+        val token = ++trackDetailToken
+        trackDetailJob?.cancel()
+        trackDetailJob = viewModelScope.launch {
+            trackDetailLoading.value = true
+            try {
+                Graph.tidalMetadata.trackDetail(track.sourceId).onSuccess {
+                    if (trackDetailToken == token) trackDetail.value = it
+                }
+            } finally {
+                if (trackDetailToken == token) trackDetailLoading.value = false
+            }
+        }
+    }
+
+    fun clearTrackDetail() { trackDetail.value = null }
+
     private fun libraryTabName(index: Int) = when (index) {
         0 -> "albums"
         1 -> "artists"

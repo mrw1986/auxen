@@ -44,6 +44,7 @@ import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.LoadingState
 import io.github.auxen.ui.components.SourceBadge
 import io.github.auxen.ui.components.TrackActionSheet
+import io.github.auxen.ui.components.TrackInfoSheet
 import io.github.auxen.ui.theme.AuxenColors
 
 /**
@@ -69,6 +70,7 @@ fun AlbumDetailScreen(
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     var sheetTrack by remember { mutableStateOf<Track?>(null) }
+    var infoTrack by remember { mutableStateOf<Track?>(null) }
 
     // The track pool comes from the local scan ([libraryLoading]) and the
     // favorites DB read ([collectionLoading]); until both resolve an unresolved
@@ -229,6 +231,18 @@ fun AlbumDetailScreen(
             onToggleFavorite = { viewModel.toggleFavorite(track) },
             onAddToPlaylist = { viewModel.addToPlaylist(track, it) },
             onCreatePlaylist = { viewModel.createPlaylistAndAdd(track, it) },
+            onShowInfo = { infoTrack = track },
+        )
+    }
+
+    infoTrack?.let { track ->
+        val detail by viewModel.trackDetail.collectAsState()
+        val detailLoading by viewModel.trackDetailLoading.collectAsState()
+        LaunchedEffect(track) { viewModel.loadTrackDetail(track) }
+        TrackInfoSheet(
+            detail = detail,
+            loading = detailLoading,
+            onDismiss = { infoTrack = null; viewModel.clearTrackDetail() },
         )
     }
 }

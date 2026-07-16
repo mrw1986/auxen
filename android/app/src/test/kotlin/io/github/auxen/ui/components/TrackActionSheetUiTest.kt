@@ -180,6 +180,96 @@ class TrackActionSheetUiTest {
         assertEquals(null, createdName)
     }
 
+    /**
+     * The "Credits & lyrics" action is gated on BOTH `track.source == TIDAL` and
+     * a non-null `onShowInfo` — the three tests below pin each half of that gate
+     * plus the happy path. The LOCAL case is the one that matters: credits and
+     * lyrics come from the official Tidal metadata API keyed on the track's
+     * catalog id, so the action is meaningless (and would open an empty sheet)
+     * for a MediaStore track.
+     */
+    @Test
+    fun creditsActionShownForTidalTrackAndInvokesHandler() {
+        var infoShown = 0
+        var dismissed = 0
+        compose.setContent {
+            AuxenTheme(darkTheme = true) {
+                TrackActionSheet(
+                    track = track(source = Source.TIDAL),
+                    isFavorite = false,
+                    playlists = playlists,
+                    onDismiss = { dismissed++ },
+                    onPlay = {},
+                    onPlayNext = {},
+                    onEnqueue = {},
+                    onToggleFavorite = {},
+                    onAddToPlaylist = {},
+                    onCreatePlaylist = {},
+                    onShowInfo = { infoShown++ },
+                )
+            }
+        }
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Credits & lyrics").performSemanticsAction(SemanticsActions.OnClick)
+
+        // The sheet must dismiss as it opens the info sheet — two stacked
+        // ModalBottomSheets would otherwise fight for the same surface.
+        assertEquals(1, infoShown)
+        assertEquals(1, dismissed)
+    }
+
+    @Test
+    fun creditsActionAbsentForLocalTrack() {
+        compose.setContent {
+            AuxenTheme(darkTheme = true) {
+                TrackActionSheet(
+                    track = track(source = Source.LOCAL),
+                    isFavorite = false,
+                    playlists = playlists,
+                    onDismiss = {},
+                    onPlay = {},
+                    onPlayNext = {},
+                    onEnqueue = {},
+                    onToggleFavorite = {},
+                    onAddToPlaylist = {},
+                    onCreatePlaylist = {},
+                    onShowInfo = {},
+                )
+            }
+        }
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Credits & lyrics").assertDoesNotExist()
+        compose.onNodeWithText("Add to playlist").assertExists()
+    }
+
+    @Test
+    fun creditsActionAbsentWhenHostProvidesNoHandler() {
+        compose.setContent {
+            AuxenTheme(darkTheme = true) {
+                TrackActionSheet(
+                    track = track(source = Source.TIDAL),
+                    isFavorite = false,
+                    playlists = playlists,
+                    onDismiss = {},
+                    onPlay = {},
+                    onPlayNext = {},
+                    onEnqueue = {},
+                    onToggleFavorite = {},
+                    onAddToPlaylist = {},
+                    onCreatePlaylist = {},
+                )
+            }
+        }
+        compose.waitForIdle()
+
+        // A host that cannot show the sheet (no `onShowInfo`) must not offer a
+        // dead action. This is also what keeps the `action-sheet-*` Roborazzi
+        // goldens — captured from a TIDAL fixture with no handler — stable.
+        compose.onNodeWithText("Credits & lyrics").assertDoesNotExist()
+    }
+
     @Test
     fun favoriteLabelReflectsState() {
         compose.setContent {
