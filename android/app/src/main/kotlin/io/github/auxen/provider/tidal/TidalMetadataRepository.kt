@@ -130,6 +130,15 @@ class TidalMetadataRepository(
         }
     }
 
+    /** Track credits + lyrics (+ similar tracks) as a compound document projection. */
+    suspend fun trackDetail(trackId: String): Result<TidalTrackDetail> {
+        val token = session.validAccessToken()
+            ?: return Result.failure(IllegalStateException("Not logged in to the official Tidal API"))
+        return client.getTrackMetadata(trackId, token, TRACK_DETAIL_INCLUDE, countryCode).mapCatching { doc ->
+            trackDetailFrom(doc, json, ARTWORK_TARGET_PX) ?: error("Track $trackId not found")
+        }
+    }
+
     /** Resolve the artist + album ids (and isrc) for a Tidal track — the detail-fetch entry point. */
     suspend fun trackRelations(trackId: String): Result<TrackRelations> {
         val token = session.validAccessToken()
@@ -196,6 +205,14 @@ class TidalMetadataRepository(
         // the album's authoritative tracklist (a bounded, ordered list), so the
         // include is the right mechanism here.
         val ALBUM_DETAIL_INCLUDE = listOf("items", "artists", "coverArt", "similarAlbums")
+
+        // All four are real Tracks_Relationships per the spec. "artists" earns its
+        // place only by naming the PRIMARY track's artist, which trackDetailFrom
+        // then carries onto the similar-track rows — see that function's KDoc for
+        // why those rows' own artists are unreachable from this document.
+        // TidalTrackDetail has no artist field of its own: the sheet already knows
+        // the track it was opened from.
+        val TRACK_DETAIL_INCLUDE = listOf("credits", "lyrics", "similarTracks", "artists")
 
         const val ARTWORK_TARGET_PX = 640
     }

@@ -84,6 +84,40 @@ data class TidalAlbumDetail(
     val similarAlbums: List<AlbumSummary>,
 )
 
+/**
+ * `Credits_Attributes` (spec, verbatim): ONE contributor per resource, as
+ * `{name, role}` — the spec marks both `required`, and a track's `credits`
+ * relationship is a multi-linkage, so "Producer: Alice, Bob" arrives as two
+ * sibling resources sharing a role, never as one resource with a name list.
+ * That is precisely why [trackDetailFrom] groups by role. Both fields stay
+ * nullable/defaulted anyway — the house rule for every DTO facing this
+ * versioned external API.
+ */
+@Serializable
+data class CreditsAttributes(val name: String? = null, val role: String? = null)
+
+/**
+ * `Lyrics_Attributes` (spec, verbatim, subset): plain [text] + time-synced
+ * [lrcText]. The spec's other three fields (`provider`, `direction`,
+ * `technicalStatus`) are deliberately unmodelled — nothing renders them, and
+ * `ignoreUnknownKeys` drops them harmlessly.
+ */
+@Serializable
+data class LyricsAttributes(val text: String? = null, val lrcText: String? = null)
+
+/** Contributors sharing one role (e.g. "Producer" -> [Alice, Bob]). */
+data class TrackCredit(val role: String, val names: List<String>)
+
+/** Track credits + lyrics (and similar tracks) for the credits/lyrics sheet. */
+data class TidalTrackDetail(
+    val id: String,
+    val title: String,
+    val credits: List<TrackCredit>,
+    val lyricsText: String?,
+    val lyricsSynced: String?,
+    val similarTracks: List<Track>,
+)
+
 /** Best-fit artwork URL for [resource]'s named artwork [relationship], or null when not included/absent. */
 internal fun TidalDocumentView.artworkUrlFor(
     resource: TidalResource,
@@ -262,6 +296,68 @@ fun albumDetailFrom(doc: TidalDocument, json: Json, artworkTargetPx: Int): Tidal
                     .copy(trackNumber = meta?.trackNumber ?: (i + 1), discNumber = meta?.volumeNumber)
             },
         similarAlbums = view.related(album, "similarAlbums").map { albumSummaryFrom(it, view, json, artworkTargetPx) },
+    )
+}
+
+/**
+ * Pure projection: compound track [TidalDocument] → [TidalTrackDetail]. Returns
+ * null when there is no primary track.
+ *
+ * **Credits are grouped, not listed.** `Credits_Attributes` is one `{name, role}`
+ * per resource (see [CreditsAttributes]), so a track produced by two people
+ * arrives as two sibling `credits` resources both roled "Producer". Rendering
+ * that raw would print "Producer: Alice" then "Producer: Bob"; grouping by role
+ * gives the sheet the "Producer — Alice, Bob" shape a credits list is expected to
+ * have. `groupBy` yields a `LinkedHashMap`, so BOTH the role order and the names
+ * within a role stay in document order — first-seen wins, no sorting. Entries
+ * missing either half are dropped: a nameless role or a roleless name has nothing
+ * to render.
+ *
+ * `similarTracks` are projected with `artworkUrl = null` for the same structural
+ * reason [artistDetailFrom]'s similar artists have no art: a similar track's own
+ * `albums`/`coverArt` is not flatly include-able from THIS document, and only its
+ * own document carries it. [artworkTargetPx] is therefore accepted-but-unused —
+ * it keeps this projection signature-symmetric with its two siblings so
+ * [TidalMetadataRepository] can call all three uniformly with `ARTWORK_TARGET_PX`.
+ * It is a seam, not an oversight: the day similar-track art becomes reachable it
+ * is already threaded through. Do not "clean it up" — the call sites pass it by
+ * name.
+ *
+ * **KNOWN LIMITATION — every similar track inherits the PRIMARY track's artist
+ * name.** `?include=artists` resolves the artists of the primary resource only;
+ * a similar track's own artists are not in this document, so its true artist is
+ * unreachable here. `Track.artist` is non-null, so the projection must put
+ * *something* there, and it carries the primary artist over. For a similar track
+ * by a DIFFERENT artist that label is simply wrong. This is invisible in Slice 1
+ * — Task 8's `TrackInfoSheet` renders title/credits/lyrics and never touches
+ * [TidalTrackDetail.similarTracks] — but any future surface that renders or
+ * enqueues these rows MUST fix it first, or it will show (and now-play) the wrong
+ * artist. The `sourceId`s are correct, so such rows would still PLAY the right
+ * audio while displaying the wrong name — the quiet failure mode. The fix is to
+ * resolve each similar track's own artist (a nested `similarTracks.artists`
+ * include, unverified at our tier, or one document per track), not to paper over
+ * it here.
+ */
+fun trackDetailFrom(doc: TidalDocument, json: Json, artworkTargetPx: Int): TidalTrackDetail? {
+    val view = TidalDocumentView(doc, json)
+    val track = view.primary ?: return null
+    val artistName = view.related(track, "artists").firstOrNull()
+        ?.decodeAttributes<ArtistAttributes>(json)?.name.orEmpty()
+    val credits = view.related(track, "credits")
+        .mapNotNull { it.decodeAttributes<CreditsAttributes>(json) }
+        .filter { it.role != null && it.name != null }
+        .groupBy { it.role!! }
+        .map { (role, entries) -> TrackCredit(role, entries.mapNotNull { it.name }) }
+    val lyrics = view.related(track, "lyrics").firstOrNull()?.decodeAttributes<LyricsAttributes>(json)
+    return TidalTrackDetail(
+        id = track.id,
+        title = track.decodeAttributes<TrackAttributes>(json)?.title.orEmpty(),
+        credits = credits,
+        lyricsText = lyrics?.text,
+        lyricsSynced = lyrics?.lrcText,
+        similarTracks = view.related(track, "similarTracks").map {
+            trackFrom(it, json, artistName = artistName, albumTitle = null, artworkUrl = null)
+        },
     )
 }
 
