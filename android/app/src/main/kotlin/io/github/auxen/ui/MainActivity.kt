@@ -341,7 +341,8 @@ private fun MainScreen(viewModel: PlayerViewModel, widthSizeClass: WindowWidthSi
                             viewModel,
                             album = backStack.arguments?.getString("album").orEmpty(),
                             artist = backStack.arguments?.getString("artist").orEmpty(),
-                            onOpenArtist = { artist -> navController.navigate(artistRoute(artist)) },
+                            tidalAlbumId = backStack.arguments?.getString("tidalAlbumId"),
+                            onOpenArtist = { name, id -> navController.navigate(artistRoute(name, id)) },
                         )
                     }
                     composable(

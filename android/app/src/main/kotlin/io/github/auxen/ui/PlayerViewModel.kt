@@ -506,7 +506,21 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         albumDetailKey = key
         albumDetailJob?.cancel()
         albumDetail.value = null
-        if (tidalAlbumId == null && seedTidalTrackId == null) return
+        if (tidalAlbumId == null && seedTidalTrackId == null) {
+            // Nothing to load — but this path must still clear the spinner, and
+            // it is the ONE path that nothing else will. The cancelled job above
+            // does not do it: its `finally` is key-guarded, and [albumDetailKey]
+            // is already this key, not its own — that guard is what stops a
+            // superseded load from clearing the WINNER's spinner early. Here
+            // there IS no winner to launch, so the flag would stay true forever
+            // (Tidal album still in flight -> back -> a local-only album), and
+            // an album with no tracks to fall back on would spin instead of
+            // settling to its EmptyState. [loadArtistDetail] has no early return
+            // and so cannot reach this state; this asymmetry is why the check
+            // lives here rather than in the shared `finally`.
+            albumDetailLoading.value = false
+            return
+        }
         albumDetailJob = viewModelScope.launch {
             albumDetailLoading.value = true
             try {

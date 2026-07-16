@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import io.github.auxen.R
 import io.github.auxen.data.groupAlbums
+import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.ArtworkImage
 import io.github.auxen.ui.components.AuxenTrackRow
@@ -47,6 +49,11 @@ import io.github.auxen.ui.theme.AuxenColors
 /**
  * Album detail — desktop AlbumDetailView: header (art, title, artist link,
  * meta, Play All + Shuffle) and the ordered track list.
+ *
+ * The local MediaStore-derived grouping is the offline base and always renders
+ * first; remote enrichment (real title/artist/type/year, high-res cover art and
+ * the COMPLETE tracklist) is overlaid on top as it lands. An album we cannot
+ * resolve a Tidal id for renders exactly as it does today.
  */
 @UnstableApi
 @Composable
@@ -54,7 +61,8 @@ fun AlbumDetailScreen(
     viewModel: PlayerViewModel,
     album: String,
     artist: String,
-    onOpenArtist: (String) -> Unit,
+    tidalAlbumId: String? = null,
+    onOpenArtist: (name: String, tidalArtistId: String?) -> Unit,
 ) {
     val localTracks by viewModel.localTracks.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
@@ -74,46 +82,85 @@ fun AlbumDetailScreen(
     val group = groupAlbums(pool).firstOrNull { it.album == album && it.albumArtist == artist }
     val tracks = group?.tracks ?: emptyList()
 
+    val detail by viewModel.albumDetail.collectAsState()
+    val albumDetailLoading by viewModel.albumDetailLoading.collectAsState()
+    // ANY Tidal track in this group resolves the album id: trackRelations reads
+    // related(track, "albums").first(), and every track here is grouped by this
+    // album already. So — unlike the artist screen, whose seed must match on the
+    // PRIMARY artist to avoid resolving a compilation's albumArtist — no further
+    // guard is needed here.
+    val seedTidalTrackId = tracks.firstOrNull { it.isTidal }?.sourceId
+    LaunchedEffect(album, artist, tidalAlbumId, seedTidalTrackId) {
+        viewModel.loadAlbumDetail(album, artist, tidalAlbumId, seedTidalTrackId)
+    }
+    // The remote tracklist is the COMPLETE album; the local group holds only the
+    // tracks the user happens to own. Remote wins when it has anything, so a
+    // Tidal-only album is fully playable; an empty/absent remote list falls back
+    // to the local group, leaving a non-Tidal album exactly as it is today.
+    val displayTracks = detail?.tracks?.takeIf { it.isNotEmpty() } ?: tracks
+
+    // `TidalAlbumDetail.title`/`.artistName` are NON-NULL Strings projected with
+    // `.orEmpty()` (TidalMetadataDetail.kt:278/280), so a `?:` on the nullable
+    // `detail` alone would NOT guard a document that resolved but carried no
+    // usable text — it would blank the header that the local group had filled
+    // correctly. That is not hypothetical on this API: the same "linked but
+    // absent from `included`" behaviour that forced Task 3's biography fallback
+    // applies to `artists` here. Hence isNotBlank(), not just null-safety.
+    val displayTitle = detail?.title?.takeIf { it.isNotBlank() } ?: album
+    val displayArtist = detail?.artistName?.takeIf { it.isNotBlank() } ?: artist
+
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                 ArtworkImage(
-                    model = group?.artUrl,
+                    // Remote cover art (high-res, best-fit) wins when present;
+                    // the local group's art is the offline fallback.
+                    model = detail?.artworkUrl ?: group?.artUrl,
                     contentDescription = null,
                     glyphSize = 48.dp,
                     modifier = Modifier.size(140.dp).clip(RoundedCornerShape(10.dp)),
                 )
                 Spacer(Modifier.width(16.dp))
                 Column {
-                    Text(album, style = MaterialTheme.typography.headlineSmall)
+                    Text(displayTitle, style = MaterialTheme.typography.headlineSmall)
                     Text(
-                        artist,
+                        displayArtist,
                         style = MaterialTheme.typography.bodyLarge,
                         // Text tint (clickable artist link) -- resolves to the contrast-safe
                         // primary (final-review fix round, Minor #2); the Play All button
                         // below is a container behind BgDeep content and correctly keeps the
                         // raw brand amber.
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable { onOpenArtist(artist) },
+                        // The remote artist id skips the artist screen's own id
+                        // resolution entirely when we have it.
+                        modifier = Modifier.clickable { onOpenArtist(displayArtist, detail?.artistId) },
                     )
                     val meta = listOfNotNull(
-                        group?.year?.toString(),
-                        "${tracks.size} tracks",
+                        detail?.albumType,
+                        detail?.releaseYear?.toString() ?: group?.year?.toString(),
+                        "${displayTracks.size} tracks",
                     ).joinToString(" • ")
                     Text(
                         meta,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    tracks.firstOrNull()?.let { SourceBadge(it.source, Modifier.padding(top = 6.dp)) }
+                    // A resolved remote album IS a Tidal album, including the
+                    // Tidal-only case where there is no local track to read a
+                    // source off at all.
+                    val badgeSource = if (detail != null) Source.TIDAL else tracks.firstOrNull()?.source
+                    badgeSource?.let { SourceBadge(it, Modifier.padding(top = 6.dp)) }
                 }
             }
         }
         item {
             Row(modifier = Modifier.padding(16.dp)) {
                 Button(
-                    onClick = { viewModel.playAll(tracks) },
-                    enabled = tracks.isNotEmpty(),
+                    // displayTracks, so a Tidal-only album (opened from an
+                    // enriched discography with no local files) is fully playable
+                    // through the existing internal-v1 pipeline.
+                    onClick = { viewModel.playAll(displayTracks) },
+                    enabled = displayTracks.isNotEmpty(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = AuxenColors.AmberPrimary,
                         contentColor = AuxenColors.BgDeep,
@@ -124,17 +171,28 @@ fun AlbumDetailScreen(
                 }
                 Spacer(Modifier.width(12.dp))
                 OutlinedButton(
-                    onClick = { viewModel.playAll(tracks, shuffled = true) },
-                    enabled = tracks.isNotEmpty(),
+                    onClick = { viewModel.playAll(displayTracks, shuffled = true) },
+                    enabled = displayTracks.isNotEmpty(),
                 ) {
                     Icon(Icons.Filled.Shuffle, contentDescription = null)
                     Text("Shuffle")
                 }
             }
         }
-        if (tracks.isEmpty()) {
+        // displayTracks, not tracks: a Tidal-only album has an empty local group
+        // but a full remote tracklist, and must render the list rather than
+        // "no tracks".
+        if (displayTracks.isEmpty()) {
             item {
-                if (loading) {
+                // `albumDetailLoading` may spin the EMPTY list — never the
+                // populated one (we are inside displayTracks.isEmpty(), so there
+                // is no local list here to block, and `loading` is untouched).
+                // Without it a Tidal-only album reads "no tracks" for the whole
+                // remote round-trip, since the local `loading` is already false.
+                // The finally in loadAlbumDetail always clears this, so an album
+                // genuinely not on Tidal still settles to EmptyState rather than
+                // a stuck spinner.
+                if (loading || albumDetailLoading) {
                     LoadingState()
                 } else {
                     EmptyState(
@@ -145,7 +203,7 @@ fun AlbumDetailScreen(
                 }
             }
         }
-        items(tracks, key = { "${it.source}:${it.sourceId}" }) { track ->
+        items(displayTracks, key = { "${it.source}:${it.sourceId}" }) { track ->
             AuxenTrackRow(
                 track = track,
                 isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
