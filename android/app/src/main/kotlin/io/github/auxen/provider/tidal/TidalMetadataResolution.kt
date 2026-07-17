@@ -6,14 +6,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 
 /**
- * The ids needed to fetch an artist/album detail document, resolved from a
- * single Tidal-sourced track via `GET /tracks/{id}?include=artists,albums`.
- * [isrc] is carried for the documented ISRC/barcode fallback (see the plan's
- * Architecture) — unused while direct id-equivalence holds.
- */
-data class TrackRelations(val artistId: String?, val albumId: String?, val isrc: String?)
-
-/**
  * Pure projection from a compound track [TidalDocument] to [TrackRelations].
  * Returns null when the document has no primary track resource. Extracted from
  * [TidalMetadataRepository.trackRelations] so the mapping is unit-testable with

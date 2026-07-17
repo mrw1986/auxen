@@ -1,5 +1,6 @@
 package io.github.auxen.provider.tidal
 
+import io.github.auxen.model.Track
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
@@ -22,6 +23,20 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
  * `TidalProvider.API_BASE` (a private companion) so every request SHAPE is
  * unit-testable with no live call, exactly like the other internal-v1 files.
  */
+
+/** Full album detail: header art + metadata + ordered tracklist + similar albums. */
+data class TidalAlbumDetail(
+    val id: String,
+    val title: String,
+    val artistName: String,
+    val artistId: String?,
+    val albumType: String?,
+    val releaseYear: Int?,
+    val explicit: Boolean,
+    val artworkUrl: String?,
+    val tracks: List<Track>,
+    val similarAlbums: List<AlbumSummary>,
+)
 
 /**
  * `albums/{id}` metadata. Every field but `id` is nullable/defaulted — the same

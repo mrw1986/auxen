@@ -40,13 +40,4 @@ class TidalMetadataPrimitivesTest {
         assertNull(parseIsoDurationSeconds(null))
         assertNull(parseIsoDurationSeconds("not-a-duration"))
     }
-
-    @Test fun `takes the release year from an ISO date`() {
-        assertEquals(2021, releaseYearOf("2021-05-14"))
-    }
-
-    @Test fun `release year is null for null or empty input`() {
-        assertNull(releaseYearOf(null))
-        assertNull(releaseYearOf(""))
-    }
 }

@@ -47,6 +47,3 @@ fun parseIsoDurationSeconds(iso: String?): Double? {
     if (iso.isNullOrBlank()) return null
     return runCatching { Duration.parse(iso).seconds.toDouble() }.getOrNull()
 }
-
-/** Release year from `Albums_Attributes.releaseDate` (ISO date "YYYY-MM-DD"); null when absent/malformed. */
-fun releaseYearOf(releaseDate: String?): Int? = releaseDate?.take(4)?.toIntOrNull()

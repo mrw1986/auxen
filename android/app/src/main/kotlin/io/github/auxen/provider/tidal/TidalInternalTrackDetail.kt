@@ -1,5 +1,6 @@
 package io.github.auxen.provider.tidal
 
+import io.github.auxen.model.Track
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
@@ -13,6 +14,19 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
  * (`.superpowers/sdd/official-v2-retirement-schema.md`) and from `tidalapi`'s
  * `media.py` (credits/lyrics).
  */
+
+/** Contributors sharing one role (e.g. "Producer" -> [Alice, Bob]). */
+data class TrackCredit(val role: String, val names: List<String>)
+
+/** Track credits + lyrics (and similar tracks) for the credits/lyrics sheet. */
+data class TidalTrackDetail(
+    val id: String,
+    val title: String,
+    val credits: List<TrackCredit>,
+    val lyricsText: String?,
+    val lyricsSynced: String?,
+    val similarTracks: List<Track>,
+)
 
 /** One contributor inside a credits role group. `id` is often absent. */
 @Serializable

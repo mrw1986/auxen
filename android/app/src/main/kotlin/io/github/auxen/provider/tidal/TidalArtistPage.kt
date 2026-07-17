@@ -308,13 +308,13 @@ internal inline fun <reified T> List<JsonElement>.decodeEach(json: Json): List<T
  * gone (empty `pagedList`, or every item malformed) is dropped rather than
  * rendered as a header over an empty rail.
  */
-fun artistPageFrom(body: String, json: Json, artistId: String): TidalArtistPage? {
-    val page = runCatching { json.decodeFromString<TidalV1ArtistPageResponse>(body) }.getOrNull() ?: return null
+fun artistPageFrom(body: String, json: Json, artistId: String): TidalArtistPage? = runCatching {
+    val page = json.decodeFromString<TidalV1ArtistPageResponse>(body)
     val modules = page.rows.orEmpty().flatMap { it.modules.orEmpty() }
     // No modules at all is not a page. This is the case that catches a v1 error
     // envelope: `{"status":400,...}` decodes CLEANLY into rows=[] because every
-    // field is defaulted, so `runCatching` above cannot reject it — this can.
-    if (modules.isEmpty()) return null
+    // field is defaulted, so it must be rejected here.
+    if (modules.isEmpty()) return@runCatching null
 
     val header = modules.firstOrNull { it.type == "ARTIST_HEADER" }
 
@@ -337,7 +337,7 @@ fun artistPageFrom(body: String, json: Json, artistId: String): TidalArtistPage?
         if (artists.isEmpty()) null else TidalArtistLinkSection(module.title.orEmpty(), artists)
     }
 
-    return TidalArtistPage(
+    TidalArtistPage(
         id = header?.artist?.id?.toString() ?: artistId,
         name = header?.artist?.name.orEmpty(),
         // ARTIST_HEADER.bio.text is the biography official v2 has not got at our
@@ -352,4 +352,4 @@ fun artistPageFrom(body: String, json: Json, artistId: String): TidalArtistPage?
         albumSections = albumSections,
         artistSections = artistSections,
     )
-}
+}.getOrNull()
