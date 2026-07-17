@@ -119,6 +119,28 @@ class TidalProvider(
     }
 
     /**
+     * Multi-type search — artists + albums + tracks in one read-only catalog GET
+     * on `search` (the endpoint `types=…` filters), so artist and album pages are
+     * reachable from search, not just tracks. Metadata only: resolves no stream,
+     * touches no session state.
+     *
+     * **Additive alongside [search].** [search] hits `search/tracks` (bare
+     * `{"items":[…]}`, singular `artist`, kept for its interface contract); this
+     * hits `search` and gets a per-type envelope whose items carry `artists`
+     * plural — see [searchResultsFrom] and the plan's Finding 1.
+     *
+     * Returns [TidalSearchResults.EMPTY] when not logged in or on any HTTP/parse
+     * failure: search then shows local tracks only (or nothing), never an error —
+     * the same not-logged-in discipline as [search].
+     */
+    suspend fun searchAll(query: String, limit: Int = 20): TidalSearchResults {
+        val token = validToken() ?: return TidalSearchResults.EMPTY
+        val url = searchAllUrl(API_BASE, query, countryCode, limit)
+        val body = runCatching { get(url.toString(), token) }.getOrNull() ?: return TidalSearchResults.EMPTY
+        return searchResultsFrom(body, json)
+    }
+
+    /**
      * Resolve a playable stream. Requests Hi-Res lossless; Tidal answers with
      * either a BTS manifest (direct FLAC/AAC URLs) or a DASH MPD, which is
      * passed to ExoPlayer as a data: URI (media3-exoplayer-dash handles it).

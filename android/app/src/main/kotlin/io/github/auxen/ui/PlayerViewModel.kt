@@ -28,6 +28,9 @@ import io.github.auxen.model.QueueEntry
 import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
 import io.github.auxen.playback.PlaybackService
+import io.github.auxen.provider.tidal.ArtistLink
+import io.github.auxen.provider.tidal.TidalAlbumResult
+import io.github.auxen.provider.tidal.TidalSearchResults
 import io.github.auxen.provider.tidal.formatTidalStreamingProbeResult
 import io.github.auxen.provider.tidal.probePlayback
 import io.github.auxen.provider.tidal.probeStreaming
@@ -74,6 +77,17 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     val localTracks = MutableStateFlow<List<Track>>(emptyList())
     val searchQuery = MutableStateFlow("")
     val searchResults = MutableStateFlow<List<Track>>(emptyList())
+
+    /**
+     * Tidal-only album + artist results for the search screen, filled alongside
+     * [searchResults] by [search]. Empty when the query is blank, when not logged
+     * in to Tidal, or on any failure — the search screen hides those sections.
+     * There is no local equivalent (the local DB has no artist/album entities
+     * yet — Slice 2), so these are Tidal-only by construction.
+     */
+    val searchAlbums = MutableStateFlow<List<TidalAlbumResult>>(emptyList())
+    val searchArtists = MutableStateFlow<List<ArtistLink>>(emptyList())
+
     var searchInFlight by mutableStateOf(false)
         private set
 
@@ -895,20 +909,23 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Search local library and Tidal, collapsing duplicates — like the desktop app. */
+    /** Search local library and Tidal (tracks + albums + artists), collapsing track duplicates. */
     fun search(query: String) {
         if (query.isBlank()) return
         viewModelScope.launch {
             searchInFlight = true
             val local = runCatching { Graph.local.search(query) }.getOrDefault(emptyList())
-            val tidal = runCatching { Graph.tidal.search(query) }.getOrDefault(emptyList())
+            val tidal = runCatching { Graph.tidal.searchAll(query) }.getOrDefault(TidalSearchResults.EMPTY)
             val priority = runCatching { Graph.library.sourcePriority() }
                 .getOrDefault(SourcePriority.PREFER_QUALITY)
-            val merged = DuplicateResolver.merge(local, tidal, priority)
+            val merged = DuplicateResolver.merge(local, tidal.tracks, priority)
             // Latest-query-wins: drop stale responses that resolve after the
-            // field changed or was cleared.
+            // field changed or was cleared. All three surfaces flip together so
+            // the tracks list and the album/artist rails never show mismatched queries.
             if (query == searchQuery.value) {
                 searchResults.value = merged
+                searchAlbums.value = tidal.albums
+                searchArtists.value = tidal.artists
                 searchInFlight = false
             }
         }
@@ -920,6 +937,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         searchDebounceJob?.cancel()
         if (query.isBlank()) {
             searchResults.value = emptyList()
+            searchAlbums.value = emptyList()
+            searchArtists.value = emptyList()
             searchInFlight = false
             return
         }
