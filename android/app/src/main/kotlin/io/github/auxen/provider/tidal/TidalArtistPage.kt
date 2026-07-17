@@ -283,7 +283,12 @@ internal fun TidalV1PageTrack.toTrack(): Track {
  * array in one call would let a single malformed row throw and take an entire
  * section with it; here one bad row is dropped and its siblings survive.
  */
-private inline fun <reified T> List<JsonElement>.decodeEach(json: Json): List<T> =
+/**
+ * Decode each element independently, dropping the ones that fail. `internal`
+ * rather than private because `search`'s per-type blocks reuse it for the same
+ * item-level totality — one malformed row must never cost a whole type section.
+ */
+internal inline fun <reified T> List<JsonElement>.decodeEach(json: Json): List<T> =
     mapNotNull { runCatching { json.decodeFromJsonElement<T>(it) }.getOrNull() }
 
 /**

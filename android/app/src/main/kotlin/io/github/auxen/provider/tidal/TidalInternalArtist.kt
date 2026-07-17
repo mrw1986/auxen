@@ -42,6 +42,15 @@ data class TidalV1Album(
     val explicit: Boolean? = null,
     val numberOfTracks: Int? = null,
     val artist: TidalV1AlbumArtist? = null,
+    /**
+     * Plural artists — the multi-type `search` album item carries this, not the
+     * singular `artist` (which is null there). Read ONLY by the search projection
+     * ([searchResultsFrom]) for the album's artist name; [toAlbumSummary] ignores
+     * it and `AlbumSummary` has no artist field, so this is inert for the
+     * discography and pages/artist callers. Defaulted, so a body without the key
+     * (every `artists/{id}/albums` and `pages/artist` album) decodes unchanged.
+     */
+    val artists: List<TidalV1AlbumArtist> = emptyList(),
 )
 
 /** The v1 paged-collection envelope: `{ "limit", "offset", "totalNumberOfItems", "items": [...] }`. */
