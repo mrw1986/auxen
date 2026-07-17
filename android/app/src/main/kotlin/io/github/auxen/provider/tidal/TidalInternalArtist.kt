@@ -161,7 +161,14 @@ fun artistAlbumsFrom(body: String, json: Json): List<AlbumSummary> =
         ?.map { it.toAlbumSummary() }
         .orEmpty()
 
-private fun TidalV1Album.toAlbumSummary() = AlbumSummary(
+/**
+ * v1 album item -> [AlbumSummary]. `internal` rather than private because
+ * `pages/artist`'s `ALBUM_LIST` items are the SAME v1 album shape and
+ * [artistPageFrom] maps them through here — one mapper, so the two cannot drift.
+ * (Those items carry no `type` key, so `albumType` is null for them; nothing on
+ * the artist page renders it, and the module title carries what `type` cannot.)
+ */
+internal fun TidalV1Album.toAlbumSummary() = AlbumSummary(
     id = id.toString(),
     title = title,
     albumType = type,
