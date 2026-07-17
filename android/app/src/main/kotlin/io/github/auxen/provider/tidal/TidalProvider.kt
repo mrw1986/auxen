@@ -266,6 +266,54 @@ class TidalProvider(
     }
 
     /**
+     * Resolve a Tidal track's artist + album ids from ONE internal-v1 read
+     * (`GET tracks/{id}`). This is the internal-v1 replacement for the official-v2
+     * `trackRelations`, used as the seed step of BOTH the artist-id chain
+     * ([io.github.auxen.ui.PlayerViewModel.loadArtistDetail]) and the album-id
+     * chain ([io.github.auxen.ui.PlayerViewModel.loadAlbumDetail]). Metadata only:
+     * resolves no stream, touches no session state.
+     *
+     * Returns null when not logged in or on any HTTP/parse failure — the caller
+     * then falls through to its next id source or renders un-enriched, exactly as
+     * with the official read it replaces.
+     */
+    suspend fun trackRelations(trackId: String): TrackRelations? {
+        val token = validToken() ?: return null
+        val url = trackRelationsUrl(API_BASE, trackId, countryCode)
+        val body = runCatching { get(url.toString(), token) }.getOrNull() ?: return null
+        return trackRelationsFromV1(body, json)
+    }
+
+    /**
+     * Full album detail — `GET albums/{id}` + a paged sweep of
+     * `GET albums/{id}/items` — projected to [TidalAlbumDetail]. A read-only
+     * catalog GET: resolves no stream, touches no session state. The tracklist is
+     * the COMPLETE album (paged), with native `trackNumber`/`volumeNumber`; videos
+     * are filtered out.
+     *
+     * Returns null when not logged in, when the metadata read fails, or when the
+     * body is not an album ([albumDetailFromV1]'s contract) — the album screen
+     * then falls back to its local group, exactly as it does today for a
+     * non-Tidal album.
+     */
+    suspend fun albumDetail(albumId: String): TidalAlbumDetail? {
+        val token = validToken() ?: return null
+        val metaBody = runCatching { get(albumMetadataUrl(API_BASE, albumId, countryCode).toString(), token) }
+            .getOrNull() ?: return null
+        val itemBodies = mutableListOf<String>()
+        var offset = 0
+        while (offset < ALBUM_ITEMS_MAX) {
+            val body = runCatching { get(albumItemsUrl(API_BASE, albumId, countryCode, ALBUM_ITEMS_PAGE, offset).toString(), token) }
+                .getOrNull() ?: break
+            itemBodies += body
+            val total = runCatching { json.decodeFromString<TidalV1AlbumItemsResponse>(body) }.getOrNull()
+            offset += ALBUM_ITEMS_PAGE
+            if (total == null || total.items.isEmpty() || offset >= total.totalNumberOfItems) break
+        }
+        return albumDetailFromV1(metaBody, itemBodies, json)
+    }
+
+    /**
      * The artist's biography as DISPLAY-READY text — a read-only catalog GET,
      * mirroring the desktop's `best.get_bio()` (`auxen/providers/tidal.py:911-916`).
      * Metadata only: it resolves no stream and touches no session state.
@@ -379,5 +427,10 @@ class TidalProvider(
 
     private companion object {
         const val API_BASE = "https://api.tidal.com/v1"
+        // albums/{id}/items paging: 100 covers all but box sets in one call; the
+        // MAX cap bounds a pathological loop (a huge box set truncates gracefully
+        // rather than looping unboundedly — no album on Tidal reaches 1000 tracks).
+        const val ALBUM_ITEMS_PAGE = 100
+        const val ALBUM_ITEMS_MAX = 1000
     }
 }

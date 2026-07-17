@@ -583,7 +583,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             artistDetailLoading.value = true
             try {
                 val artistId = tidalArtistId
-                    ?: seedTidalTrackId?.let { Graph.tidalMetadata.trackRelations(it).getOrNull()?.artistId }
+                    ?: seedTidalTrackId?.let { Graph.tidal.trackRelations(it)?.artistId }
                     ?: Graph.tidal.searchArtistIdExact(artistName)
                     ?: return@launch
                 // ONE read. `artistPage` never throws (it returns null on any
@@ -627,11 +627,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             albumDetailLoading.value = true
             try {
                 val albumId = tidalAlbumId
-                    ?: Graph.tidalMetadata.trackRelations(seedTidalTrackId!!).getOrNull()?.albumId
+                    ?: Graph.tidal.trackRelations(seedTidalTrackId!!)?.albumId
                     ?: return@launch
-                Graph.tidalMetadata.albumDetail(albumId).onSuccess {
-                    if (albumDetailKey == key) albumDetail.value = it
-                }
+                // ONE internal-v1 read (paged internally); it returns null on any
+                // failure, so there is nothing to catch — the try/finally exists
+                // solely to clear the spinner on the early return above.
+                val detail = Graph.tidal.albumDetail(albumId)
+                if (albumDetailKey == key && detail != null) albumDetail.value = detail
             } finally {
                 if (albumDetailKey == key) albumDetailLoading.value = false
             }
