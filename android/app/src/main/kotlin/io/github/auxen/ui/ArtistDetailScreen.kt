@@ -98,38 +98,56 @@ fun ArtistDetailScreen(
     val tracks = pool.filter { it.artist == artist || it.albumArtist == artist }
     val albums = groupAlbums(tracks)
 
-    val detail by viewModel.artistDetail.collectAsState()
-    val remoteAlbums by viewModel.artistAlbums.collectAsState()
-    val topTracks by viewModel.artistTopTracks.collectAsState()
+    val page by viewModel.artistPage.collectAsState()
     val artistDetailLoading by viewModel.artistDetailLoading.collectAsState()
     // The seed MUST be a track whose PRIMARY artist is this screen's artist.
     // `tracks` is filtered on `it.artist == artist || it.albumArtist == artist`,
     // and trackRelations takes related(track,"artists").first() — the primary
     // artist. So seeding off an albumArtist-only match (a compilation, a
     // "Various Artists" album) would resolve a DIFFERENT artist's id and hang
-    // the wrong bio, discography and top tracks on this page. `it.artist` is the
-    // main-artist name for Tidal tracks (TidalProvider.toTrack maps
-    // TrackDto.artist.name), so this comparison is exactly the right guard.
+    // the wrong page on this screen. `it.artist` is the main-artist name for
+    // Tidal tracks (TidalProvider.toTrack maps TrackDto.artist.name), so this
+    // comparison is exactly the right guard.
     val seedTidalTrackId = tracks.firstOrNull { it.isTidal && it.artist == artist }?.sourceId
     LaunchedEffect(artist, tidalArtistId, seedTidalTrackId) {
         viewModel.loadArtistDetail(artist, tidalArtistId, seedTidalTrackId)
     }
+
     // Tidal top tracks (popularity order) first, then local tracks not among
-    // them — the desktop's merge (window.py:1409-1422). With no top tracks this
+    // them — the desktop's merge (window.py:1409-1422). With no page this
     // returns `tracks` unchanged, so the offline base is never at risk.
+    //
+    // CAPPED AT 50. pages/artist's 'Top Tracks' module reported 300 items and
+    // this endpoint REFUSES a `limit` param (400), so the cap is ours to apply.
+    // 50 is what the artist page shipped with (artistTopTracks(limit = 50)) and
+    // what the desktop uses (get_top_tracks(limit=50)) — this is deliberately
+    // not a behaviour change.
+    val topTracks = remember(page) { page?.topTracks.orEmpty().take(TOP_TRACKS_DISPLAY_LIMIT) }
     val displayTracks = remember(topTracks, tracks) { mergeArtistTracks(topTracks, tracks) }
-    // Local albums render first and Tidal-only albums are appended, deduped on
-    // normalized titles — the desktop's union (window.py:1394-1407), but with a
-    // punctuation-tolerant compare it does not have (see normalizeTitleForDedup).
-    // RAW titles: dedupRemoteAlbums normalizes both sides itself, and
-    // pre-lowercasing here would just be a lossy half of what it already does.
-    val tidalOnlyAlbums = remember(albums, remoteAlbums) {
-        dedupRemoteAlbums(
-            localTitles = albums.map { it.album }.toSet(),
-            remote = remoteAlbums,
-        )
+
+    // Every ALBUM_LIST Tidal gave us, in page order, under ITS OWN title —
+    // 'Albums', 'EP & Singles', 'Live albums', 'Compilations', 'Appears On'. We
+    // never match on those strings (see TidalArtistPage.kt's KDoc): a rename, a
+    // new category or a localisation all just work.
+    //
+    // The user's LOCAL albums merge into the FIRST section, which assumes the
+    // first ALBUM_LIST is the primary discography — true for both probed
+    // artists. It is a POSITION assumption, deliberately chosen over a TITLE
+    // match because position survives renaming and localisation. If it is ever
+    // wrong the failure is cosmetic (local albums under a row headed 'EP &
+    // Singles'), never data loss.
+    //
+    // Each section is deduped against the RAW local titles — dedupRemoteAlbums
+    // normalizes both sides itself, and pre-lowercasing here would be a lossy
+    // half of what it already does.
+    val localTitles = remember(albums) { albums.map { it.album }.toSet() }
+    val albumSections = remember(page, localTitles) {
+        page?.albumSections.orEmpty().map { section ->
+            section.title to dedupRemoteAlbums(localTitles = localTitles, remote = section.albums)
+        }
     }
-    val similarArtists = detail?.similarArtists.orEmpty()
+    val artistSections = page?.artistSections.orEmpty()
+    val totalAlbums = albums.size + albumSections.sumOf { (_, remote) -> remote.size }
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
@@ -138,9 +156,10 @@ fun ArtistDetailScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 ArtworkImage(
-                    // Remote profile art wins when present; the local album art
-                    // is the offline fallback.
-                    model = detail?.artworkUrl ?: tracks.firstNotNullOfOrNull { it.albumArtUrl },
+                    // The page's own profile art (480x480 — the artist size; the
+                    // 640 album size does not render for a picture) wins when
+                    // present; the local album art is the offline fallback.
+                    model = page?.artworkUrl ?: tracks.firstNotNullOfOrNull { it.albumArtUrl },
                     contentDescription = null,
                     glyph = Icons.Filled.Person,
                     glyphSize = 40.dp,
@@ -150,9 +169,9 @@ fun ArtistDetailScreen(
                 Column {
                     Text(artist, style = MaterialTheme.typography.headlineSmall)
                     Text(
-                        // Counts describe what is actually on screen, not the
-                        // local subset.
-                        "${albums.size + tidalOnlyAlbums.size} albums • ${displayTracks.size} tracks",
+                        // Counts describe what is actually on screen, across
+                        // every album section, not the local subset.
+                        "$totalAlbums albums • ${displayTracks.size} tracks",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -186,14 +205,11 @@ fun ArtistDetailScreen(
             }
         }
         // A null biography renders nothing at all — no header, no placeholder,
-        // no error. By the time this is null the internal-v1 `artists/{id}/bio`
-        // read has already come back empty or 404'd (the expected answer for a
-        // lesser-known artist), and the desktop hides the section too.
-        //
-        // The text is display-ready: `artistBioFrom` has already turned the
-        // endpoint's `<br>`/`[wimpLink]` markup into plain text, so no raw tag
-        // can reach this Text.
-        detail?.biography?.let { biography ->
+        // no error. This text comes from ARTIST_HEADER.bio.text, the biography
+        // official v2 has none of at our tier, and it is display-ready:
+        // artistPageFrom already ran formatTidalBio over the endpoint's
+        // `<br>`/`[wimpLink]` markup, so no raw tag can reach this Text.
+        page?.biography?.let { biography ->
             item { SectionHeader("Biography") }
             item {
                 Text(
@@ -208,65 +224,108 @@ fun ArtistDetailScreen(
                 )
             }
         }
-        if (albums.isNotEmpty() || tidalOnlyAlbums.isNotEmpty()) {
-            item { SectionHeader("Albums") }
-            item {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    items(albums, key = { "${it.album}|${it.albumArtist}" }) { album ->
-                        AlbumCard(
-                            title = album.album,
-                            artist = null,
-                            artUrl = album.artUrl,
-                            source = album.tracks.firstOrNull()?.source,
-                            onClick = { onOpenAlbum(album.album, album.albumArtist, null) },
-                            onPlay = { viewModel.playAll(album.tracks) },
-                            // Carousel item — a fill-width card has no width
-                            // constraint inside a LazyRow, so pin it here.
-                            modifier = Modifier.width(150.dp),
-                        )
+        if (albumSections.isEmpty()) {
+            // No Tidal page (not logged in, no id resolved, the call failed) —
+            // the offline-safe local base, exactly as it renders today.
+            if (albums.isNotEmpty()) {
+                item { SectionHeader("Albums") }
+                item {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        items(albums, key = { "${it.album}|${it.albumArtist}" }) { album ->
+                            AlbumCard(
+                                title = album.album,
+                                artist = null,
+                                artUrl = album.artUrl,
+                                source = album.tracks.firstOrNull()?.source,
+                                onClick = { onOpenAlbum(album.album, album.albumArtist, null) },
+                                onPlay = { viewModel.playAll(album.tracks) },
+                                // Carousel item — a fill-width card has no width
+                                // constraint inside a LazyRow, so pin it here.
+                                modifier = Modifier.width(150.dp),
+                            )
+                        }
                     }
-                    items(tidalOnlyAlbums, key = { "tidal:${it.id}" }) { summary ->
-                        AlbumCard(
-                            title = summary.title,
-                            artist = null,
-                            artUrl = summary.artworkUrl,
-                            source = Source.TIDAL,
-                            onClick = { onOpenAlbum(summary.title, detail?.name ?: artist, summary.id) },
-                            // No local tracks to enqueue — a tap opens the album,
-                            // whose remote tracklist (Task 7) is playable.
-                            onPlay = null,
-                            modifier = Modifier.width(150.dp),
-                        )
+                }
+            }
+        } else {
+            albumSections.forEachIndexed { index, (sectionTitle, remoteAlbums) ->
+                // The user's local albums join the FIRST section only — see the
+                // position-assumption note above. Sections after it are Tidal-only.
+                val localHere = if (index == 0) albums else emptyList()
+                if (localHere.isEmpty() && remoteAlbums.isEmpty()) return@forEachIndexed
+                // Tidal's OWN title, verbatim. Never matched on, only rendered.
+                item(key = "section-header-$index") { SectionHeader(sectionTitle) }
+                item(key = "section-row-$index") {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        items(localHere, key = { "${it.album}|${it.albumArtist}" }) { album ->
+                            AlbumCard(
+                                title = album.album,
+                                artist = null,
+                                artUrl = album.artUrl,
+                                source = album.tracks.firstOrNull()?.source,
+                                onClick = { onOpenAlbum(album.album, album.albumArtist, null) },
+                                onPlay = { viewModel.playAll(album.tracks) },
+                                modifier = Modifier.width(150.dp),
+                            )
+                        }
+                        items(remoteAlbums, key = { "tidal:${it.id}" }) { summary ->
+                            AlbumCard(
+                                title = summary.title,
+                                artist = null,
+                                artUrl = summary.artworkUrl,
+                                source = Source.TIDAL,
+                                // KNOWN LIMITATION (plan, Open question 4): the
+                                // artist arg is this screen's artist, which is
+                                // WRONG for an 'Appears On' album (that is a
+                                // different artist's record). It self-corrects —
+                                // tidalAlbumId is non-null, so AlbumDetailScreen
+                                // fetches the album's own document and shows the
+                                // real artist; this arg only seeds the local
+                                // grouping fallback. Same behaviour the shipped
+                                // tidal-only row already has.
+                                onClick = { onOpenAlbum(summary.title, page?.name ?: artist, summary.id) },
+                                // No local tracks to enqueue — a tap opens the
+                                // album, whose remote tracklist is playable.
+                                onPlay = null,
+                                modifier = Modifier.width(150.dp),
+                            )
+                        }
                     }
                 }
             }
         }
-        if (similarArtists.isNotEmpty()) {
-            item { SectionHeader("Similar artists") }
-            item {
+        // Every ARTIST_LIST, under its own title — 'Fans Also Like', and
+        // 'Influencers' for the artists that have one. Selecting on type rather
+        // than title is what makes the second row ship at all.
+        artistSections.forEachIndexed { index, section ->
+            item(key = "artists-header-$index") { SectionHeader(section.title) }
+            item(key = "artists-row-$index") {
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    // ArtistLink.artworkUrl is always null here (see its KDoc),
-                    // so these render with ArtistRow's Person glyph — the same
-                    // fallback the header uses.
+                    // These now carry REAL photos (ArtistLink.artworkUrl from the
+                    // item's `picture` at 480x480 — the artist size; 640 is the
+                    // album size and does not render for a picture). Slice 1's
+                    // similar artists were null by construction and fell back to
+                    // ArtistRow's Person glyph; that glyph is still the fallback
+                    // for an artist whose `picture` is null.
                     //
-                    // Deliberately UNKEYED — and it STAYS unkeyed even though
-                    // artistDetailFrom now dedups similarArtists by id. This API
-                    // demonstrably repeats a linkage entry (the on-device probe
-                    // of artist 8405 returned `Fixxxer (Remastered)` twice; see
-                    // dedupRemoteAlbums' KDoc), and keying on `link.id` turns any
-                    // duplicate that ever slips past the projection into a hard
-                    // "key was already used" CRASH. The dedup is defence in
-                    // depth, not permission to re-add the key: the cost of the
-                    // default index key here is nil (the list is short, static
-                    // and never reordered), and the cost of being wrong is the
-                    // whole screen.
-                    items(similarArtists) { link ->
+                    // Deliberately UNKEYED. This API demonstrably repeats a
+                    // linkage entry (the probe of artist 8405 returned
+                    // `Fixxxer (Remastered)` twice through the same mechanism;
+                    // see dedupRemoteAlbums' KDoc), and keying on `link.id`
+                    // turns any duplicate into a hard "key was already used"
+                    // CRASH. The cost of the default index key here is nil (the
+                    // list is short, static and never reordered); the cost of
+                    // being wrong is the whole screen.
+                    items(section.artists) { link ->
                         ArtistRow(
                             name = link.name,
                             artUrl = link.artworkUrl,
@@ -288,9 +347,9 @@ fun ArtistDetailScreen(
                 // is no local list here to block, and `loading` is untouched).
                 // Without it a Tidal-only artist (a similar-artist tap) reads
                 // "no tracks" for the whole remote round-trip, since the local
-                // `loading` is already false. (That round-trip is no longer
-                // padded by the official biography fallback — deleted 2026-07-16
-                // — but it is still id-resolution + detail + bio + two lists.)
+                // `loading` is already false.
+                // (That round-trip is now id-resolution + ONE pages/artist call,
+                // where it used to be id-resolution + four sequential reads.)
                 // The finally in loadArtistDetail always clears this, so
                 // an artist genuinely not on Tidal still settles to EmptyState
                 // rather than a stuck spinner.
@@ -348,3 +407,13 @@ fun ArtistDetailScreen(
         )
     }
 }
+
+/**
+ * How many of `pages/artist`'s 'Top Tracks' the screen renders.
+ *
+ * The module reported 300 items and the endpoint REFUSES a `limit` param (it
+ * answers 400), so the cap is the client's to apply. 50 is what this page
+ * shipped with (`artistTopTracks(limit = 50)`) and what the desktop uses
+ * (`get_top_tracks(limit=50)`) — deliberately not a behaviour change.
+ */
+private const val TOP_TRACKS_DISPLAY_LIMIT = 50

@@ -40,7 +40,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.decodeFromString
@@ -481,30 +480,30 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ---- Slice 1: official-API detail enrichment (overlays local grouping) ----
-    val artistDetail = MutableStateFlow<io.github.auxen.provider.tidal.TidalArtistDetail?>(null)
+    // ---- The artist page: ONE internal-v1 read (pages/artist) ----
 
     /**
-     * The artist discography, from INTERNAL-v1 (`artists/{id}/albums`) — a
-     * separate flow from [artistDetail] because it is a separate API and a
-     * separate call. [io.github.auxen.provider.tidal.TidalMetadataRepository]'s
-     * constructor is frozen and holds no internal-v1 provider, so this
-     * composition happens here, not there. Empty means "no discography" (not
-     * logged in to internal-v1, unknown artist, or the call failed) — the row
-     * simply falls back to local albums.
+     * The whole Tidal artist page from ONE call — biography, top tracks, the
+     * discography already categorised by Tidal, and Fans Also Like with photos.
+     *
+     * **This replaced three flows** (`artistDetail` from official v2,
+     * `artistAlbums` and `artistTopTracks` from internal-v1) fed by four
+     * sequential round-trips. On-device that produced no biography (official v2
+     * has none at our tier), placeholder avatars (a similar artist's profileArt
+     * is not include-able from an official artist document) and 20 *"Fixxxer"*
+     * rough mixes as a discography (`artists/{id}/albums` returns 43 albums
+     * flattened and discards Tidal's own curation).
+     *
+     * Null means "no artist page": not logged in to internal-v1, no id resolved,
+     * or the call failed. The screen then renders exactly what it renders today
+     * off its offline-safe local base.
+     *
+     * This lives here, not on [io.github.auxen.provider.tidal.TidalMetadataRepository],
+     * because that class's constructor is FROZEN and holds no internal-v1
+     * provider — the same reason `artistAlbums`/`artistTopTracks` were composed
+     * here before it.
      */
-    val artistAlbums = MutableStateFlow<List<io.github.auxen.provider.tidal.AlbumSummary>>(emptyList())
-
-    /**
-     * The artist's top tracks in POPULARITY order, from INTERNAL-v1
-     * (`artists/{id}/toptracks`) — same reasoning as [artistAlbums]: separate
-     * API, separate call, composed here because the repository cannot reach the
-     * internal-v1 provider. Empty means "no top tracks", and the screen then
-     * shows the plain local track list exactly as it does today
-     * ([io.github.auxen.provider.tidal.mergeArtistTracks] returns the local list
-     * untouched on an empty top-tracks list).
-     */
-    val artistTopTracks = MutableStateFlow<List<Track>>(emptyList())
+    val artistPage = MutableStateFlow<io.github.auxen.provider.tidal.TidalArtistPage?>(null)
     val artistDetailLoading = MutableStateFlow(false)
     private var artistDetailKey: String? = null
     private var artistDetailJob: Job? = null
@@ -516,8 +515,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Load remote artist enrichment. Resolves the artist id through the chain in
-     * the plan's *Artist-id resolution*, then fans out to the reads. Keyed so a
-     * recomposition/re-navigation to the same artist does not refetch.
+     * the plan's *Artist-id resolution*, then loads the whole page in one read.
+     * Keyed so a recomposition/re-navigation to the same artist does not refetch.
      *
      * The id chain, in order — first hit wins:
      *  1. [tidalArtistId] — already known (a similar-artist tap).
@@ -532,19 +531,21 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
      * artist is exactly who step 3 exists for. `searchArtistIdExact` is one
      * request, only on artist-page open, and the key guard stops it repeating.
      *
-     * The official artist document and the two internal-v1 lists are fetched off
-     * ONE resolved id and each is allowed to fail on its own: a missing
-     * discography must not cost us the biography, and vice versa.
+     * Once the id resolves, ONE call ([io.github.auxen.provider.tidal.TidalProvider.artistPage])
+     * fills the whole page. There is nothing left to fan out and nothing left to
+     * fail independently: the four reads this replaced could each half-succeed
+     * and leave the screen in a partial state, and now the page either lands or
+     * it does not.
      *
      * **Why every write is guarded on [key] and not just by `cancel()`** — do not
      * "simplify" these checks away. `cancel()` alone cannot stop a superseded
      * load dead, because the internal-v1 provider wraps its network reads in
-     * `runCatching { get(...) }` (e.g. `TidalProvider.artistAlbums`), and
+     * `runCatching { get(...) }` (e.g. `TidalProvider.artistPage`), and
      * `runCatching` catches `Throwable` — **including the `CancellationException`
      * that cancellation delivers**. A cancelled loader therefore resumes with
-     * `emptyList()` in hand and runs on until its next REAL suspension point; a
+     * `null` in hand and runs on until its next REAL suspension point; a
      * `MutableStateFlow` write is not one. Without the [key] guard it would still
-     * clobber the winner's discography with an empty list and clear the winner's
+     * clobber the winner's page with null and clear the winner's
      * spinner early. The guard is the actual correctness mechanism; `cancel()` is
      * the optimisation that stops the wasted request.
      */
@@ -560,12 +561,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         // LaunchedEffect restarting cancels only ITS OWN coroutine, never the
         // viewModelScope job below. Unguarded, the two race and whichever network
         // round-trip lands LAST wins: for two Tidal artists sharing an exact
-        // name, that is the WRONG artist's bio on the page. Same cancel-and-
-        // relaunch idiom as searchDebounceJob/loginJob.
+        // name, that is the WRONG artist's page. Same cancel-and-relaunch idiom
+        // as searchDebounceJob/loginJob.
         artistDetailJob?.cancel()
-        artistDetail.value = null
-        artistAlbums.value = emptyList()
-        artistTopTracks.value = emptyList()
+        artistPage.value = null
         artistDetailJob = viewModelScope.launch {
             artistDetailLoading.value = true
             try {
@@ -573,42 +572,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     ?: seedTidalTrackId?.let { Graph.tidalMetadata.trackRelations(it).getOrNull()?.artistId }
                     ?: Graph.tidal.searchArtistIdExact(artistName)
                     ?: return@launch
-                Graph.tidalMetadata.artistDetail(artistId).onSuccess {
-                    if (artistDetailKey == key) artistDetail.value = it
-                }
-                // The biography is INTERNAL-v1 ([TidalProvider.artistBio]) —
-                // official v2 has none at our tier (proven on-device for
-                // Metallica AND Tommy Richman; see artistBioUrl's KDoc). It is
-                // composed in HERE for the same reason the two lists below are:
-                // the repository's constructor is frozen and cannot reach the
-                // internal-v1 provider.
-                //
-                // Fetched BEFORE the lists on purpose. The Biography section
-                // renders ABOVE the Albums row, so a bio landing after it would
-                // shove the discography down mid-scroll; filling it first costs
-                // the same total time (these are all sequential) and keeps the
-                // layout stable under the user's finger.
-                //
-                // `update` (not `.value =`) so this composes onto whatever the
-                // official detail published rather than racing a stale read, and
-                // `current?` means a FAILED artistDetail stays null — there is no
-                // page to hang a bio on, and the screen reads `detail?.biography`
-                // anyway. A null bio is left alone, never written: that keeps an
-                // official bio (should the tier ever serve one) from being
-                // clobbered by an internal-v1 miss.
-                val bio = Graph.tidal.artistBio(artistId)
-                if (artistDetailKey == key && bio != null) {
-                    artistDetail.update { current -> current?.copy(biography = bio) }
-                }
-                // Internal-v1, per the artist-lists decision. Neither throws
-                // (both return empty on any failure), so neither can take down
-                // the official detail resolved just above, nor each other.
-                // Published one at a time, in this order, so the discography row
-                // appears as soon as it lands instead of waiting on top tracks.
-                val albums = Graph.tidal.artistAlbums(artistId)
-                if (artistDetailKey == key) artistAlbums.value = albums
-                val top = Graph.tidal.artistTopTracks(artistId)
-                if (artistDetailKey == key) artistTopTracks.value = top
+                // ONE read. `artistPage` never throws (it returns null on any
+                // failure), so there is nothing to catch; the try/finally exists
+                // solely to clear the spinner on the early return above.
+                val page = Graph.tidal.artistPage(artistId)
+                if (artistDetailKey == key && page != null) artistPage.value = page
             } finally {
                 if (artistDetailKey == key) artistDetailLoading.value = false
             }
