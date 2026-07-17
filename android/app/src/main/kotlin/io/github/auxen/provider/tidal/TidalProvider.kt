@@ -314,6 +314,34 @@ class TidalProvider(
     }
 
     /**
+     * Credits + lyrics for a Tidal track, assembled into the [TidalTrackDetail]
+     * the info sheet renders — two internal-v1 reads (`tracks/{id}/credits` and
+     * `tracks/{id}/lyrics`) in place of the official-v2 compound document. Metadata
+     * only: resolves no stream.
+     *
+     * Each read fails independently and gracefully: no credits → empty list, no
+     * lyrics (a 404 is EXPECTED for instrumentals) → null text. Returns null ONLY
+     * when not logged in — the sheet then shows "No details available." The title
+     * comes from [track] because neither endpoint carries it. `similarTracks` is
+     * empty: internal-v1 credits/lyrics carry none, and the sheet never rendered them.
+     */
+    suspend fun trackDetail(track: Track): TidalTrackDetail? {
+        val token = validToken() ?: return null
+        val credits = runCatching { get(trackCreditsUrl(API_BASE, track.sourceId, countryCode).toString(), token) }
+            .getOrNull()?.let { trackCreditsFrom(it, json) }.orEmpty()
+        val lyrics = runCatching { get(trackLyricsUrl(API_BASE, track.sourceId, countryCode).toString(), token) }
+            .getOrNull()?.let { trackLyricsFrom(it, json) }
+        return TidalTrackDetail(
+            id = track.sourceId,
+            title = track.title,
+            credits = credits,
+            lyricsText = lyrics?.lyrics,
+            lyricsSynced = lyrics?.subtitles,
+            similarTracks = emptyList(),
+        )
+    }
+
+    /**
      * The artist's biography as DISPLAY-READY text — a read-only catalog GET,
      * mirroring the desktop's `best.get_bio()` (`auxen/providers/tidal.py:911-916`).
      * Metadata only: it resolves no stream and touches no session state.

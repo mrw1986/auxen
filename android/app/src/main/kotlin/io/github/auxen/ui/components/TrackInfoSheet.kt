@@ -19,8 +19,9 @@ import io.github.auxen.provider.tidal.TidalTrackDetail
 
 /**
  * Credits + lyrics for a Tidal track, opened from [TrackActionSheet]'s
- * "Credits & lyrics" action. Backed by the OFFICIAL metadata API's
- * `trackDetail` projection — metadata only; nothing here resolves a stream.
+ * "Credits & lyrics" action. Backed by the internal-v1 `tracks/{id}/credits`
+ * and `tracks/{id}/lyrics` reads (assembled by `TidalProvider.trackDetail`) —
+ * metadata only; nothing here resolves a stream.
  *
  * [detail] is null both while [loading] and when the fetch failed / the track
  * has no document; the body tells those apart with [loading] alone, so a

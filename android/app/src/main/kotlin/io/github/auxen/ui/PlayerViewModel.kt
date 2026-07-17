@@ -653,15 +653,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
      * [loadAlbumDetail] document at length**, and it is load-bearing here for the
      * same reason: the info sheet is opened per-track, so long-pressing track A,
      * dismissing mid-flight and opening track B leaves A's request in the air. If
-     * A lands last, its `onSuccess` would clobber B's — and since the sheet reads
-     * its header from [TidalTrackDetail.title], the user would sit on a sheet
-     * showing A's title, A's credits and A's lyrics with no way to tell it is
-     * stale except to notice the title. Cancelling A helps (unlike the
-     * internal-v1 reads, `Graph.tidalMetadata.trackDetail` lets a
-     * `CancellationException` propagate — `mapCatching` never sees it, because
-     * the client's own `withContext` rethrows on the way out), but cancellation
-     * is not instantaneous and A's `finally` still races B's spinner. The guard
-     * is what actually settles both.
+     * A lands last, its write would clobber B's — and since the sheet reads its
+     * header from [TidalTrackDetail.title], the user would sit on a sheet showing
+     * A's title, credits and lyrics with no way to tell it is stale. `cancel()`
+     * cannot settle this alone: `Graph.tidal.trackDetail` wraps its reads in
+     * `runCatching`, which swallows the `CancellationException` cancellation
+     * delivers, so a cancelled load resumes with a value in hand. The token guard
+     * is what actually settles both — the same mechanism [loadArtistDetail] documents.
      *
      * **A monotonic token, not the siblings' string key** — deliberately. Their
      * key doubles as a dedup ("same artist → don't refetch"); this load must NOT
@@ -677,9 +675,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         trackDetailJob = viewModelScope.launch {
             trackDetailLoading.value = true
             try {
-                Graph.tidalMetadata.trackDetail(track.sourceId).onSuccess {
-                    if (trackDetailToken == token) trackDetail.value = it
-                }
+                val detail = Graph.tidal.trackDetail(track)
+                if (trackDetailToken == token && detail != null) trackDetail.value = detail
             } finally {
                 if (trackDetailToken == token) trackDetailLoading.value = false
             }
