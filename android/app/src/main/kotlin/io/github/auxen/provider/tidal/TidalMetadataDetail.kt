@@ -190,12 +190,15 @@ internal fun albumSummaryFrom(res: TidalResource, view: TidalDocumentView, json:
  * Pure projection: compound artist [TidalDocument] → [TidalArtistDetail].
  * Returns null when there is no primary artist.
  *
- * `biography` is null both when the artist has none AND when Tidal simply did
- * not put the resource in `included` (observed on-device for artist 8405, whose
- * `biography` linkage was present but unresolved). The projection cannot tell
- * those apart and does not try: it reports null, and
- * [TidalMetadataRepository.artistDetail] fetches the relationship endpoint on
- * null. Both causes converge on the same fix, so neither needs identifying.
+ * **`biography` is always null in production, and that is expected.**
+ * [TidalMetadataRepository.ARTIST_DETAIL_INCLUDE] no longer requests the
+ * include, because official v2 has no biography at our tier (proven for
+ * Metallica and Tommy Richman). The real bio is fetched from internal-v1 and
+ * composed onto this type by the ViewModel — see [TidalProvider.artistBio]. This
+ * projection still reads the field so it stays a faithful projection of whatever
+ * document it is handed (and so the ViewModel's compose-in is additive rather
+ * than overwriting), not because the field is expected to arrive. If you are
+ * here because the bio is missing, the answer is not to re-add the include.
  *
  * `similarArtists`' own `profileArt` is NOT flatly include-able from an artist
  * document, so those `artworkUrl`s are null — the UI shows a glyph, and tapping
@@ -223,25 +226,13 @@ fun artistDetailFrom(doc: TidalDocument, json: Json, artworkTargetPx: Int): Tida
     )
 }
 
-/**
- * Pure projection for the biography FALLBACK document
- * (`GET /artists/{id}/relationships/biography?include=biography`).
- *
- * Reads `included` directly rather than going through [TidalDocumentView]: this
- * document's `data` is a bare `Resource_Identifier` (`{type,id}`) with no
- * attributes and no relationships, so `primary`/`related` have nothing to give.
- * The text only ever exists in `included`, put there by `?include=biography`.
- *
- * Null — never an error — when the artist has no biography (`data: null`,
- * empty `included`) or the text is blank. The caller treats null as "no bio"
- * and hides the section, matching the desktop, which swallows the identical
- * 404 (`providers/tidal.py:912-915`: "404s are expected for lesser-known artists").
- */
-fun biographyTextFrom(doc: TidalDocument, json: Json): String? =
-    doc.included.firstOrNull { it.type == "artistBiographies" }
-        ?.decodeAttributes<ArtistBiographyAttributes>(json)
-        ?.text
-        ?.takeIf { it.isNotBlank() }
+// `biographyTextFrom` — the projection for the
+// `/artists/{id}/relationships/biography` fallback document — was DELETED on
+// 2026-07-16 together with that endpoint and its client method. It parsed
+// correctly; there was simply never anything to parse. Official v2 serves no
+// biography at our tier (proven for Metallica and Tommy Richman), so the bio
+// now comes from internal-v1 `artists/{id}/bio` via `artistBioFrom`
+// (TidalInternalArtist.kt), which also handles the markup that endpoint returns.
 
 /**
  * Pure projection: compound album [TidalDocument] → [TidalAlbumDetail]. Returns

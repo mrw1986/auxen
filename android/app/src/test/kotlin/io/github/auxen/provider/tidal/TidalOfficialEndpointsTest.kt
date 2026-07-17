@@ -91,20 +91,11 @@ class TidalOfficialEndpointsTest {
         assertEquals("Bearer tok-123", request.header("Authorization"))
     }
 
-    @Test
-    fun `artist biography relationship request carries the include and country code`() {
-        val request = TidalOfficialEndpoints.artistBiographyRequest(
-            id = "8405", accessToken = "tok-123",
-            include = listOf("biography"), countryCode = "US",
-        )
-        val url = request.url
-        assertEquals("/v2/artists/8405/relationships/biography", url.encodedPath)
-        // Without ?include=biography the response carries only a {type,id}
-        // identifier and no bio text — the include is load-bearing, not cosmetic.
-        assertEquals(listOf("biography"), url.queryParameterValues("include"))
-        assertEquals("US", url.queryParameter("countryCode"))
-        assertEquals("Bearer tok-123", request.header("Authorization"))
-    }
+    // `artist biography relationship request …` was deleted on 2026-07-16 with the
+    // endpoint it covered. The request shape was correct; the endpoint just has no
+    // data at our tier (empty for Metallica AND Tommy Richman, even with the
+    // load-bearing ?include=biography). The bio is internal-v1 now — see
+    // `artistBioUrl` in TidalInternalArtistTest.
 
     @Test
     fun `album request carries include params and the country code`() {

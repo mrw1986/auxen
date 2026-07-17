@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.decodeFromString
@@ -479,6 +480,30 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     ?: return@launch
                 Graph.tidalMetadata.artistDetail(artistId).onSuccess {
                     if (artistDetailKey == key) artistDetail.value = it
+                }
+                // The biography is INTERNAL-v1 ([TidalProvider.artistBio]) —
+                // official v2 has none at our tier (proven on-device for
+                // Metallica AND Tommy Richman; see artistBioUrl's KDoc). It is
+                // composed in HERE for the same reason the two lists below are:
+                // the repository's constructor is frozen and cannot reach the
+                // internal-v1 provider.
+                //
+                // Fetched BEFORE the lists on purpose. The Biography section
+                // renders ABOVE the Albums row, so a bio landing after it would
+                // shove the discography down mid-scroll; filling it first costs
+                // the same total time (these are all sequential) and keeps the
+                // layout stable under the user's finger.
+                //
+                // `update` (not `.value =`) so this composes onto whatever the
+                // official detail published rather than racing a stale read, and
+                // `current?` means a FAILED artistDetail stays null — there is no
+                // page to hang a bio on, and the screen reads `detail?.biography`
+                // anyway. A null bio is left alone, never written: that keeps an
+                // official bio (should the tier ever serve one) from being
+                // clobbered by an internal-v1 miss.
+                val bio = Graph.tidal.artistBio(artistId)
+                if (artistDetailKey == key && bio != null) {
+                    artistDetail.update { current -> current?.copy(biography = bio) }
                 }
                 // Internal-v1, per the artist-lists decision. Neither throws
                 // (both return empty on any failure), so neither can take down

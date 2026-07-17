@@ -68,14 +68,21 @@ class TidalArtistDetailTest {
         assertNull(artistDetailFrom(json.decodeFromString("""{ "data": [], "included": [] }"""), json, 640))
     }
 
-    // ---- the biography fallback (falsified assumption A, on-device 2026-07-16) ----
+    // ---- the biography is NOT official-v2's to give (on-device 2026-07-16) ----
+    //
+    // The two `biographyTextFrom` tests that lived here were deleted with the
+    // function: the `/artists/{id}/relationships/biography` fallback answered
+    // empty for Metallica AND for Tommy Richman, so official v2 has no bio at our
+    // tier. The bio is now internal-v1 — its tests are `artistBioFrom` /
+    // `formatTidalBio` in TidalInternalArtistTest.
 
     @Test
     fun `artistDetailFrom leaves biography null when the resource is linked but not included`() {
         // EXACTLY what the real API returned for artist 8405: the relationship
         // linkage is there, the artistBiographies resource is not in `included`.
-        // The projection must NOT invent one — the repository fetches the
-        // fallback when it sees this null.
+        // The projection must NOT invent one. In production this null is now the
+        // ONLY outcome — ARTIST_DETAIL_INCLUDE no longer asks for the bio at all
+        // — and the ViewModel composes the internal-v1 bio in on top.
         val doc = """
             { "data": { "id": "8405", "type": "artists",
                 "attributes": { "name": "Metallica" },
@@ -86,33 +93,13 @@ class TidalArtistDetailTest {
     }
 
     @Test
-    fun `biographyTextFrom reads the bio out of a relationship document`() {
-        // GET /artists/{id}/relationships/biography?include=biography — `data` is
-        // a bare Resource_Identifier, so the text only exists in `included`.
-        val doc = """
-            { "data": { "id": "b9", "type": "artistBiographies" },
-              "included": [
-                { "id": "b9", "type": "artistBiographies",
-                  "attributes": { "text": "Formed in Los Angeles in 1981.", "source": "TIDAL", "editable": false } }
-              ],
-              "links": { "self": "/artists/8405/relationships/biography" } }
-        """.trimIndent()
-        assertEquals("Formed in Los Angeles in 1981.", biographyTextFrom(json.decodeFromString(doc), json))
-    }
-
-    @Test
-    fun `biographyTextFrom returns null for an empty or blank relationship document`() {
-        // A genuinely bio-less artist: to-one linkage resolves to null. Must read
-        // as "no bio", never as an error.
-        val empty = """{ "data": null, "included": [], "links": { "self": "/x" } }"""
-        assertNull(biographyTextFrom(json.decodeFromString(empty), json))
-
-        val blank = """
-            { "data": { "id": "b9", "type": "artistBiographies" },
-              "included": [ { "id": "b9", "type": "artistBiographies", "attributes": { "text": "   " } } ],
-              "links": { "self": "/x" } }
-        """.trimIndent()
-        assertNull(biographyTextFrom(json.decodeFromString(blank), json))
+    fun `ARTIST_DETAIL_INCLUDE does not ask official v2 for a biography it has not got`() {
+        // Pins the deletion. Re-adding "biography" here buys a bigger response and
+        // a field that is always null (proven for Metallica and Tommy Richman).
+        assertEquals(
+            listOf("similarArtists", "profileArt"),
+            TidalMetadataRepository.ARTIST_DETAIL_INCLUDE,
+        )
     }
 
     // ---- local ∪ Tidal discography dedup (mirrors desktop window.py:1394-1407) ----

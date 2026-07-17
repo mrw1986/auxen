@@ -243,6 +243,31 @@ class TidalProvider(
         return artistIdFromSearch(body, json, artistName)
     }
 
+    /**
+     * The artist's biography as DISPLAY-READY text — a read-only catalog GET,
+     * mirroring the desktop's `best.get_bio()` (`auxen/providers/tidal.py:911-916`).
+     * Metadata only: it resolves no stream and touches no session state.
+     *
+     * This lives on internal-v1 because **official v2 has no biography data at
+     * our tier** — proven twice on-device, for Metallica and for Tommy Richman;
+     * see [artistBioUrl]'s KDoc. The official artist document no longer even
+     * requests the include.
+     *
+     * Returns null when not logged in, on a 404, or on any call/parse failure —
+     * and a **404 is the EXPECTED case for a lesser-known artist**, not an
+     * error. [get] throws on a non-2xx, so `runCatching` is what turns that 404
+     * into "no bio"; the screen then hides the section, exactly as the desktop's
+     * bare `except` does ("404s are expected for lesser-known artists"). A
+     * bio-less artist must render cleanly, and a bio failure must never cost the
+     * page its discography or top tracks.
+     */
+    suspend fun artistBio(artistId: String): String? {
+        val token = validToken() ?: return null
+        val url = artistBioUrl(API_BASE, artistId, countryCode)
+        val body = runCatching { get(url.toString(), token) }.getOrNull() ?: return null
+        return artistBioFrom(body, json)
+    }
+
     // ------------------------------------------------------------------
     // Internals
     // ------------------------------------------------------------------

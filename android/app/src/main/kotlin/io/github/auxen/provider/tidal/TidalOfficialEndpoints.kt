@@ -80,29 +80,15 @@ object TidalOfficialEndpoints {
         return authed(url, accessToken)
     }
 
-    /**
-     * `GET /artists/{id}/relationships/biography` — the biography fallback.
-     *
-     * Probed on-device 2026-07-16: `GET /artists/8405?include=biography` came
-     * back with an EMPTY biography, so the bio does not reliably arrive in the
-     * artist document's `included`. This endpoint is the direct fetch. Per the
-     * spec its params are `id`, `countryCode`, `include` (example: `biography`),
-     * and it answers `Artists_Single_Relationship_Data_Document` — `data` is a
-     * bare `{type,id}` identifier, so **`?include=biography` is load-bearing**:
-     * without it the response carries no bio text at all.
-     */
-    fun artistBiographyRequest(
-        id: String,
-        accessToken: String,
-        include: List<String> = emptyList(),
-        countryCode: String? = null,
-    ): Request {
-        val url = "$BASE/artists/$id/relationships/biography".toHttpUrl().newBuilder()
-            .apply { countryCode?.let { addQueryParameter("countryCode", it) } }
-            .apply { include.forEach { addQueryParameter("include", it) } }
-            .build()
-        return authed(url, accessToken)
-    }
+    // `artistBiographyRequest` (GET /artists/{id}/relationships/biography) was
+    // DELETED here on 2026-07-16. It was the biography fallback, and it does not
+    // work at our access tier: with `?include=biography` — the param the spec
+    // makes load-bearing — it still answered nothing, for artist 8405
+    // (Metallica) and on-device for Tommy Richman. The artist document's own
+    // `?include=biography` is equally empty. Official v2 simply has no biography
+    // data for us; the bio now comes from internal-v1 `artists/{id}/bio`
+    // (TidalProvider.artistBio). Re-adding this endpoint would re-add a second
+    // sequential round-trip that returns null on every artist.
 
     /** `GET /albums/{id}` with `?include=...` (items/artists/coverArt/similarAlbums). `countryCode` optional per spec. */
     fun albumRequest(

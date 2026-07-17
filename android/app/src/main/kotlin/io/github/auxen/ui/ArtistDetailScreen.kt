@@ -183,8 +183,13 @@ fun ArtistDetailScreen(
             }
         }
         // A null biography renders nothing at all — no header, no placeholder,
-        // no error. The repository has already exhausted its fallback by the
-        // time this is null, and the desktop hides the section too.
+        // no error. By the time this is null the internal-v1 `artists/{id}/bio`
+        // read has already come back empty or 404'd (the expected answer for a
+        // lesser-known artist), and the desktop hides the section too.
+        //
+        // The text is display-ready: `artistBioFrom` has already turned the
+        // endpoint's `<br>`/`[wimpLink]` markup into plain text, so no raw tag
+        // can reach this Text.
         detail?.biography?.let { biography ->
             item { SectionHeader("Biography") }
             item {
@@ -278,9 +283,10 @@ fun ArtistDetailScreen(
                 // is no local list here to block, and `loading` is untouched).
                 // Without it a Tidal-only artist (a similar-artist tap) reads
                 // "no tracks" for the whole remote round-trip, since the local
-                // `loading` is already false — and that round-trip is the slow
-                // path, because an empty biography forces a second sequential
-                // fetch. The finally in loadArtistDetail always clears this, so
+                // `loading` is already false. (That round-trip is no longer
+                // padded by the official biography fallback — deleted 2026-07-16
+                // — but it is still id-resolution + detail + bio + two lists.)
+                // The finally in loadArtistDetail always clears this, so
                 // an artist genuinely not on Tidal still settles to EmptyState
                 // rather than a stuck spinner.
                 if (loading || artistDetailLoading) {

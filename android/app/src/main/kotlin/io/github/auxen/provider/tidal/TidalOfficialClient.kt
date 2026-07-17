@@ -45,13 +45,9 @@ class TidalOfficialClient(private val client: OkHttpClient) {
         countryCode: String? = null,
     ): Result<TidalDocument> = execute(TidalOfficialEndpoints.artistRequest(id, accessToken, include, countryCode))
 
-    /** Fetch an artist's biography relationship document (see [TidalOfficialEndpoints.artistBiographyRequest]). */
-    suspend fun getArtistBiography(
-        id: String,
-        accessToken: String,
-        include: List<String>,
-        countryCode: String? = null,
-    ): Result<TidalDocument> = execute(TidalOfficialEndpoints.artistBiographyRequest(id, accessToken, include, countryCode))
+    // `getArtistBiography` was DELETED on 2026-07-16 along with the endpoint it
+    // wrapped — official v2 has no biography data at our tier. See the note in
+    // TidalOfficialEndpoints where artistBiographyRequest used to live.
 
     /** Fetch an album as a JSON:API compound document (tracklist/artists/coverArt/similarAlbums). */
     suspend fun getAlbum(

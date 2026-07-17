@@ -7,9 +7,9 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 
 /**
  * The pure parts of the artist reads that live on the INTERNAL v1 API
- * (`api.tidal.com/v1`) — the three deliberate internal-v1 additions in this
- * slice (see Global Constraints): the **discography**, the **top tracks**, and
- * **artist id by exact name**.
+ * (`api.tidal.com/v1`) — the four deliberate internal-v1 additions in this
+ * slice (see Global Constraints): the **discography**, the **top tracks**,
+ * **artist id by exact name**, and the **biography**.
  *
  * Why not official v2: probed on-device 2026-07-16, `GET /artists/8405?include=albums`
  * returned 20 *Fixxxer* variants (rough mixes, a vocal idea, `Fixxxer (Remastered)`
@@ -229,3 +229,97 @@ fun artistIdFromSearch(body: String, json: Json, artistName: String): String? {
         ?.firstOrNull { it.name.lowercase() == wanted }
         ?.id?.toString()
 }
+
+/**
+ * `GET {apiBase}/artists/{artistId}/bio?countryCode=…` — the artist biography.
+ *
+ * **This is on internal-v1 because official v2 has no biography at our tier.**
+ * Not a guess: `GET /artists/8405?include=biography` came back with the linkage
+ * present and the `artistBiographies` resource absent from `included`, and the
+ * dedicated `/artists/{id}/relationships/biography?include=biography` fallback
+ * then returned nothing either — for Metallica, and again on-device for Tommy
+ * Richman. Two real artists, one of them among the most famous acts alive. That
+ * fallback (and its whole client/endpoint chain) was DELETED when this landed;
+ * do not resurrect it.
+ *
+ * Mirrors `tidalapi`'s `Artist.get_bio()`, which is
+ * `request("GET", f"artists/{self.id}/bio").json()["text"]`
+ * (`tidalapi/artist.py:212-219`) — a plain v1 GET with **no params of its own**,
+ * so the only query parameter is the `countryCode` that `basic_request` attaches
+ * to every v1 call (`tidalapi/request.py:75-76`). The desktop calls it at
+ * `auxen/providers/tidal.py:911-916` and renders rich markup out of the result.
+ */
+fun artistBioUrl(apiBase: String, artistId: String, countryCode: String): HttpUrl =
+    "$apiBase/artists/$artistId/bio".toHttpUrl().newBuilder()
+        .addQueryParameter("countryCode", countryCode)
+        .build()
+
+/** The v1 bio envelope: `{ "source", "lastUpdated", "text" }` — `get_bio` reads only `text`. */
+@Serializable
+data class TidalV1Bio(val text: String? = null)
+
+private val BR_TAG = Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE)
+private val WIMP_LINK = Regex(
+    """\[wimpLink[^\]]*](.*?)\[/wimpLink]""",
+    setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+)
+private val WIMP_LINK_RESIDUAL = Regex("""\[/?wimpLink[^\]]*]""", RegexOption.IGNORE_CASE)
+private val HTML_TAG = Regex("""<[^>]+>""")
+private val BLANK_LINES = Regex("""\n{3,}""")
+
+/**
+ * Tidal bio markup → display text, mirroring the desktop's `_format_bio`
+ * (`auxen/views/artist_detail.py:1282-1325`). The endpoint returns markup, not
+ * prose — that the desktop bothers to parse it is the proof the payload is real,
+ * rich content.
+ *
+ * The rules, in order:
+ *  1. `<br>` / `<br/>` / `<br />` → newline. **Case-insensitively**, which the
+ *     desktop's regex is not: there a `<BR>` falls through to the generic tag
+ *     strip and silently loses the line break. Same intent, one less bug.
+ *  2. `[wimpLink artistId="123"]Name[/wimpLink]` → `Name`.
+ *  3. Any UNPAIRED `[wimpLink …]`/`[/wimpLink]` → dropped. Rule 2 cannot match a
+ *     half-tag, and the tag syntax is square-bracketed so rule 4 will not catch
+ *     it either — without this sweep a malformed bio prints the raw tag.
+ *  4. Every remaining HTML tag → dropped.
+ *  5. Runs of 3+ newlines → one blank line; trim.
+ *
+ * **Deliberate divergences from the desktop, both forced by the target:**
+ * - **Plain text, not bold.** The desktop wraps wimpLink names in Pango `<b>`
+ *   and preserves `<b>/<i>/<u>/…`; this returns a plain `String` for a Compose
+ *   `Text`. Emphasis is lost, never information. Bold would mean an
+ *   `AnnotatedString`, which would drag `androidx.compose.ui.text` into this
+ *   provider package — a layering inversion for italics.
+ * - **No entity escaping.** The desktop's `&` → `&amp;` step exists ONLY because
+ *   Pango parses its input as markup. Compose `Text` renders a literal string,
+ *   so porting that step would print `&amp;` on screen where the artist wrote
+ *   `&`. Its absence here is the correct port, not an omission.
+ */
+fun formatTidalBio(raw: String): String =
+    raw.replace(BR_TAG, "\n")
+        .replace(WIMP_LINK) { it.groupValues[1] }
+        .replace(WIMP_LINK_RESIDUAL, "")
+        .replace(HTML_TAG, "")
+        .replace(BLANK_LINES, "\n\n")
+        .trim()
+
+/**
+ * Pure projection: an `artists/{id}/bio` body → display-ready biography text, or
+ * **null**.
+ *
+ * Parsing and formatting are fused deliberately: [formatTidalBio] is not optional
+ * decoration, it is what stops raw `[wimpLink]`/HTML markup reaching the screen.
+ * A caller handed the raw `text` field could forget to call it; a caller handed
+ * this cannot.
+ *
+ * Null — never an error — for a malformed body, a v1 error envelope, a missing
+ * `text`, or markup that renders to nothing. Every one of those means the same
+ * thing to the UI: hide the section. The desktop swallows the identical failure
+ * in a bare `except` ("404s are expected for lesser-known artists",
+ * `providers/tidal.py:911-916`).
+ */
+fun artistBioFrom(body: String, json: Json): String? =
+    runCatching { json.decodeFromString<TidalV1Bio>(body) }.getOrNull()
+        ?.text
+        ?.let { formatTidalBio(it) }
+        ?.takeIf { it.isNotBlank() }

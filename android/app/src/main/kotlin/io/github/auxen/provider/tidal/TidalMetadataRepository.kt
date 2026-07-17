@@ -88,37 +88,31 @@ class TidalMetadataRepository(
     }
 
     /**
-     * The official-v2 artist document: biography, similar artists, profile art.
-     * **Not the discography and not the top tracks** — those are internal-v1
-     * [TidalProvider.artistAlbums] / [TidalProvider.artistTopTracks], composed
-     * alongside this by the ViewModel (this class's constructor is frozen and
-     * holds no internal-v1 provider).
+     * The official-v2 artist document: similar artists + profile art. **ONE
+     * request, no fallback.**
      *
-     * When the artist document carries no biography, ONE extra fetch of
-     * `/artists/{id}/relationships/biography?include=biography` fills it. That
-     * covers both known causes at once — Tidal omitting the resource from
-     * `included` (observed for artist 8405 on 2026-07-16) and an artist who
-     * genuinely has no bio — without needing to tell them apart.
+     * **Not the biography, not the discography, not the top tracks** — all three
+     * are internal-v1 ([TidalProvider.artistBio] / [TidalProvider.artistAlbums] /
+     * [TidalProvider.artistTopTracks]), composed alongside this by the ViewModel
+     * (this class's constructor is frozen and holds no internal-v1 provider).
      *
-     * The fallback is TOTAL: `getOrNull()` swallows a 404, a network error, and
-     * a `data`-less relationship document alike, all landing on `biography =
-     * null` → the UI hides the section. A bio-less artist must render cleanly,
-     * never as an error, and the rest of the detail must survive a bio failure.
-     * This mirrors the desktop, which wraps `get_bio()` in a bare `except`
-     * ("404s are expected for lesser-known artists", `providers/tidal.py:912-915`).
+     * **The biography used to be here and is gone on purpose.** Official v2 has
+     * no biography data at our tier: `?include=biography` returned the linkage
+     * with the resource absent from `included`, and the dedicated
+     * `/artists/{id}/relationships/biography?include=biography` fallback then
+     * returned nothing either — for artist 8405 (Metallica) and again on-device
+     * for Tommy Richman. That fallback was a second SEQUENTIAL round-trip on
+     * every bio-less artist, i.e. on every artist, which is what made this page
+     * slow; deleting it makes the official half of the artist page a single
+     * request. Do not re-add `"biography"` to [ARTIST_DETAIL_INCLUDE] — it costs
+     * a bigger response for a field that never arrives.
      */
     suspend fun artistDetail(artistId: String): Result<TidalArtistDetail> {
         val token = session.validAccessToken()
             ?: return Result.failure(IllegalStateException("Not logged in to the official Tidal API"))
-        val detail = client.getArtist(artistId, token, ARTIST_DETAIL_INCLUDE, countryCode).mapCatching { doc ->
+        return client.getArtist(artistId, token, ARTIST_DETAIL_INCLUDE, countryCode).mapCatching { doc ->
             artistDetailFrom(doc, json, ARTWORK_TARGET_PX) ?: error("Artist $artistId not found")
         }
-        val projected = detail.getOrNull() ?: return detail
-        if (projected.biography != null) return detail
-        val bio = client.getArtistBiography(artistId, token, BIOGRAPHY_INCLUDE, countryCode)
-            .getOrNull()
-            ?.let { biographyTextFrom(it, json) }
-        return Result.success(projected.copy(biography = bio))
     }
 
     /** Full album detail: metadata, ordered tracklist, cover art, similar albums. */
@@ -192,13 +186,19 @@ class TidalMetadataRepository(
         // Re-adding either include here re-introduces the bug AND costs a
         // bigger response for data nothing reads — don't.
         //
+        // "biography" is deliberately ABSENT for the same reason: official v2
+        // has none at our tier. Probed on-device 2026-07-16, the include's
+        // resource never lands in `included`, and the dedicated relationship
+        // endpoint answered empty for Metallica AND for Tommy Richman. The bio
+        // now comes from internal-v1 (TidalProvider.artistBio). Re-adding it here
+        // buys a bigger response and a field that is always null — don't.
+        //
         // NOTE: this is Slice 1's own constant. The Foundation's ARTIST_INCLUDE
         // (= biography, similarArtists, albums) is a DIFFERENT, merged constant
-        // used by artistOverview() and the Task-1 probe readout. Leave it alone.
-        val ARTIST_DETAIL_INCLUDE = listOf("biography", "similarArtists", "profileArt")
-
-        /** The relationship endpoint's own include — without it the document has a `{type,id}` and no bio text. */
-        val BIOGRAPHY_INCLUDE = listOf("biography")
+        // used by artistOverview() and the Task-1 probe readout. It keeps its
+        // "biography" precisely so that probe keeps REPORTING the emptiness that
+        // motivated this split. Leave it alone.
+        val ARTIST_DETAIL_INCLUDE = listOf("similarArtists", "profileArt")
 
         // The four relationships the album page renders, all real per the spec's
         // Albums_Relationships. Unlike the artist's `albums`/`tracks`, `items` IS

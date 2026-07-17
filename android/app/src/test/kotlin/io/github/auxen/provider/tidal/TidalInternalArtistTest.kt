@@ -175,4 +175,69 @@ class TidalInternalArtistTest {
         assertNull(artistIdFromSearch("""{ "status": 401, "userMessage": "unauthorized" }""", json, "Anybody"))
         assertNull(artistIdFromSearch("not json at all", json, "Anybody"))
     }
+
+    // ---- 4. the biography: artists/{id}/bio ----
+
+    @Test
+    fun `artistBioUrl mirrors tidalapi get_bio - the bare bio path plus countryCode`() {
+        val url = artistBioUrl(apiBase = "https://api.tidal.com/v1", artistId = "8405", countryCode = "US")
+        assertEquals("api.tidal.com", url.host)
+        // tidalapi/artist.py:212-219: request("GET", f"artists/{self.id}/bio").
+        assertEquals("/v1/artists/8405/bio", url.encodedPath)
+        // get_bio passes NO params of its own. countryCode is what basic_request
+        // attaches to EVERY v1 call (tidalapi/request.py:75-76) — the same reason
+        // the other three internal-v1 URLs here carry it.
+        assertEquals("US", url.queryParameter("countryCode"))
+        // Not a collection: limit/offset are meaningless and get_bio sends neither.
+        assertNull(url.queryParameter("limit"))
+        assertNull(url.queryParameter("offset"))
+    }
+
+    @Test
+    fun `artistBioFrom reads the text field out of the v1 bio envelope`() {
+        // get_bio returns .json()["text"] — the payload is an object with a `text`.
+        val body = """{ "source": "TiVo", "lastUpdated": "2023-01-01", "text": "Formed in Los Angeles in 1981." }"""
+        assertEquals("Formed in Los Angeles in 1981.", artistBioFrom(body, json))
+    }
+
+    @Test
+    fun `artistBioFrom converts every br variant to a newline`() {
+        val body = """{ "text": "One<br>Two<br/>Three<br />Four<BR>Five" }"""
+        assertEquals("One\nTwo\nThree\nFour\nFive", artistBioFrom(body, json))
+    }
+
+    @Test
+    fun `artistBioFrom unwraps wimpLink tags to the bare name`() {
+        // The desktop renders these BOLD (artist_detail.py:1319); we render the
+        // name as plain text. Either way the raw tag must never reach the screen.
+        val body = """{ "text": "Produced by [wimpLink artistId=\"12345\"]Bob Rock[/wimpLink] in 1991." }"""
+        assertEquals("Produced by Bob Rock in 1991.", artistBioFrom(body, json))
+    }
+
+    @Test
+    fun `artistBioFrom strips residual html and never leaks a wimpLink tag`() {
+        // An UNPAIRED tag matches no wimpLink regex, so the desktop's two rules
+        // alone would print it verbatim. The residual sweep is what stops that.
+        val body = """{ "text": "<p>Hard <b>rock</b>.</p>[/wimpLink]" }"""
+        assertEquals("Hard rock.", artistBioFrom(body, json))
+    }
+
+    @Test
+    fun `formatTidalBio collapses runs of blank lines and trims`() {
+        // Mirrors the desktop's final `re.sub(r'\n{3,}', '\n\n', text).strip()`.
+        assertEquals("A\n\nB", formatTidalBio("<br><br>A<br><br><br><br>B<br>"))
+    }
+
+    @Test
+    fun `artistBioFrom returns null for a 404 envelope, a malformed body, or blank text`() {
+        // A 404 is EXPECTED for lesser-known artists and must degrade to "no bio",
+        // never an error (providers/tidal.py:911-915). TidalProvider.get() throws
+        // on !isSuccessful, so the 404 body never even reaches here — but an error
+        // envelope served with a 200 must land on null too.
+        assertNull(artistBioFrom("""{ "status": 404, "userMessage": "Artist not found" }""", json))
+        assertNull(artistBioFrom("not json at all", json))
+        assertNull(artistBioFrom("""{ "text": "   " }""", json))
+        // Markup that renders to nothing is "no bio", not an empty section.
+        assertNull(artistBioFrom("""{ "text": "<br><br>" }""", json))
+    }
 }
