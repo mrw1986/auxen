@@ -4,6 +4,7 @@ import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -160,6 +161,108 @@ class TidalArtistDetailTest {
             listOf("Reload"),
             dedupRemoteAlbums(localTitles = setOf("kill 'em all"), remote = remote).map { it.title },
         )
+    }
+
+    // ---- punctuation-variant dedup (DELIBERATELY BEATS THE DESKTOP, 2026-07-16) ----
+
+    @Test
+    fun `normalizeTitleForDedup folds the dash family, ellipses and dots to spaces`() {
+        // The dash family and the two ellipsis spellings are the styling
+        // differences Tidal ships the SAME release under.
+        assertEquals("hardwired to self destruct", normalizeTitleForDedup("Hardwired...To Self Destruct"))
+        assertEquals("hardwired to self destruct", normalizeTitleForDedup("Hardwired…To Self-Destruct"))
+        assertEquals("hardwired to self destruct", normalizeTitleForDedup("Hardwired... To Self-Destruct"))
+        assertEquals("st anger", normalizeTitleForDedup("St. Anger"))
+        assertEquals("and justice for all", normalizeTitleForDedup("...And Justice for All"))
+        // Parentheticals are UNTOUCHED — they distinguish real releases.
+        assertEquals("72 seasons (atmos mix)", normalizeTitleForDedup("72 Seasons (Atmos Mix)"))
+    }
+
+    @Test
+    fun `normalizeTitleForDedup falls back to the raw title when folding leaves nothing`() {
+        // An all-punctuation title folds to "", and TWO such titles would then
+        // collide and eat each other. The fallback keeps them distinct.
+        assertEquals("...", normalizeTitleForDedup("..."))
+        assertNotEquals(normalizeTitleForDedup("..."), normalizeTitleForDedup("…"))
+    }
+
+    @Test
+    fun `dedupRemoteAlbums merges the Hardwired hyphen variants seen on device`() {
+        // THE REPORTED CASE: the discography showed `Hardwired...To Self Destruct`
+        // AND `Hardwired...To Self-Destruct` — differing by ONE hyphen, so the old
+        // exact-lowercase match kept both.
+        val remote = listOf(
+            albumSummary("1", "Hardwired...To Self Destruct"),
+            albumSummary("2", "Hardwired…To Self-Destruct"),
+        )
+        assertEquals(listOf("1"), dedupRemoteAlbums(emptySet(), remote).map { it.id })
+    }
+
+    @Test
+    fun `dedupRemoteAlbums keeps genuinely different releases apart`() {
+        // The NEGATIVES. Each of these must render as its own row.
+        val remote = listOf(
+            albumSummary("1", "72 Seasons"),
+            // A different mix is a different release, not a punctuation variant.
+            albumSummary("2", "72 Seasons (Atmos Mix)"),
+            // Clean/explicit variants both showing is a deliberate product decision.
+            albumSummary("3", "72 Seasons (Clean)"),
+            // Ambiguous: "Re-Load" may or may not be "Reload". Folding a hyphen to a
+            // SPACE (not to nothing) leaves them distinct, which is the safe answer.
+            albumSummary("4", "Reload"),
+            albumSummary("5", "Re-Load"),
+        )
+        assertEquals(listOf("1", "2", "3", "4", "5"), dedupRemoteAlbums(emptySet(), remote).map { it.id })
+    }
+
+    @Test
+    fun `dedupRemoteAlbums normalizes the LOCAL titles too, not just the remote ones`() {
+        // The footgun: normalizing only one side means a local
+        // `Hardwired...To Self-Destruct` never matches the normalized remote and
+        // the duplicate survives anyway.
+        val remote = listOf(albumSummary("1", "Hardwired…To Self Destruct"))
+        assertTrue(dedupRemoteAlbums(setOf("Hardwired...To Self-Destruct"), remote).isEmpty())
+    }
+
+    @Test
+    fun `mergeArtistTracks drops a repeated top-track title carrying a DIFFERENT Tidal id`() {
+        // THE REPORTED CASE: top tracks showed `Enter Sandman` twice — original and
+        // remaster, two distinct catalog ids, so the source:sourceId dedup kept
+        // both. Top tracks arrive in popularity order, so the FIRST is the one to
+        // keep.
+        val top = listOf(
+            tidalTrack("100", "Enter Sandman"),
+            tidalTrack("200", "Enter Sandman"),
+            tidalTrack("300", "One"),
+        )
+        val merged = mergeArtistTracks(top, emptyList())
+        assertEquals(listOf("100", "300"), merged.map { it.sourceId })
+    }
+
+    @Test
+    fun `mergeArtistTracks never title-dedups a LOCAL track against a Tidal top track`() {
+        // The title dedup is scoped to the TIDAL list only. The user's own file is
+        // a genuinely distinct, offline-playable track — dropping it because a
+        // streaming row happens to share its title would delete their library from
+        // their own artist page. The reported bug was two TIDAL ids; this is not
+        // that, and it must not be swept up in the fix.
+        val top = listOf(tidalTrack("100", "Enter Sandman"))
+        val local = listOf(localTrack("f1", "Enter Sandman"))
+        assertEquals(
+            listOf("Enter Sandman", "Enter Sandman"),
+            mergeArtistTracks(top, local).map { it.title },
+        )
+    }
+
+    @Test
+    fun `mergeArtistTracks still drops a local Tidal favorite whose id a deduped top track held`() {
+        // Subtle: the id set must be built from the ORIGINAL top tracks, not the
+        // title-deduped ones. The remaster (200) is dropped from display, but the
+        // user's Tidal favorite OF that remaster must still not reappear below as
+        // an "extra" — it was in the top list.
+        val top = listOf(tidalTrack("100", "Enter Sandman"), tidalTrack("200", "Enter Sandman"))
+        val local = listOf(tidalTrack("200", "Enter Sandman"))
+        assertEquals(listOf("100"), mergeArtistTracks(top, local).map { it.sourceId })
     }
 
     // ---- top tracks ∪ local tracks (mirrors desktop window.py:1409-1422) ----

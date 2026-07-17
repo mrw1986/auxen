@@ -118,11 +118,14 @@ fun ArtistDetailScreen(
     // them — the desktop's merge (window.py:1409-1422). With no top tracks this
     // returns `tracks` unchanged, so the offline base is never at risk.
     val displayTracks = remember(topTracks, tracks) { mergeArtistTracks(topTracks, tracks) }
-    // Local albums render first and Tidal-only albums are appended, deduped by
-    // lowercase title — the desktop's union (window.py:1394-1407).
+    // Local albums render first and Tidal-only albums are appended, deduped on
+    // normalized titles — the desktop's union (window.py:1394-1407), but with a
+    // punctuation-tolerant compare it does not have (see normalizeTitleForDedup).
+    // RAW titles: dedupRemoteAlbums normalizes both sides itself, and
+    // pre-lowercasing here would just be a lossy half of what it already does.
     val tidalOnlyAlbums = remember(albums, remoteAlbums) {
         dedupRemoteAlbums(
-            localTitles = albums.map { it.album.lowercase() }.toSet(),
+            localTitles = albums.map { it.album }.toSet(),
             remote = remoteAlbums,
         )
     }
