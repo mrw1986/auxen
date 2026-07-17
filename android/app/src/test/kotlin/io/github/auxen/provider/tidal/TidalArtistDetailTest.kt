@@ -54,6 +54,33 @@ class TidalArtistDetailTest {
     }
 
     @Test
+    fun `artistDetailFrom dedups similarArtists by id, keeping the first and the order`() {
+        // NOT hypothetical: this compound-document mechanism demonstrably repeats
+        // a linkage entry — the on-device probe of artist 8405 returned
+        // `Fixxxer (Remastered)` TWICE through the very same `related()` path
+        // (see dedupRemoteAlbums' KDoc). `related()` resolves linkage 1:1 with no
+        // dedup, so a repeated entry yields duplicate ids. Rendering them is a
+        // visible bug, and keying a LazyRow on link.id would make it a hard
+        // "key was already used" crash.
+        val doc = """
+            { "data": { "id": "8405", "type": "artists",
+                "attributes": { "name": "Metallica" },
+                "relationships": { "similarArtists": { "data": [
+                    { "id": "200", "type": "artists" },
+                    { "id": "200", "type": "artists" },
+                    { "id": "201", "type": "artists" }
+                ] } } },
+              "included": [
+                { "id": "200", "type": "artists", "attributes": { "name": "Megadeth" } },
+                { "id": "201", "type": "artists", "attributes": { "name": "Slayer" } }
+              ] }
+        """.trimIndent()
+        val similar = artistDetailFrom(json.decodeFromString(doc), json, 640)!!.similarArtists
+        assertEquals(listOf("200", "201"), similar.map { it.id })
+        assertEquals(listOf("Megadeth", "Slayer"), similar.map { it.name })
+    }
+
+    @Test
     fun `artistDetailFrom tolerates an artist with no relationships`() {
         val doc = """{ "data": { "id": "5", "type": "artists", "attributes": { "name": "Solo" } }, "included": [] }"""
         val d = artistDetailFrom(json.decodeFromString(doc), json, artworkTargetPx = 640)!!

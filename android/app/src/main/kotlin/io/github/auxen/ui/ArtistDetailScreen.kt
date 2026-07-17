@@ -252,15 +252,17 @@ fun ArtistDetailScreen(
                     // so these render with ArtistRow's Person glyph — the same
                     // fallback the header uses.
                     //
-                    // Deliberately UNKEYED. `similarArtists` comes straight off
-                    // the linkage array via TidalDocumentView.related, which
-                    // resolves 1:1 with no dedup — and this API demonstrably
-                    // repeats a linkage entry (the on-device probe of artist
-                    // 8405 returned `Fixxxer (Remastered)` twice; see
-                    // dedupRemoteAlbums' KDoc). Keying on `link.id` would turn
-                    // such a duplicate into a hard "key was already used" crash.
-                    // The list is short, static and never reordered, so the
-                    // default index key is both safe and sufficient.
+                    // Deliberately UNKEYED — and it STAYS unkeyed even though
+                    // artistDetailFrom now dedups similarArtists by id. This API
+                    // demonstrably repeats a linkage entry (the on-device probe
+                    // of artist 8405 returned `Fixxxer (Remastered)` twice; see
+                    // dedupRemoteAlbums' KDoc), and keying on `link.id` turns any
+                    // duplicate that ever slips past the projection into a hard
+                    // "key was already used" CRASH. The dedup is defence in
+                    // depth, not permission to re-add the key: the cost of the
+                    // default index key here is nil (the list is short, static
+                    // and never reordered), and the cost of being wrong is the
+                    // whole screen.
                     items(similarArtists) { link ->
                         ArtistRow(
                             name = link.name,

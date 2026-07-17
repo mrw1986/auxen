@@ -200,6 +200,16 @@ internal fun albumSummaryFrom(res: TidalResource, view: TidalDocumentView, json:
  * than overwriting), not because the field is expected to arrive. If you are
  * here because the bio is missing, the answer is not to re-add the include.
  *
+ * `similarArtists` is **deduped by id, first occurrence winning**, in document
+ * order. [TidalDocumentView.related] resolves the linkage array 1:1 with no
+ * dedup, and this API demonstrably repeats a linkage entry — the on-device probe
+ * of artist 8405 returned `Fixxxer (Remastered)` TWICE through this exact
+ * mechanism (see [dedupRemoteAlbums]' KDoc). Duplicates render as duplicate rows,
+ * and would be a hard Compose "key was already used" crash for any caller that
+ * keyed on the id. The dedup is DEFENCE IN DEPTH, not a licence to re-add that
+ * key: ArtistDetailScreen's similar-artist LazyRow stays deliberately unkeyed,
+ * because a projection is the wrong place to bet a crash on.
+ *
  * `similarArtists`' own `profileArt` is NOT flatly include-able from an artist
  * document, so those `artworkUrl`s are null — the UI shows a glyph, and tapping
  * through fetches that artist's own document (with art).
@@ -222,7 +232,7 @@ fun artistDetailFrom(doc: TidalDocument, json: Json, artworkTargetPx: Int): Tida
                 name = it.decodeAttributes<ArtistAttributes>(json)?.name.orEmpty(),
                 artworkUrl = view.artworkUrlFor(it, "profileArt", json, artworkTargetPx),
             )
-        },
+        }.distinctBy { it.id },
     )
 }
 
