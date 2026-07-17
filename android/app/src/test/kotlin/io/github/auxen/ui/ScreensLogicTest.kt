@@ -90,6 +90,34 @@ class ScreensLogicTest {
     }
 
     /**
+     * `searchTabContent(tab, sourceFilter)` is `internal` in `SearchScreen.kt`;
+     * this test lives in the same package/module so it can call it directly
+     * without Robolectric (same precedent as [greetingBoundaries]).
+     *
+     * The type-tab override ships Tracks / Albums / Artists tabs. Albums and
+     * Artists are Tidal-only (the local DB has no album/artist entities yet —
+     * Slice 2), so selecting the "Local" source filter on those two tabs has no
+     * data and must resolve to a Tidal-only empty state, never a misleading
+     * blank. The Tracks tab always shows tracks (the source filter then narrows
+     * the list — see [searchTypeFilterSemantics]).
+     */
+    @Test
+    fun searchTabContentSemantics() {
+        // Tracks tab (0): tracks under every source filter.
+        assertEquals(SearchTabContent.TRACKS, searchTabContent(0, "All"))
+        assertEquals(SearchTabContent.TRACKS, searchTabContent(0, "Local"))
+        assertEquals(SearchTabContent.TRACKS, searchTabContent(0, "Tidal"))
+        // Albums tab (1): Tidal albums under All/Tidal, Tidal-only empty under Local.
+        assertEquals(SearchTabContent.ALBUMS, searchTabContent(1, "All"))
+        assertEquals(SearchTabContent.ALBUMS, searchTabContent(1, "Tidal"))
+        assertEquals(SearchTabContent.TIDAL_ONLY_UNAVAILABLE, searchTabContent(1, "Local"))
+        // Artists tab (2): same shape as albums.
+        assertEquals(SearchTabContent.ARTISTS, searchTabContent(2, "All"))
+        assertEquals(SearchTabContent.ARTISTS, searchTabContent(2, "Tidal"))
+        assertEquals(SearchTabContent.TIDAL_ONLY_UNAVAILABLE, searchTabContent(2, "Local"))
+    }
+
+    /**
      * Mirrors the per-surface loading gate added in polish C2 (Library,
      * Collection, Home, Album/Artist detail): a spinner only while the load is
      * in flight AND there's nothing to show, the EmptyState only once the load

@@ -150,6 +150,10 @@
     <string name="empty_search_prompt_subtitle">Find tracks, albums, and artists across your music.</string>
     <string name="empty_search_no_results_title">No results</string>
     <string name="empty_search_no_results_subtitle">Try a different search or filter.</string>
+    <string name="empty_search_albums_tidal_only_title">Albums are Tidal-only</string>
+    <string name="empty_search_albums_tidal_only_subtitle">Switch the source filter to All or Tidal to see albums.</string>
+    <string name="empty_search_artists_tidal_only_title">Artists are Tidal-only</string>
+    <string name="empty_search_artists_tidal_only_subtitle">Switch the source filter to All or Tidal to see artists.</string>
 
     <string name="empty_collection_tracks_title">No favorite tracks yet</string>
     <string name="empty_collection_tracks_subtitle">Tap the heart on any track to add it here.</string>

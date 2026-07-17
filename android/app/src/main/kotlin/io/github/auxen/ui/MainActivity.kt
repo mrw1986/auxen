@@ -359,7 +359,15 @@ private fun MainScreen(viewModel: PlayerViewModel, widthSizeClass: WindowWidthSi
                             onOpenArtist = { name, id -> navController.navigate(artistRoute(name, id)) },
                         )
                     }
-                    composable("search") { SearchScreen(viewModel) }
+                    composable("search") {
+                        SearchScreen(
+                            viewModel,
+                            onOpenArtist = { name, id -> navController.navigate(artistRoute(name, id)) },
+                            onOpenAlbum = { album, artist, tidalAlbumId ->
+                                navController.navigate(albumRoute(album, artist, tidalAlbumId))
+                            },
+                        )
+                    }
                     composable("collection") {
                         CollectionScreen(
                             viewModel,
