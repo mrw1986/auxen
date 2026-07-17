@@ -268,6 +268,40 @@ class TidalProvider(
         return artistBioFrom(body, json)
     }
 
+    /**
+     * The artist's ENTIRE Tidal page in one read-only catalog GET — biography,
+     * top tracks, the discography **already categorised by Tidal**, and Fans
+     * Also Like **with photos**. Metadata only: it resolves no stream and
+     * touches no session state.
+     *
+     * This is the artist screen's single remote source. It replaces a four-call
+     * fan-out ([artistBio] + [artistAlbums] + [artistTopTracks] + the official-v2
+     * `artistDetail`) that on-device produced no biography, placeholder avatars,
+     * and 20 *"Fixxxer"* rough mixes where a discography should be — because
+     * `artists/{id}/albums` returns 43 albums FLATTENED and discards the
+     * curation this endpoint keeps.
+     *
+     * **The request carries no `limit`, and must not** — this endpoint answers
+     * **400** when one is present (probed 2026-07-16). [get] adds no params, and
+     * [artistPageUrl] sends exactly the four the probe proved.
+     *
+     * [artistId] is a Tidal catalog artist id — the same id official v2 uses,
+     * proven on-device by the id-equivalence gate.
+     *
+     * Returns **null** when not logged in, on any HTTP failure, or when the body
+     * is not a page ([artistPageFrom]'s contract). All of those mean one thing to
+     * the caller: no remote enrichment, and the artist screen renders exactly
+     * what it renders today off its local base. A missing artist page must
+     * degrade the screen, never break it — the same discipline as [artistAlbums]
+     * and the desktop's swallow at `providers/tidal.py:899-900`.
+     */
+    suspend fun artistPage(artistId: String): TidalArtistPage? {
+        val token = validToken() ?: return null
+        val url = artistPageUrl(API_BASE, artistId, countryCode)
+        val body = runCatching { get(url.toString(), token) }.getOrNull() ?: return null
+        return artistPageFrom(body, json, artistId)
+    }
+
     // ------------------------------------------------------------------
     // Internals
     // ------------------------------------------------------------------

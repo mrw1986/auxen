@@ -137,5 +137,26 @@ fun TidalOfficialDebugScreen(viewModel: PlayerViewModel, modifier: Modifier = Mo
         idProbeStatus?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
         }
+
+        HorizontalDivider()
+
+        var artistPageProbeId by remember { mutableStateOf("") }
+        val artistPageProbeStatus by viewModel.tidalArtistPageProbeStatus.collectAsState()
+        OutlinedTextField(
+            value = artistPageProbeId,
+            onValueChange = { artistPageProbeId = it },
+            label = { Text(stringResource(R.string.tidal_artist_page_probe_label)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = { viewModel.runTidalArtistPageProbe(artistPageProbeId) },
+            enabled = artistPageProbeId.isNotBlank(),
+        ) {
+            Text(stringResource(R.string.tidal_artist_page_probe_button))
+        }
+        artistPageProbeStatus?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+        }
     }
 }

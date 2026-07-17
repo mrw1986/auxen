@@ -386,6 +386,101 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private val _tidalArtistPageProbeStatus = MutableStateFlow<String?>(null)
+    val tidalArtistPageProbeStatus: StateFlow<String?> = _tidalArtistPageProbeStatus.asStateFlow()
+
+    /**
+     * The artist-page-rebuild gate: prove `pages/artist` answers from the app's
+     * OWN internal-v1 session and carries what the probe of 2026-07-16 saw.
+     *
+     * It also settles the one open payload question: whether `pagedList.items`
+     * is fully materialised or a first page. The section counts below are what
+     * we ACTUALLY parsed, so they answer it directly.
+     *
+     * Names, titles, ids and counts only — never a token, never a full URL.
+     */
+    fun runTidalArtistPageProbe(artistId: String) {
+        viewModelScope.launch {
+            val id = artistId.trim()
+            _tidalArtistPageProbeStatus.value = "Fetching pages/artist for $id…"
+            val page = Graph.tidal.artistPage(id)
+            if (page == null) {
+                _tidalArtistPageProbeStatus.value =
+                    "FAIL: pages/artist returned nothing for artist id $id. Either you are not logged in " +
+                        "on the internal-v1 path (Account → Log in to Tidal), or the request shape is " +
+                        "wrong. Check FIRST that no `limit` param is being sent — this endpoint answers " +
+                        "400 when one is present, and that is the known trap."
+                return@launch
+            }
+            _tidalArtistPageProbeStatus.value = buildString {
+                appendLine("Artist: ${page.name} (id ${page.id})")
+                appendLine("Picture: ${if (page.artworkUrl != null) "present (480x480)" else "— MISSING"}")
+                appendLine()
+                appendLine("Biography: ${page.biography?.length?.let { "$it chars" } ?: "— MISSING"}")
+                page.biography?.take(160)?.let { appendLine("  \"$it…\"") }
+                appendLine(
+                    if (page.biography != null) {
+                        "PASS — the bio official v2 has not got at our tier. EYEBALL IT: it must read as " +
+                            "prose, with NO raw [wimpLink] or <br> tags left in."
+                    } else {
+                        "FAIL — no biography. This is the headline fix; if it is missing for a major " +
+                            "artist, do not proceed to Task 3."
+                    },
+                )
+                appendLine()
+                appendLine("Top tracks: ${page.topTracks.size}")
+                page.topTracks.take(5).forEach { appendLine("  • ${it.title} — ${it.artist} [${it.qualityLabel}]") }
+                appendLine(
+                    if (page.topTracks.isEmpty()) {
+                        "FAIL — no top tracks."
+                    } else if (page.topTracks.any { it.artist.isBlank() }) {
+                        "FAIL — a track has a BLANK artist name. The projection is reading the singular " +
+                            "`artist` key, which this payload does not have; it must read `artists[0]`."
+                    } else {
+                        "PASS — EYEBALL THE ORDER: it must read like the artist's best-known songs."
+                    },
+                )
+                appendLine()
+                appendLine("Album sections: ${page.albumSections.size}")
+                page.albumSections.forEach { section ->
+                    appendLine("  ${section.title} (${section.albums.size})")
+                    section.albums.take(3).forEach { appendLine("    • ${it.title} (${it.releaseYear ?: "—"})") }
+                }
+                appendLine(
+                    if (page.albumSections.isEmpty()) {
+                        "FAIL — no album sections."
+                    } else {
+                        "PASS — EYEBALL THE CATEGORIES: real studio albums under the FIRST section, and " +
+                            "the Fixxxer rough mixes under 'EP & Singles' rather than in the discography. " +
+                            "The first section is where local albums merge (Task 4), so confirm it IS the " +
+                            "primary discography."
+                    },
+                )
+                appendLine()
+                appendLine("Artist sections: ${page.artistSections.size}")
+                page.artistSections.forEach { section ->
+                    val withArt = section.artists.count { it.artworkUrl != null }
+                    appendLine("  ${section.title} (${section.artists.size}, $withArt with photos)")
+                    section.artists.take(3).forEach { appendLine("    • ${it.name}") }
+                }
+                appendLine(
+                    if (page.artistSections.flatMap { it.artists }.none { it.artworkUrl != null }) {
+                        "FAIL — no photos on any similar artist. That is the user's actual ask."
+                    } else {
+                        "PASS — the photos are here. CONFIRM ON SCREEN that they LOAD: a 480x480 URL is " +
+                            "only correct if the CDN renders it (tidalapi allows 160/320/480/750 for an " +
+                            "artist; 640 — the ALBUM size — would 404)."
+                    },
+                )
+                appendLine()
+                appendLine(
+                    "Section counts above are what we PARSED — they settle whether pagedList.items is " +
+                        "fully materialised or a first page. Record them in the report.",
+                )
+            }
+        }
+    }
+
     // ---- Slice 1: official-API detail enrichment (overlays local grouping) ----
     val artistDetail = MutableStateFlow<io.github.auxen.provider.tidal.TidalArtistDetail?>(null)
 
