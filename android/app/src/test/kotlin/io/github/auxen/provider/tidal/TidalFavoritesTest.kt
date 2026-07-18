@@ -1,6 +1,7 @@
 package io.github.auxen.provider.tidal
 
 import kotlinx.serialization.json.Json
+import io.github.auxen.model.Source
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -44,6 +45,75 @@ class TidalFavoritesTest {
           "totalNumberOfItems": 2
         }
     """.trimIndent()
+
+    private val tracksPage = """
+        {
+          "items": [
+            { "created": "2023-05-01T12:00:00.000+0000",
+              "item": { "id": 12345, "title": "Nightcall", "duration": 258.0,
+                        "trackNumber": 1, "volumeNumber": 1, "explicit": false,
+                        "audioQuality": "LOSSLESS",
+                        "artists": [ { "id": 11, "name": "Kavinsky" } ],
+                        "album": { "id": 75413016, "title": "OutRun", "cover": "aa-bb-cc" } } },
+            { "created": null,
+              "item": { "id": 222, "title": "No Album", "artists": [], "album": null } }
+          ],
+          "totalNumberOfItems": 2
+        }
+    """.trimIndent()
+
+    @Test
+    fun `favoriteTracksFrom projects playable tracks with art, artist, quality and addedAt`() {
+        val tracks = favoriteTracksFrom(tracksPage, json)
+        assertEquals(2, tracks.size)
+        val first = tracks[0].track
+        assertEquals("12345", first.sourceId)
+        assertEquals("Nightcall", first.title)
+        assertEquals("Kavinsky", first.artist) // artists[0].name — there is NO singular `artist` key
+        assertEquals("OutRun", first.album)
+        assertEquals(Source.TIDAL, first.source)
+        assertEquals("FLAC", first.format) // LOSSLESS -> FLAC via toTrack's quality map
+        assertEquals("https://resources.tidal.com/images/aa/bb/cc/640x640.jpg", first.albumArtUrl)
+        assertEquals(1682942400000L, tracks[0].addedAtMillis) // 2023-05-01T12:00:00Z
+    }
+
+    @Test
+    fun `favoriteTracksFrom tolerates a missing album, empty artists and null created`() {
+        val second = favoriteTracksFrom(tracksPage, json)[1]
+        assertEquals("222", second.track.sourceId)
+        assertEquals("", second.track.artist) // empty artists -> artists.firstOrNull()?.name.orEmpty()
+        assertNull(second.track.album) // null album -> album?.title
+        assertNull(second.track.albumArtUrl) // null album -> tidalV1CoverUrl(null)
+        assertNull(second.addedAtMillis) // null created
+    }
+
+    @Test
+    fun `favoriteTracksFrom returns empty list on garbage or an error envelope`() {
+        assertEquals(emptyList<TidalFavoriteTrack>(), favoriteTracksFrom("not json", json))
+        assertEquals(emptyList<TidalFavoriteTrack>(), favoriteTracksFrom("{\"status\":404}", json))
+    }
+
+    @Test
+    fun `favorite tracks read URL is paged and country-scoped, most-recent-first`() {
+        val url = favoriteTracksUrl("https://api.tidal.com/v1", "42", "US", limit = 50, offset = 100)
+        assertEquals("/v1/users/42/favorites/tracks", url.encodedPath)
+        assertEquals("50", url.queryParameter("limit"))
+        assertEquals("100", url.queryParameter("offset"))
+        assertEquals("DATE", url.queryParameter("order"))
+        assertEquals("DESC", url.queryParameter("orderDirection"))
+        assertEquals("US", url.queryParameter("countryCode"))
+    }
+
+    @Test
+    fun `favorite track write URL and delete URL target the tracks relationship`() {
+        val add = favoriteTracksWriteUrl("https://api.tidal.com/v1", "42", "US")
+        assertEquals("/v1/users/42/favorites/tracks", add.encodedPath)
+        assertEquals("US", add.queryParameter("countryCode"))
+
+        val del = favoriteTrackDeleteUrl("https://api.tidal.com/v1", "42", "12345", "US")
+        assertEquals("/v1/users/42/favorites/tracks/12345", del.encodedPath)
+        assertEquals("US", del.queryParameter("countryCode"))
+    }
 
     @Test
     fun `favoriteAlbumsFrom projects id title artist cover and addedAt`() {

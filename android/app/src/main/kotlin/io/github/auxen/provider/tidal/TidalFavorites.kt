@@ -3,6 +3,7 @@ package io.github.auxen.provider.tidal
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import io.github.auxen.model.Track
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.time.Instant
@@ -40,6 +41,17 @@ data class TidalFavoriteArtist(
     val addedAtMillis: Long?,
 )
 
+/**
+ * A Tidal favorite TRACK, projected to a fully-playable [Track] (via
+ * [TidalV1PageTrack.toTrack]) paired with its remote `created` millis. Unlike
+ * the album/artist favorites — which back narrow local tables and so get bespoke
+ * persistence DTOs — a favorite track reuses the EXISTING `tracks`+`favorites`
+ * tables, so the projection IS a [Track]; [addedAtMillis] rides alongside so the
+ * pull can favorite it at Tidal's own timestamp (the Tracks tab orders by
+ * added_at DESC). This is a transient parse result, not a stored row.
+ */
+data class TidalFavoriteTrack(val track: Track, val addedAtMillis: Long?)
+
 // ---- internal-v1 response DTOs (every field nullable/defaulted, the tolerance
 // every DTO in this package applies to a reverse-engineered endpoint) ----
 
@@ -70,6 +82,15 @@ private data class TidalV1FavoriteArtistItem(val created: String? = null, val it
 @Serializable
 private data class TidalV1FavoriteArtistsResponse(
     val items: List<TidalV1FavoriteArtistItem> = emptyList(),
+    val totalNumberOfItems: Int = 0,
+)
+
+@Serializable
+private data class TidalV1FavoriteTrackItem(val created: String? = null, val item: TidalV1PageTrack? = null)
+
+@Serializable
+private data class TidalV1FavoriteTracksResponse(
+    val items: List<TidalV1FavoriteTrackItem> = emptyList(),
     val totalNumberOfItems: Int = 0,
 )
 
@@ -134,6 +155,21 @@ fun favoriteArtistsFrom(body: String, json: Json): List<TidalFavoriteArtist> = r
     }
 }.getOrDefault(emptyList())
 
+/**
+ * Pure: one `favorites/tracks` page body → [TidalFavoriteTrack]s. Reuses the
+ * existing [TidalV1PageTrack.toTrack] projection (artists[0].name, album cover
+ * @640, quality, source = TIDAL) — NO new track parser — and pairs each with its
+ * remote `created` millis. Same degrade-to-empty discipline as
+ * [favoriteAlbumsFrom]: a malformed body / v1 error envelope yields an empty
+ * list, never a crash.
+ */
+fun favoriteTracksFrom(body: String, json: Json): List<TidalFavoriteTrack> = runCatching {
+    json.decodeFromString<TidalV1FavoriteTracksResponse>(body).items.mapNotNull { wrapper ->
+        val track = wrapper.item?.toTrack() ?: return@mapNotNull null
+        TidalFavoriteTrack(track = track, addedAtMillis = parseIso8601Millis(wrapper.created))
+    }
+}.getOrDefault(emptyList())
+
 // ---- request URL builders (pure; `order=DATE&orderDirection=DESC` gives
 // most-recent-first, matching the probed schema) ----
 
@@ -178,5 +214,27 @@ fun favoriteAlbumDeleteUrl(apiBase: String, userId: String, albumId: String, cou
 /** `DELETE {apiBase}/users/{userId}/favorites/artists/{artistId}?countryCode`. */
 fun favoriteArtistDeleteUrl(apiBase: String, userId: String, artistId: String, countryCode: String): HttpUrl =
     "$apiBase/users/$userId/favorites/artists/$artistId".toHttpUrl().newBuilder()
+        .addQueryParameter("countryCode", countryCode)
+        .build()
+
+/** `GET {apiBase}/users/{userId}/favorites/tracks?limit&offset&order=DATE&orderDirection=DESC&countryCode`. */
+fun favoriteTracksUrl(apiBase: String, userId: String, countryCode: String, limit: Int, offset: Int): HttpUrl =
+    "$apiBase/users/$userId/favorites/tracks".toHttpUrl().newBuilder()
+        .addQueryParameter("limit", limit.toString())
+        .addQueryParameter("offset", offset.toString())
+        .addQueryParameter("order", "DATE")
+        .addQueryParameter("orderDirection", "DESC")
+        .addQueryParameter("countryCode", countryCode)
+        .build()
+
+/** `POST {apiBase}/users/{userId}/favorites/tracks?countryCode` (form body `trackId=<id>`). */
+fun favoriteTracksWriteUrl(apiBase: String, userId: String, countryCode: String): HttpUrl =
+    "$apiBase/users/$userId/favorites/tracks".toHttpUrl().newBuilder()
+        .addQueryParameter("countryCode", countryCode)
+        .build()
+
+/** `DELETE {apiBase}/users/{userId}/favorites/tracks/{trackId}?countryCode`. */
+fun favoriteTrackDeleteUrl(apiBase: String, userId: String, trackId: String, countryCode: String): HttpUrl =
+    "$apiBase/users/$userId/favorites/tracks/$trackId".toHttpUrl().newBuilder()
         .addQueryParameter("countryCode", countryCode)
         .build()
