@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -34,15 +35,19 @@ class TidalProvider(
     private val sessionMutex = Mutex()
     private var countryCode: String = "US"
     private var bootstrapped = false
+    private var userId: String? = null
 
     val isLoggedIn: Boolean get() = bootstrapped
+
+    /** The signed-in user's Tidal id (the favorites collection owner), or null before a successful [restoreSession]. */
+    val currentUserId: String? get() = userId
 
     // ------------------------------------------------------------------
     // API response models (subset of the fields tidalapi consumes)
     // ------------------------------------------------------------------
 
     @Serializable
-    private data class ApiSession(val countryCode: String = "US")
+    private data class ApiSession(val countryCode: String = "US", val userId: Long? = null)
 
     @Serializable
     private data class ArtistDto(val name: String = "")
@@ -93,7 +98,9 @@ class TidalProvider(
         }
         return runCatching {
             val body = get("$API_BASE/sessions", session.accessToken)
-            countryCode = json.decodeFromString<ApiSession>(body).countryCode
+            val api = json.decodeFromString<ApiSession>(body)
+            countryCode = api.countryCode
+            userId = api.userId?.toString()
             bootstrapped = true
         }.isSuccess
     }
@@ -101,6 +108,7 @@ class TidalProvider(
     suspend fun logout() = sessionMutex.withLock {
         auth.logout()
         bootstrapped = false
+        userId = null
     }
 
     // ------------------------------------------------------------------
@@ -400,6 +408,86 @@ class TidalProvider(
         return artistPageFrom(body, json, artistId)
     }
 
+    /**
+     * The user's Tidal saved albums, paginated — the internal-v1 port of the
+     * desktop's `session.user.favorites.albums()` (`auxen/providers/tidal.py`
+     * `get_favorite_albums`). Metadata only: resolves no stream. Returns an
+     * empty list when not logged in / the user id is unresolved / any page
+     * fails, matching every other read here (a missing collection degrades the
+     * Collection tab, never breaks it).
+     */
+    suspend fun favoriteAlbums(): List<TidalFavoriteAlbum> {
+        val token = validToken() ?: return emptyList()
+        val uid = userId ?: return emptyList()
+        val all = mutableListOf<TidalFavoriteAlbum>()
+        var offset = 0
+        while (offset < FAVORITES_MAX) {
+            val url = favoriteAlbumsUrl(API_BASE, uid, countryCode, FAVORITES_PAGE, offset)
+            val body = runCatching { get(url.toString(), token) }.getOrNull() ?: break
+            val page = favoriteAlbumsFrom(body, json)
+            all += page
+            if (page.size < FAVORITES_PAGE) break
+            offset += FAVORITES_PAGE
+        }
+        return all
+    }
+
+    /**
+     * The user's Tidal followed artists, paginated — the internal-v1 port of
+     * the desktop's `session.user.favorites.artists()`
+     * (`get_followed_artists`). Same not-logged-in / degrade contract as
+     * [favoriteAlbums].
+     */
+    suspend fun favoriteArtists(): List<TidalFavoriteArtist> {
+        val token = validToken() ?: return emptyList()
+        val uid = userId ?: return emptyList()
+        val all = mutableListOf<TidalFavoriteArtist>()
+        var offset = 0
+        while (offset < FAVORITES_MAX) {
+            val url = favoriteArtistsUrl(API_BASE, uid, countryCode, FAVORITES_PAGE, offset)
+            val body = runCatching { get(url.toString(), token) }.getOrNull() ?: break
+            val page = favoriteArtistsFrom(body, json)
+            all += page
+            if (page.size < FAVORITES_PAGE) break
+            offset += FAVORITES_PAGE
+        }
+        return all
+    }
+
+    /** Save [albumId] to the user's Tidal collection. Best-effort — false on any failure. */
+    suspend fun addFavoriteAlbum(albumId: String): Boolean {
+        val token = validToken() ?: return false
+        val uid = userId ?: return false
+        val url = favoriteAlbumsWriteUrl(API_BASE, uid, countryCode)
+        val form = FormBody.Builder().add("albumId", albumId).build()
+        return runCatching { post(url.toString(), form, token) }.isSuccess
+    }
+
+    /** Remove [albumId] from the user's Tidal collection. Best-effort. */
+    suspend fun removeFavoriteAlbum(albumId: String): Boolean {
+        val token = validToken() ?: return false
+        val uid = userId ?: return false
+        val url = favoriteAlbumDeleteUrl(API_BASE, uid, albumId, countryCode)
+        return runCatching { delete(url.toString(), token) }.isSuccess
+    }
+
+    /** Follow [artistId] in the user's Tidal collection. Best-effort. */
+    suspend fun addFavoriteArtist(artistId: String): Boolean {
+        val token = validToken() ?: return false
+        val uid = userId ?: return false
+        val url = favoriteArtistsWriteUrl(API_BASE, uid, countryCode)
+        val form = FormBody.Builder().add("artistId", artistId).build()
+        return runCatching { post(url.toString(), form, token) }.isSuccess
+    }
+
+    /** Unfollow [artistId] in the user's Tidal collection. Best-effort. */
+    suspend fun removeFavoriteArtist(artistId: String): Boolean {
+        val token = validToken() ?: return false
+        val uid = userId ?: return false
+        val url = favoriteArtistDeleteUrl(API_BASE, uid, artistId, countryCode)
+        return runCatching { delete(url.toString(), token) }.isSuccess
+    }
+
     // ------------------------------------------------------------------
     // Internals
     // ------------------------------------------------------------------
@@ -417,6 +505,22 @@ class TidalProvider(
         client.newCall(request).execute().use { resp ->
             check(resp.isSuccessful) { "Tidal API error: HTTP ${resp.code} for $url" }
             resp.body!!.string()
+        }
+    }
+
+    private suspend fun post(url: String, form: FormBody, token: String): String = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url(url).header("Authorization", "Bearer $token").post(form).build()
+        client.newCall(request).execute().use { resp ->
+            check(resp.isSuccessful) { "Tidal API error: HTTP ${resp.code} for $url" }
+            resp.body?.string().orEmpty()
+        }
+    }
+
+    private suspend fun delete(url: String, token: String): String = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url(url).header("Authorization", "Bearer $token").delete().build()
+        client.newCall(request).execute().use { resp ->
+            check(resp.isSuccessful) { "Tidal API error: HTTP ${resp.code} for $url" }
+            resp.body?.string().orEmpty()
         }
     }
 
@@ -460,5 +564,9 @@ class TidalProvider(
         // rather than looping unboundedly — no album on Tidal reaches 1000 tracks).
         const val ALBUM_ITEMS_PAGE = 100
         const val ALBUM_ITEMS_MAX = 1000
+        // favorites paging: 50 matches the desktop page size; MAX bounds a
+        // pathological loop (114 albums / 110 artists are ~3 pages).
+        const val FAVORITES_PAGE = 50
+        const val FAVORITES_MAX = 5000
     }
 }
