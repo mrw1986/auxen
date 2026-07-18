@@ -45,7 +45,10 @@ fun formatDuration(seconds: Double?): String {
 
 /**
  * The canonical track row — Android port of the desktop
- * `make_standard_track_row`: [Art][Title(+E)+Subtitle][Duration][Source][Quality][Heart][trailing].
+ * `make_standard_track_row`: [Art][Title(+E) / Subtitle(+Quality)][Duration][Heart][trailing].
+ * The source pill is intentionally omitted (it is redundant on a Tidal-filtered
+ * list and available in the track action sheet); the quality pill rides on the
+ * subtitle line so the title column gets the full freed width on phone widths.
  * Long-press opens the track action sheet (wired by callers).
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -131,13 +134,28 @@ fun AuxenTrackRow(
                     )
                 }
             }
-            Text(
-                listOfNotNull(track.artist, track.album).joinToString(" — "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    listOfNotNull(track.artist, track.album).joinToString(" — "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    // The subtitle text absorbs the ellipsis so the fixed-size
+                    // quality chip after it stays fully visible even when
+                    // "artist — album" is long (fill = false keeps it hugging
+                    // its content, leaving room for the chip).
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                // Quality moved off the title row (was [Duration][Source][Quality]
+                // after the title). Still Tidal-only, matching the prior inline
+                // gate and the AuxenTrackRowUiTest contract; the != "Unknown"
+                // guard avoids a dangling spacer when QualityBadge self-suppresses.
+                if (track.source == Source.TIDAL && track.qualityLabel != "Unknown") {
+                    Spacer(Modifier.width(6.dp))
+                    QualityBadge(track.qualityLabel)
+                }
+            }
         }
         Spacer(Modifier.width(8.dp))
         Text(
@@ -146,12 +164,6 @@ fun AuxenTrackRow(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontFamily = FontFamily.Monospace,
         )
-        Spacer(Modifier.width(8.dp))
-        SourceBadge(track.source)
-        if (track.source == Source.TIDAL) {
-            Spacer(Modifier.width(4.dp))
-            QualityBadge(track.qualityLabel)
-        }
         IconButton(onClick = onToggleFavorite) {
             Icon(
                 if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
