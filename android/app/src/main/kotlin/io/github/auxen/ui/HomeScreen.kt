@@ -138,7 +138,15 @@ fun HomeScreen(
                             artist = album.albumArtist,
                             artUrl = album.artUrl,
                             source = Source.LOCAL,
-                            onClick = { viewModel.playAll(album.tracks) },
+                            // D3: open the album like every other grid; Play stays
+                            // on the card's play button below.
+                            onClick = {
+                                onOpenAlbumForTrack(
+                                    album.album,
+                                    album.albumArtist,
+                                    album.tracks.firstOrNull { it.isTidal }?.sourceId,
+                                )
+                            },
                             onPlay = { viewModel.playAll(album.tracks) },
                             // Carousel item — a fill-width card has no width
                             // constraint inside a LazyRow, so pin it here.
