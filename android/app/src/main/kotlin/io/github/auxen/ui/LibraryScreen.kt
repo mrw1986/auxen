@@ -1,6 +1,7 @@
 package io.github.auxen.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -138,22 +139,28 @@ fun LibraryScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = { sortMenuOpen = true }) { Text(sortLabel(sort)) }
-            DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { sortMenuOpen = false }) {
-                sortOptionsFor(tab).forEach { option ->
-                    DropdownMenuItem(
-                        text = { Text(sortLabel(option)) },
-                        // Fix 35 — mark the applied sort so it's visible at a glance.
-                        trailingIcon = {
-                            if (option == sort) {
-                                Icon(Icons.Filled.Check, contentDescription = "Selected")
-                            }
-                        },
-                        onClick = {
-                            viewModel.setLibrarySort(option)
-                            sortMenuOpen = false
-                        },
-                    )
+            // Anchor the sort menu to its button by wrapping both in a Box.
+            // A bare DropdownMenu sibling in this Row anchors to a zero-width slot
+            // and mispositions to the wrong side of the screen; the Box gives the
+            // menu the button's bounds so it opens directly under the button.
+            Box {
+                TextButton(onClick = { sortMenuOpen = true }) { Text(sortLabel(sort)) }
+                DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { sortMenuOpen = false }) {
+                    sortOptionsFor(tab).forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(sortLabel(option)) },
+                            // Fix 35 — mark the applied sort so it's visible at a glance.
+                            trailingIcon = {
+                                if (option == sort) {
+                                    Icon(Icons.Filled.Check, contentDescription = "Selected")
+                                }
+                            },
+                            onClick = {
+                                viewModel.setLibrarySort(option)
+                                sortMenuOpen = false
+                            },
+                        )
+                    }
                 }
             }
             IconButton(onClick = { viewModel.toggleLibrarySortDirection() }) {
