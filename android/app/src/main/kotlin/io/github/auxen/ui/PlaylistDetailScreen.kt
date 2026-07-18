@@ -15,15 +15,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueueMusic
@@ -31,6 +32,8 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -49,21 +52,36 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import io.github.auxen.R
+import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.theme.AuxenColors
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 /** Desktop PLAYLIST_COLORS — the 8-swatch picker palette. */
 val PLAYLIST_COLORS = listOf(
     "#d4a039", "#00c4cc", "#7cb87a", "#9b59b6",
     "#e74c3c", "#3498db", "#e67e22", "#1abc9c",
 )
+
+/**
+ * A playlist row's drag-stable identity: its ORIGINAL position in the loaded
+ * playlist, assigned once and carried with the row as the optimistic order
+ * mutates during a drag — the role QueueEntry.id plays in QueueScreen. A
+ * playlist can repeat a track id (its PK is (playlist_id, track_id, position)),
+ * so "source:sourceId" is NOT a unique row key and a bare current index is not
+ * stable under reorder; the original position is both.
+ */
+private data class ReorderablePlaylistRow(val id: Int, val track: Track)
 
 /**
  * Parse a stored `#RRGGBB` playlist color, falling back to the brand amber token
@@ -76,7 +94,11 @@ private fun parseColor(hex: String?): Color =
 
 /**
  * Playlist detail — desktop PlaylistView: color-dot header, Play All/Shuffle,
- * rename/recolor/delete, and per-row remove + move up/down reordering.
+ * rename/recolor/delete, and drag-to-reorder tracks (long-press the drag handle)
+ * with a per-row overflow menu for Remove. Reorder mirrors QueueScreen's
+ * ReorderableQueueList (optimistic order during the drag, one movePlaylistTrack
+ * on drop); the playlist list is unfiltered, so reorderable indices ARE playlist
+ * positions and map straight to movePlaylistTrack — no index translation needed.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @UnstableApi
@@ -147,27 +169,85 @@ fun PlaylistDetailScreen(
                 subtitle = stringResource(R.string.empty_playlist_subtitle),
             )
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                itemsIndexed(tracks, key = { i, t -> "$i|${t.source}:${t.sourceId}" }) { index, track ->
-                    AuxenTrackRow(
-                        track = track,
-                        isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
-                        onPlay = { viewModel.play(track) },
-                        onToggleFavorite = { viewModel.toggleFavorite(track) },
-                        trailing = {
-                            IconButton(
-                                onClick = { viewModel.movePlaylistTrack(playlistId, index, index - 1) },
-                                enabled = index > 0,
-                            ) { Icon(Icons.Filled.ArrowUpward, contentDescription = "Move up") }
-                            IconButton(
-                                onClick = { viewModel.movePlaylistTrack(playlistId, index, index + 1) },
-                                enabled = index < tracks.size - 1,
-                            ) { Icon(Icons.Filled.ArrowDownward, contentDescription = "Move down") }
-                            IconButton(onClick = { viewModel.removeFromPlaylist(playlistId, track) }) {
-                                Icon(Icons.Filled.Close, contentDescription = "Remove from playlist")
-                            }
-                        },
-                    )
+            // Drag-to-reorder, mirroring QueueScreen.ReorderableQueueList: `order`
+            // is an optimistic local copy the reorder callback mutates in place for
+            // smooth animation; it re-syncs to the real list whenever that changes
+            // for any OTHER reason — but never mid-drag, so a completed drag can't
+            // be clobbered before it commits. The controller is never touched until
+            // the drag ends; on drop, one net movePlaylistTrack reproduces the
+            // dragged order. Rows carry a stable per-occurrence key (original
+            // position) so a repeated track id still has a unique, drag-stable
+            // identity. movePlaylistTrack is position-based (remove-at-from,
+            // insert-at-to, then rewrite positions), so from/to map straight from
+            // the reorderable indices — no queueMoveTarget-style translation, since
+            // this list is unfiltered (unlike the Queue, which pins the playing row).
+            val rows = remember(tracks) { tracks.mapIndexed { i, t -> ReorderablePlaylistRow(i, t) } }
+            var order by remember { mutableStateOf(rows) }
+            var draggingId by remember { mutableStateOf<Int?>(null) }
+            LaunchedEffect(rows) { if (draggingId == null) order = rows }
+
+            val haptics = LocalHapticFeedback.current
+            val lazyListState = rememberLazyListState()
+            val reorderState = rememberReorderableLazyListState(lazyListState) { from, to ->
+                order = order.toMutableList().apply { add(to.index, removeAt(from.index)) }
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            }
+
+            LazyColumn(state = lazyListState, modifier = Modifier.fillMaxSize()) {
+                items(order, key = { it.id }) { row ->
+                    ReorderableItem(reorderState, key = row.id) { _ ->
+                        val track = row.track
+                        var menuOpen by remember { mutableStateOf(false) }
+                        AuxenTrackRow(
+                            track = track,
+                            isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+                            onPlay = { viewModel.play(track) },
+                            onToggleFavorite = { viewModel.toggleFavorite(track) },
+                            trailing = {
+                                // Remove relocated from the old inline ✕ into a ⋮
+                                // overflow, freeing the row for the drag handle.
+                                Box {
+                                    IconButton(onClick = { menuOpen = true }) {
+                                        Icon(Icons.Filled.MoreVert, contentDescription = "More actions")
+                                    }
+                                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                        DropdownMenuItem(
+                                            text = { Text("Remove from playlist") },
+                                            leadingIcon = { Icon(Icons.Filled.Close, contentDescription = null) },
+                                            onClick = {
+                                                menuOpen = false
+                                                viewModel.removeFromPlaylist(playlistId, track)
+                                            },
+                                        )
+                                    }
+                                }
+                                // Long-press drag handle. longPressDraggableHandle is
+                                // the enclosing ReorderableItem scope's member (no
+                                // import). On drop, from = the row's ORIGINAL position
+                                // (its index in `rows`, unchanged during the drag),
+                                // to = its index in the dragged `order`; one
+                                // movePlaylistTrack reproduces the order.
+                                Icon(
+                                    Icons.Filled.DragHandle,
+                                    contentDescription = "Reorder ${track.title}",
+                                    modifier = Modifier.longPressDraggableHandle(
+                                        onDragStarted = { draggingId = row.id },
+                                        onDragStopped = {
+                                            val id = draggingId
+                                            draggingId = null
+                                            if (id != null) {
+                                                val from = rows.indexOfFirst { it.id == id }
+                                                val to = order.indexOfFirst { it.id == id }
+                                                if (from >= 0 && to >= 0 && from != to) {
+                                                    viewModel.movePlaylistTrack(playlistId, from, to)
+                                                }
+                                            }
+                                        },
+                                    ),
+                                )
+                            },
+                        )
+                    }
                 }
             }
         }
