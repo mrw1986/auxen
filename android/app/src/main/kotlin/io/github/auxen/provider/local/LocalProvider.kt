@@ -23,6 +23,25 @@ import java.io.InputStream
  */
 class LocalProvider(private val context: Context) : MusicProvider {
 
+    private val tagReader = LocalTagReader(context)
+
+    /**
+     * The user's chosen music folders (folder identities = MediaStore DATA
+     * parent dirs). EMPTY = all folders — today's default. Set by
+     * PlayerViewModel from the persisted selection before each library read,
+     * and applied uniformly by [queryTracks] so search/allTracks/recentlyAdded
+     * all honour it. Plain config, not logic — the logic is the pure
+     * [isFolderIncluded]; @Volatile because the setter (main thread) and the
+     * reads ([queryTracks] on Dispatchers.IO) run on different threads.
+     */
+    @Volatile
+    private var includedFolders: Set<String> = emptySet()
+
+    /** Replace the active folder filter. Empty set restores "all folders". */
+    fun setIncludedFolders(folders: Set<String>) {
+        includedFolders = folders
+    }
+
     override suspend fun search(query: String, limit: Int): List<Track> =
         queryTracks(
             selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND " +
@@ -54,6 +73,47 @@ class LocalProvider(private val context: Context) : MusicProvider {
             limit = limit,
             sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC",
         )
+
+    /**
+     * The distinct on-device folders that contain music, with per-folder track
+     * counts — the source for the "Music folders" setting checklist. Ignores
+     * the active [includedFolders] filter (the user must see ALL folders to
+     * choose among them). The grouping/counting is the pure [foldersFrom]; this
+     * method is just its MediaStore feeder (untested, like the query wrappers).
+     */
+    suspend fun musicFolders(): List<MusicFolder> = withContext(Dispatchers.IO) {
+        val paths = mutableListOf<String>()
+        context.contentResolver.query(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Audio.Media.DATA),
+            "${MediaStore.Audio.Media.IS_MUSIC} != 0",
+            null,
+            null,
+        )?.use { cursor ->
+            val dataCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
+            if (dataCol >= 0) {
+                while (cursor.moveToNext()) {
+                    cursor.getString(dataCol)?.let { paths += it }
+                }
+            }
+        }
+        foldersFrom(paths)
+    }
+
+    /**
+     * Enrich [track] with its embedded tags (genre, disc number, and — API 31+
+     * — sample rate / bit depth), filling only the fields the MediaStore read
+     * left null (the pure [Track.mergedWith]). Returns [track] unchanged for a
+     * non-local track, a read failure, or when the tags add nothing. Off the
+     * main thread via [LocalTagReader]. Lazy by design — callers enrich a track
+     * only when its details are shown / it starts playing, never the whole
+     * library (see PlayerViewModel).
+     */
+    suspend fun enrich(track: Track): Track {
+        if (track.source != Source.LOCAL) return track
+        val tags = tagReader.read(track.sourceId) ?: return track
+        return track.mergedWith(tags)
+    }
 
     override suspend fun getStreamInfo(track: Track): StreamInfo = withContext(Dispatchers.IO) {
         val uri = ContentUris.withAppendedId(
@@ -110,6 +170,7 @@ class LocalProvider(private val context: Context) : MusicProvider {
             MediaStore.Audio.Media.BITRATE,
             MediaStore.Audio.Media.MIME_TYPE,
             MediaStore.Audio.Media.ALBUM_ID,
+            MediaStore.Audio.Media.DATA,
         )
         val tracks = mutableListOf<Track>()
         context.contentResolver.query(
@@ -130,8 +191,11 @@ class LocalProvider(private val context: Context) : MusicProvider {
             val bitrateCol = cursor.getColumnIndex(MediaStore.Audio.Media.BITRATE)
             val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
             val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+            val dataCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
 
             while (cursor.moveToNext() && tracks.size < limit) {
+                val data = if (dataCol >= 0) cursor.getString(dataCol) else null
+                if (!isFolderIncluded(includedFolders, folderPathOf(data.orEmpty()))) continue
                 val albumId = cursor.getLong(albumIdCol)
                 val artUri = ContentUris.withAppendedId(ALBUM_ART_URI, albumId)
                 tracks += Track(
