@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,6 +49,7 @@ fun AlbumCard(
     onClick: () -> Unit,
     onPlay: (() -> Unit)? = null,
     onLongPress: (() -> Unit)? = null,
+    onToggleFavorite: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val haptics = LocalHapticFeedback.current
@@ -102,6 +104,18 @@ fun AlbumCard(
                             tint = AuxenColors.BgDeep,
                         )
                     }
+                }
+            }
+            if (onToggleFavorite != null) {
+                IconButton(
+                    onClick = onToggleFavorite,
+                    modifier = Modifier.align(Alignment.TopEnd),
+                ) {
+                    Icon(
+                        Icons.Filled.Favorite,
+                        contentDescription = "Remove $title from collection",
+                        tint = AuxenColors.AmberPrimary,
+                    )
                 }
             }
         }

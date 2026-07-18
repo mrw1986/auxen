@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -52,6 +53,8 @@ import io.github.auxen.data.AlbumGroup
 import io.github.auxen.data.ArtistGroup
 import io.github.auxen.data.groupAlbums
 import io.github.auxen.data.groupArtists
+import io.github.auxen.data.mergeCollectionAlbums
+import io.github.auxen.data.mergeCollectionArtists
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.AlbumActionSheet
@@ -85,6 +88,9 @@ fun CollectionScreen(
     val favorites by viewModel.favorites.collectAsState()
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
+    val favoriteAlbumRows by viewModel.favoriteAlbums.collectAsState()
+    val favoriteArtistRows by viewModel.favoriteArtists.collectAsState()
+    val syncStatus by viewModel.tidalCollectionStatus.collectAsState()
     val filter by viewModel.collectionFilter.collectAsState()
     val loading by viewModel.collectionLoading.collectAsState()
     var tab by rememberSaveable { mutableIntStateOf(0) }
@@ -93,9 +99,21 @@ fun CollectionScreen(
     var albumSheet by remember { mutableStateOf<AlbumGroup?>(null) }
     var artistSheet by remember { mutableStateOf<ArtistGroup?>(null) }
 
+    // Auto-pull the user's Tidal saved albums + followed artists on Collection
+    // open. The ViewModel's collectionSynced guard makes it once-per-process and
+    // its isLoggedIn guard makes it a no-op when signed out, so this is not a
+    // launch-time network surprise — it fires only when Collection is entered.
+    LaunchedEffect(Unit) { viewModel.syncFavoritesFromTidal() }
+
     fun matches(track: Track): Boolean = when (filter) {
         "tidal" -> track.source == Source.TIDAL
         "local" -> track.source == Source.LOCAL
+        else -> true
+    }
+    // The All/Tidal/Local chips must apply to the remote favorite rows too.
+    fun matchesSource(source: String): Boolean = when (filter) {
+        "tidal" -> source == Source.TIDAL.name
+        "local" -> source == Source.LOCAL.name
         else -> true
     }
     val filtered = favorites.filter(::matches)
@@ -138,7 +156,20 @@ fun CollectionScreen(
                         ),
                     )
                 }
+                IconButton(onClick = { viewModel.syncFavoritesFromTidal(force = true) }) {
+                    Icon(Icons.Filled.Sync, contentDescription = "Sync favorites from Tidal")
+                }
             }
+        }
+        // Transient sync feedback — plain human text (counts/names only, never a
+        // token), also the on-device idempotency checkpoint's readout.
+        syncStatus?.let { status ->
+            Text(
+                status,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
         }
 
         // Every tab renders the same centered EmptyState when its (filtered) list
@@ -176,7 +207,10 @@ fun CollectionScreen(
                 }
             }
             1 -> {
-                val albums = groupAlbums(filtered)
+                val albums = mergeCollectionAlbums(
+                    local = groupAlbums(filtered),
+                    remote = favoriteAlbumRows.filter { matchesSource(it.source) },
+                )
                 if (loading && albums.isEmpty()) {
                     LoadingState()
                 } else if (albums.isEmpty()) {
@@ -192,22 +226,43 @@ fun CollectionScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         modifier = Modifier.fillMaxSize().padding(16.dp),
                     ) {
-                        items(albums, key = { "${it.album}|${it.albumArtist}" }) { album ->
+                        items(albums, key = { it.key }) { album ->
                             AlbumCard(
-                                title = album.album,
-                                artist = album.albumArtist,
+                                title = album.title,
+                                artist = album.artist,
                                 artUrl = album.artUrl,
-                                source = album.tracks.firstOrNull()?.source,
-                                onClick = { onOpenAlbum(album) },
-                                onPlay = { viewModel.playAll(album.tracks) },
-                                onLongPress = { albumSheet = album },
+                                source = album.source,
+                                onClick = { onOpenAlbum(album.toAlbumGroup()) },
+                                // A remote-only saved album has no local tracks to play.
+                                onPlay = if (album.tracks.isNotEmpty()) {
+                                    { viewModel.playAll(album.tracks) }
+                                } else {
+                                    null
+                                },
+                                // PRESERVE the existing album long-press action sheet (Play /
+                                // Shuffle / Play Next / Enqueue / Add-to-Playlist), added in the
+                                // 2026-07-18 context-menu work. The pre-rewrite code wired
+                                // `onLongPress = { albumSheet = album }`; this rewrite MUST keep it
+                                // or it silently drops the menu and orphans `albumSheet` +
+                                // `AlbumActionSheet`. A remote-only saved album (no local tracks)
+                                // has nothing to feed the sheet, so gate it.
+                                onLongPress = album.toAlbumGroup().takeIf { it.tracks.isNotEmpty() }
+                                    ?.let { grp -> { albumSheet = grp } },
+                                onToggleFavorite = if (album.isRemoteFavorite) {
+                                    { viewModel.toggleFavoriteAlbum(album) }
+                                } else {
+                                    null
+                                },
                             )
                         }
                     }
                 }
             }
             2 -> {
-                val artists = groupArtists(filtered)
+                val artists = mergeCollectionArtists(
+                    local = groupArtists(filtered),
+                    remote = favoriteArtistRows.filter { matchesSource(it.source) },
+                )
                 if (loading && artists.isEmpty()) {
                     LoadingState()
                 } else if (artists.isEmpty()) {
@@ -218,13 +273,30 @@ fun CollectionScreen(
                     )
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(artists, key = { it.artist }) { artist ->
+                        items(artists, key = { it.key }) { artist ->
                             ArtistRow(
-                                name = artist.artist,
-                                subtitle = "${artist.tracks.size} favorited",
+                                name = artist.name,
+                                subtitle = if (artist.isRemoteFavorite && artist.trackCount == 0) {
+                                    "Followed on Tidal"
+                                } else {
+                                    "${artist.trackCount} favorited"
+                                },
                                 artUrl = artist.artUrl,
-                                onClick = { onOpenArtist(artist.artist) },
-                                onLongPress = { artistSheet = artist },
+                                onClick = { onOpenArtist(artist.name) },
+                                // PRESERVE the existing artist long-press action sheet (Play /
+                                // Shuffle / Play Next / Enqueue), added in the 2026-07-18
+                                // context-menu work. The pre-rewrite code wired
+                                // `onLongPress = { artistSheet = artist }`; keep it or it silently
+                                // drops the menu and orphans `artistSheet` + `ArtistActionSheet`.
+                                // The sheet needs a real track pool, which only a local group has —
+                                // so wire it off `localGroup` (null for a follow-only remote artist,
+                                // which correctly gets no menu).
+                                onLongPress = artist.localGroup?.let { grp -> { artistSheet = grp } },
+                                onToggleFavorite = if (artist.isRemoteFavorite) {
+                                    { viewModel.toggleFavoriteArtist(artist) }
+                                } else {
+                                    null
+                                },
                             )
                         }
                     }

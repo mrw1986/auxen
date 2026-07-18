@@ -18,11 +18,16 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
 import io.github.auxen.Graph
+import io.github.auxen.data.CollectionAlbum
+import io.github.auxen.data.CollectionArtist
 import io.github.auxen.data.LibrarySort
+import io.github.auxen.db.FavoriteAlbumEntity
+import io.github.auxen.db.FavoriteArtistEntity
 import io.github.auxen.db.PlaylistEntity
 import io.github.auxen.dsp.BitPerfectController
 import io.github.auxen.matching.DuplicateResolver
 import io.github.auxen.model.QueueEntry
+import io.github.auxen.model.Source
 import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
 import io.github.auxen.playback.PlaybackService
@@ -123,6 +128,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     val playlists: StateFlow<List<PlaylistEntity>> = Graph.library.playlists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Favorited albums (Tidal saved albums + local), newest first — the Collection Albums tab's remote half. */
+    val favoriteAlbums: StateFlow<List<FavoriteAlbumEntity>> = Graph.library.favoriteAlbums()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Favorited (followed) artists, newest first — the Collection Artists tab's remote half. */
+    val favoriteArtists: StateFlow<List<FavoriteArtistEntity>> = Graph.library.favoriteArtists()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private var collectionSynced = false
+    private val _tidalCollectionStatus = MutableStateFlow<String?>(null)
+    val tidalCollectionStatus: StateFlow<String?> = _tidalCollectionStatus
 
     /** Recently played tracks for the Home screen; refreshed on demand. */
     val recentlyPlayed = MutableStateFlow<List<Track>>(emptyList())
@@ -520,6 +537,48 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val key = "${track.source.name}:${track.sourceId}"
             runCatching { Graph.library.setFavorite(track, key !in favoriteKeys.value) }
+        }
+    }
+
+    /**
+     * Pull the user's Tidal saved albums + followed artists into the local
+     * favorite tables. No-op when not signed in. Guarded to once per process
+     * (the auto-pull-on-Collection-open path passes force = false); the manual
+     * "Sync from Tidal" affordance passes force = true. Additive + idempotent.
+     */
+    fun syncFavoritesFromTidal(force: Boolean = false) {
+        if (!Graph.tidal.isLoggedIn) return
+        if (collectionSynced && !force) return
+        collectionSynced = true
+        viewModelScope.launch {
+            _tidalCollectionStatus.value = "Syncing favorites from Tidal…"
+            _tidalCollectionStatus.value = runCatching { Graph.tidalCollectionSync.pullAll() }.fold(
+                onSuccess = { "Synced +${it.albums} album(s), +${it.artists} artist(s) from Tidal." },
+                onFailure = { collectionSynced = false; "Favorites sync failed: ${it.message}" },
+            )
+        }
+    }
+
+    /**
+     * Remove a Collection album entry from the collection. Only a remote
+     * favorite row carries a Tidal id to write with (a locally-grouped album is
+     * on the tab because its TRACKS are favorited). Optimistic: the local row
+     * goes first, then a best-effort push.
+     */
+    fun toggleFavoriteAlbum(album: CollectionAlbum) {
+        val tidalId = album.tidalId ?: return
+        viewModelScope.launch {
+            runCatching { Graph.library.unfavoriteAlbum(Source.TIDAL.name, tidalId) }
+            runCatching { Graph.tidalCollectionSync.pushAlbumFavorite(Source.TIDAL, tidalId, favorite = false) }
+        }
+    }
+
+    /** Unfollow a Collection artist entry. Same contract as [toggleFavoriteAlbum]. */
+    fun toggleFavoriteArtist(artist: CollectionArtist) {
+        val tidalId = artist.tidalId ?: return
+        viewModelScope.launch {
+            runCatching { Graph.library.unfavoriteArtist(Source.TIDAL.name, tidalId) }
+            runCatching { Graph.tidalCollectionSync.pushArtistFavorite(Source.TIDAL, tidalId, favorite = false) }
         }
     }
 

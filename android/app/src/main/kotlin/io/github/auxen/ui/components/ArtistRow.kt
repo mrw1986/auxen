@@ -11,7 +11,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,6 +42,7 @@ fun ArtistRow(
     subtitle: String? = null,
     artUrl: String? = null,
     onLongPress: (() -> Unit)? = null,
+    onToggleFavorite: (() -> Unit)? = null,
 ) {
     val haptics = LocalHapticFeedback.current
     Row(
@@ -79,6 +83,15 @@ fun ArtistRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (onToggleFavorite != null) {
+            IconButton(onClick = onToggleFavorite) {
+                Icon(
+                    Icons.Filled.Favorite,
+                    contentDescription = "Unfollow $name",
+                    tint = MaterialTheme.colorScheme.primary,
                 )
             }
         }
