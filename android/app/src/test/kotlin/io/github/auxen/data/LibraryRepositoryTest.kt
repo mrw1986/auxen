@@ -69,6 +69,23 @@ class LibraryRepositoryTest {
     }
 
     @Test
+    fun unfavoriteTrackRemovesOnlyTheFavoriteRowNotTheTrack() = runBlocking {
+        repo.favoriteTrack(tidalTrack, addedAtMillis = 100)
+        assertEquals(setOf("TIDAL:99"), repo.favoriteKeys().first())
+
+        repo.unfavoriteTrack(Source.TIDAL.name, "99")
+        // The favorite is gone...
+        assertTrue(repo.favoriteKeys().first().isEmpty())
+        assertTrue(repo.favorites().first().isEmpty())
+        // ...but the track row survives (it may be in a playlist / play history).
+        assertEquals("Everlong", db.trackDao().bySourceId("TIDAL", "99")!!.title)
+
+        // No-op when no such track exists locally (must not throw).
+        repo.unfavoriteTrack(Source.TIDAL.name, "does-not-exist")
+        assertTrue(repo.favoriteKeys().first().isEmpty())
+    }
+
+    @Test
     fun recordPlayIncrementsCountAndWritesHistory() = runBlocking {
         val id = repo.upsert(tidalTrack)
         now = 2000

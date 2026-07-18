@@ -133,6 +133,39 @@ fun <T> newRemoteFavorites(remote: List<T>, localFavoriteKeys: Set<String>, id: 
     remote.filter { "${Source.TIDAL.name}:${id(it)}" !in localFavoriteKeys }
 
 /**
+ * The outcome of one pure favorites reconcile: [toAdd] are remote favorites to
+ * insert locally (the additive union), [staleTidalIds] are local TIDAL-source
+ * sourceIds to unfavorite (the mirror-delete set).
+ */
+data class FavoriteReconcile<T>(val toAdd: List<T>, val staleTidalIds: List<String>)
+
+/**
+ * Pure two-way reconcile of a CONFIRMED [remote] favorite list against the local
+ * favorite [localKeys] ("SOURCE:sourceId", mixed sources). [toAdd] reuses
+ * [newRemoteFavorites] (remote favorites whose `TIDAL:<id>` key is not already
+ * local). [staleTidalIds] is the mirror-delete set: local **TIDAL-source**
+ * sourceIds NOT in the confirmed remote id set — LOCAL-source keys are filtered
+ * out first, so a local favorite is NEVER deleted by a Tidal pull.
+ *
+ * **Data-loss guard:** a NULL [remote] means the fetch FAILED / is untrusted
+ * (see [TidalProvider.favoriteAlbums] — it returns null on any page failure).
+ * Both lists are then EMPTY, so a failed/partial fetch adds nothing and — the
+ * point of this whole design — deletes nothing. Only a genuinely-empty CONFIRMED
+ * fetch (`remote = []`) can yield a non-empty stale set. Idempotent: an unchanged
+ * remote+local yields (empty, empty). [id] extracts a remote favorite's Tidal id.
+ */
+fun <T> reconcileFavorites(remote: List<T>?, localKeys: Set<String>, id: (T) -> String): FavoriteReconcile<T> {
+    if (remote == null) return FavoriteReconcile(emptyList(), emptyList())
+    val prefix = "${Source.TIDAL.name}:"
+    val remoteIds = remote.mapTo(mutableSetOf(), id)
+    val staleTidalIds = localKeys
+        .filter { it.startsWith(prefix) }
+        .map { it.removePrefix(prefix) }
+        .filter { it !in remoteIds }
+    return FavoriteReconcile(newRemoteFavorites(remote, localKeys, id), staleTidalIds)
+}
+
+/**
  * A [FavoriteAlbumEntity] for a pulled Tidal album favorite — cover + artist
  * populated from internal-v1. Title falls back to a stable placeholder only
  * when the favorite has none. Pure.

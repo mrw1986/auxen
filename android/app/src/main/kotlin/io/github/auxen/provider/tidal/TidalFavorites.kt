@@ -70,7 +70,7 @@ private data class TidalV1FavoriteAlbumItem(val created: String? = null, val ite
 @Serializable
 private data class TidalV1FavoriteAlbumsResponse(
     val items: List<TidalV1FavoriteAlbumItem> = emptyList(),
-    val totalNumberOfItems: Int = 0,
+    val totalNumberOfItems: Int,
 )
 
 @Serializable
@@ -82,7 +82,7 @@ private data class TidalV1FavoriteArtistItem(val created: String? = null, val it
 @Serializable
 private data class TidalV1FavoriteArtistsResponse(
     val items: List<TidalV1FavoriteArtistItem> = emptyList(),
-    val totalNumberOfItems: Int = 0,
+    val totalNumberOfItems: Int,
 )
 
 @Serializable
@@ -91,7 +91,7 @@ private data class TidalV1FavoriteTrackItem(val created: String? = null, val ite
 @Serializable
 private data class TidalV1FavoriteTracksResponse(
     val items: List<TidalV1FavoriteTrackItem> = emptyList(),
-    val totalNumberOfItems: Int = 0,
+    val totalNumberOfItems: Int,
 )
 
 /**
@@ -118,57 +118,97 @@ fun parseIso8601Millis(value: String?): Long? {
         ?: runCatching { Instant.parse(value).toEpochMilli() }.getOrNull()
 }
 
+/** Pure projection of a decoded albums page — the tested body shared by the lenient and strict parsers. */
+private fun TidalV1FavoriteAlbumsResponse.toFavoriteAlbums(): List<TidalFavoriteAlbum> = items.mapNotNull { wrapper ->
+    val album = wrapper.item ?: return@mapNotNull null
+    val artist = album.artist ?: album.artists.firstOrNull()
+    TidalFavoriteAlbum(
+        id = album.id.toString(),
+        title = album.title,
+        artistName = artist?.name?.ifBlank { null },
+        coverUrl = tidalV1CoverUrl(album.cover),
+        addedAtMillis = parseIso8601Millis(wrapper.created),
+    )
+}
+
 /**
- * Pure: one `favorites/albums` page body → [TidalFavoriteAlbum]s. Reuses
- * [tidalV1CoverUrl] (640 — it IS an album cover). Wrapped in `runCatching` so a
- * malformed body / v1 error envelope degrades to empty, never crashes the pull.
+ * LENIENT: one `favorites/albums` page body -> [TidalFavoriteAlbum]s, degrading a
+ * malformed body / v1 error envelope to EMPTY (never crashes). Retained as the
+ * tested projection surface; the mirror-pull reads use [favoriteAlbumsPageOrNull].
  */
 fun favoriteAlbumsFrom(body: String, json: Json): List<TidalFavoriteAlbum> = runCatching {
-    json.decodeFromString<TidalV1FavoriteAlbumsResponse>(body).items.mapNotNull { wrapper ->
-        val album = wrapper.item ?: return@mapNotNull null
-        val artist = album.artist ?: album.artists.firstOrNull()
-        TidalFavoriteAlbum(
-            id = album.id.toString(),
-            title = album.title,
-            artistName = artist?.name?.ifBlank { null },
-            coverUrl = tidalV1CoverUrl(album.cover),
-            addedAtMillis = parseIso8601Millis(wrapper.created),
-        )
-    }
+    json.decodeFromString<TidalV1FavoriteAlbumsResponse>(body).toFavoriteAlbums()
 }.getOrDefault(emptyList())
 
 /**
- * Pure: one `favorites/artists` page body → [TidalFavoriteArtist]s. Reuses
- * [tidalV1ArtistPictureUrl] (480 — an artist picture is NOT served at 640, so
- * the cover builder must not be used here; see its KDoc). Same degrade-to-empty
- * discipline as [favoriteAlbumsFrom].
+ * STRICT (mirror-safe): the same projection, but `null` on ANY decode failure —
+ * an HTML captive-portal page, a v1 error envelope, or drift that drops/renames
+ * `items` (now that `totalNumberOfItems` is REQUIRED, all three fail to decode).
+ * A GENUINE page — including a genuine empty `{"items":[],"totalNumberOfItems":0}`
+ * — decodes to a TRUSTED (possibly-empty) list. The favorites reads gate on this
+ * so an ambiguous empty from a bad 200 becomes `null` (mirror deletes nothing),
+ * never a trusted `[]` that would wipe the collection.
+ */
+fun favoriteAlbumsPageOrNull(body: String, json: Json): List<TidalFavoriteAlbum>? = runCatching {
+    json.decodeFromString<TidalV1FavoriteAlbumsResponse>(body).toFavoriteAlbums()
+}.getOrNull()
+
+/** Pure projection of a decoded artists page — the tested body shared by the lenient and strict parsers. */
+private fun TidalV1FavoriteArtistsResponse.toFavoriteArtists(): List<TidalFavoriteArtist> = items.mapNotNull { wrapper ->
+    val artist = wrapper.item ?: return@mapNotNull null
+    TidalFavoriteArtist(
+        id = artist.id.toString(),
+        name = artist.name,
+        pictureUrl = tidalV1ArtistPictureUrl(artist.picture),
+        addedAtMillis = parseIso8601Millis(wrapper.created),
+    )
+}
+
+/**
+ * LENIENT: one `favorites/artists` page body -> [TidalFavoriteArtist]s, degrading a
+ * malformed body / v1 error envelope to EMPTY (never crashes). Retained as the
+ * tested projection surface; the mirror-pull reads use [favoriteArtistsPageOrNull].
  */
 fun favoriteArtistsFrom(body: String, json: Json): List<TidalFavoriteArtist> = runCatching {
-    json.decodeFromString<TidalV1FavoriteArtistsResponse>(body).items.mapNotNull { wrapper ->
-        val artist = wrapper.item ?: return@mapNotNull null
-        TidalFavoriteArtist(
-            id = artist.id.toString(),
-            name = artist.name,
-            pictureUrl = tidalV1ArtistPictureUrl(artist.picture),
-            addedAtMillis = parseIso8601Millis(wrapper.created),
-        )
-    }
+    json.decodeFromString<TidalV1FavoriteArtistsResponse>(body).toFavoriteArtists()
 }.getOrDefault(emptyList())
 
 /**
- * Pure: one `favorites/tracks` page body → [TidalFavoriteTrack]s. Reuses the
+ * STRICT (mirror-safe): the same projection, but `null` on ANY decode failure —
+ * see [favoriteAlbumsPageOrNull] for the full rationale (captive portal / error
+ * envelope / drift all fail now that `totalNumberOfItems` is REQUIRED, while a
+ * genuine — including genuine-empty — page decodes to a trusted list).
+ */
+fun favoriteArtistsPageOrNull(body: String, json: Json): List<TidalFavoriteArtist>? = runCatching {
+    json.decodeFromString<TidalV1FavoriteArtistsResponse>(body).toFavoriteArtists()
+}.getOrNull()
+
+/** Pure projection of a decoded tracks page — the tested body shared by the lenient and strict parsers. */
+private fun TidalV1FavoriteTracksResponse.toFavoriteTracks(): List<TidalFavoriteTrack> = items.mapNotNull { wrapper ->
+    val track = wrapper.item?.toTrack() ?: return@mapNotNull null
+    TidalFavoriteTrack(track = track, addedAtMillis = parseIso8601Millis(wrapper.created))
+}
+
+/**
+ * LENIENT: one `favorites/tracks` page body -> [TidalFavoriteTrack]s, reusing the
  * existing [TidalV1PageTrack.toTrack] projection (artists[0].name, album cover
- * @640, quality, source = TIDAL) — NO new track parser — and pairs each with its
- * remote `created` millis. Same degrade-to-empty discipline as
- * [favoriteAlbumsFrom]: a malformed body / v1 error envelope yields an empty
- * list, never a crash.
+ * @640, quality, source = TIDAL) — NO new track parser. Degrades a malformed
+ * body / v1 error envelope to EMPTY (never crashes). Retained as the tested
+ * projection surface; the mirror-pull reads use [favoriteTracksPageOrNull].
  */
 fun favoriteTracksFrom(body: String, json: Json): List<TidalFavoriteTrack> = runCatching {
-    json.decodeFromString<TidalV1FavoriteTracksResponse>(body).items.mapNotNull { wrapper ->
-        val track = wrapper.item?.toTrack() ?: return@mapNotNull null
-        TidalFavoriteTrack(track = track, addedAtMillis = parseIso8601Millis(wrapper.created))
-    }
+    json.decodeFromString<TidalV1FavoriteTracksResponse>(body).toFavoriteTracks()
 }.getOrDefault(emptyList())
+
+/**
+ * STRICT (mirror-safe): the same projection, but `null` on ANY decode failure —
+ * see [favoriteAlbumsPageOrNull] for the full rationale (captive portal / error
+ * envelope / drift all fail now that `totalNumberOfItems` is REQUIRED, while a
+ * genuine — including genuine-empty — page decodes to a trusted list).
+ */
+fun favoriteTracksPageOrNull(body: String, json: Json): List<TidalFavoriteTrack>? = runCatching {
+    json.decodeFromString<TidalV1FavoriteTracksResponse>(body).toFavoriteTracks()
+}.getOrNull()
 
 // ---- request URL builders (pure; `order=DATE&orderDirection=DESC` gives
 // most-recent-first, matching the probed schema) ----

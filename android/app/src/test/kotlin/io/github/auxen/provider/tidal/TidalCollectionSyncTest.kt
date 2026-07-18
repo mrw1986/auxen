@@ -3,6 +3,7 @@ package io.github.auxen.provider.tidal
 import io.github.auxen.model.Source
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -72,5 +73,45 @@ class TidalCollectionSyncTest {
     fun `favoriteArtistEntityFor falls back to a stable name when the favorite has none`() {
         val blank = TidalFavoriteArtist(id = "21", name = "", pictureUrl = null, addedAtMillis = null)
         assertEquals("Tidal artist 21", favoriteArtistEntityFor(blank, 0).name)
+    }
+
+    @Test
+    fun `reconcileFavorites adds remote-not-local and removes stale local TIDAL favorites`() {
+        // 111 already local (skip add), 222 new (add); local TIDAL 999 is gone
+        // from remote (stale -> remove); LOCAL 42 is never a delete candidate.
+        val remote = listOf(album("111"), album("222"))
+        val localKeys = setOf("TIDAL:111", "TIDAL:999", "LOCAL:42")
+        val (toAdd, stale) = reconcileFavorites(remote, localKeys) { it.id }
+        assertEquals(listOf("222"), toAdd.map { it.id })
+        assertEquals(listOf("999"), stale)
+    }
+
+    @Test
+    fun `reconcileFavorites never removes a LOCAL-source favorite even against an empty remote`() {
+        // A CONFIRMED empty remote (the user really has 0) still spares every
+        // LOCAL favorite; only the TIDAL-source local with no remote match is stale.
+        val localKeys = setOf("TIDAL:5", "LOCAL:5", "LOCAL:999")
+        val (toAdd, stale) = reconcileFavorites(emptyList<TidalFavoriteAlbum>(), localKeys) { it.id }
+        assertTrue(toAdd.isEmpty())
+        assertEquals(listOf("5"), stale)
+    }
+
+    @Test
+    fun `reconcileFavorites is idempotent when local matches remote exactly`() {
+        val remote = listOf(album("1"), album("2"))
+        val (toAdd, stale) = reconcileFavorites(remote, setOf("TIDAL:1", "TIDAL:2")) { it.id }
+        assertTrue(toAdd.isEmpty())
+        assertTrue(stale.isEmpty())
+    }
+
+    @Test
+    fun `reconcileFavorites on a NULL (failed) fetch adds nothing and removes nothing`() {
+        // THE data-loss guard: a null remote = a failed/untrusted fetch. Even with
+        // local TIDAL favorites present, NOTHING is added and — critically —
+        // NOTHING is stale, so the mirror deletes nothing on a failed fetch.
+        val localKeys = setOf("TIDAL:1", "TIDAL:2", "LOCAL:3")
+        val (toAdd, stale) = reconcileFavorites<TidalFavoriteAlbum>(null, localKeys) { it.id }
+        assertTrue(toAdd.isEmpty())
+        assertTrue(stale.isEmpty())
     }
 }

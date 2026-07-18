@@ -201,6 +201,19 @@ class LibraryRepository(
 
     suspend fun unfavoriteArtist(source: String, sourceId: String) = db.favoriteArtistDao().delete(source, sourceId)
 
+    /**
+     * Remove [sourceId]'s favorite row (source [source]) — the track analogue of
+     * [unfavoriteAlbum]/[unfavoriteArtist], used by the Tidal mirror-pull to drop
+     * a favorite the user un-favorited on Tidal. Resolves the track id via
+     * [io.github.auxen.db.TrackDao.bySourceId] and deletes ONLY the `favorites`
+     * row (never the `tracks` row — the track may still be in a playlist or play
+     * history). No-op when no such track exists locally.
+     */
+    suspend fun unfavoriteTrack(source: String, sourceId: String) {
+        val id = db.trackDao().bySourceId(source, sourceId)?.id ?: return
+        db.favoriteDao().delete(id)
+    }
+
     private companion object {
         const val KEY_SOURCE_PRIORITY = "source_priority"
     }

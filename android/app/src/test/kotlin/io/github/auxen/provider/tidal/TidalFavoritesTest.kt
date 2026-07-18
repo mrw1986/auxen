@@ -185,4 +185,33 @@ class TidalFavoritesTest {
         assertEquals("/v1/users/42/favorites/albums/99", del.encodedPath)
         assertEquals("US", del.queryParameter("countryCode"))
     }
+
+    @Test
+    fun `strict page parsers decode a genuine page (incl a genuine EMPTY) to a trusted non-null list`() {
+        // A real page decodes to the same projection the lenient parser produces...
+        assertEquals(2, favoriteAlbumsPageOrNull(albumsPage, json)!!.size)
+        assertEquals(2, favoriteArtistsPageOrNull(artistsPage, json)!!.size)
+        assertEquals(2, favoriteTracksPageOrNull(tracksPage, json)!!.size)
+        // ...and a GENUINE empty page (items:[] WITH totalNumberOfItems) is a
+        // TRUSTED empty [] — non-null — so the to-zero mirror still works.
+        val emptyPage = """{"items":[],"totalNumberOfItems":0}"""
+        assertEquals(emptyList<TidalFavoriteAlbum>(), favoriteAlbumsPageOrNull(emptyPage, json))
+        assertEquals(emptyList<TidalFavoriteArtist>(), favoriteArtistsPageOrNull(emptyPage, json))
+        assertEquals(emptyList<TidalFavoriteTrack>(), favoriteTracksPageOrNull(emptyPage, json))
+    }
+
+    @Test
+    fun `strict page parsers return NULL on a non-favorites 200 body (captive portal, error envelope, drift)`() {
+        // THE captive-portal wipe guard. Each of these is an HTTP-200 body that is
+        // NOT a favorites page; a null result makes the read return null so the
+        // mirror deletes nothing (vs the lenient parser's trusted []).
+        val html = "<html><body>Sign in to WiFi</body></html>"          // captive portal
+        val errorEnvelope = """{"status":404,"userMessage":"not found"}""" // no totalNumberOfItems
+        val drift = """{"tracks":[{"item":{"id":1}}],"totalCount":1}"""     // items dropped/renamed, no totalNumberOfItems
+        for (bad in listOf(html, errorEnvelope, drift, "not json")) {
+            assertNull(favoriteAlbumsPageOrNull(bad, json))
+            assertNull(favoriteArtistsPageOrNull(bad, json))
+            assertNull(favoriteTracksPageOrNull(bad, json))
+        }
+    }
 }
