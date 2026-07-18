@@ -1005,7 +1005,7 @@ abstract class AuxenDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "CREATE TABLE IF NOT EXISTS `favorite_albums` (" +
-                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
                         "`source` TEXT NOT NULL, " +
                         "`source_id` TEXT NOT NULL, " +
                         "`title` TEXT NOT NULL, " +
@@ -1019,7 +1019,7 @@ abstract class AuxenDatabase : RoomDatabase() {
                 )
                 db.execSQL(
                     "CREATE TABLE IF NOT EXISTS `favorite_artists` (" +
-                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
                         "`source` TEXT NOT NULL, " +
                         "`source_id` TEXT NOT NULL, " +
                         "`name` TEXT NOT NULL, " +
