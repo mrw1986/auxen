@@ -143,9 +143,14 @@ class TidalFavoritesTest {
     }
 
     @Test
-    fun `parseIso8601Millis handles Z and offsets and null on garbage`() {
+    fun `parseIso8601Millis handles Z, colon and bare-numeric offsets, null on garbage`() {
         assertEquals(0L, parseIso8601Millis("1970-01-01T00:00:00Z"))
         assertEquals(0L, parseIso8601Millis("1970-01-01T01:00:00+01:00"))
+        // The form the internal-v1 favorites endpoint actually returns (probed
+        // live, e.g. 2026-07-03T12:17:29.572+0000): a bare numeric offset with NO
+        // colon. Regression guard for the parser fallback that the first albums
+        // fixture also depends on.
+        assertEquals(1682942400000L, parseIso8601Millis("2023-05-01T12:00:00.000+0000"))
         assertNull(parseIso8601Millis("not-a-date"))
         assertNull(parseIso8601Millis(null))
     }
@@ -193,6 +198,8 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.time.Instant
 import java.time.OffsetDateTime
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeFormatterBuilder
 
 /**
  * The pure parts of the user's Tidal favorites on the INTERNAL v1 API — the
@@ -257,10 +264,27 @@ private data class TidalV1FavoriteArtistsResponse(
     val totalNumberOfItems: Int = 0,
 )
 
-/** Parse an ISO-8601 date-time (`created`) to epoch millis, tolerant of `Z`/offset forms; null on absence/parse failure. */
+/**
+ * A formatter for the internal-v1 `created` timestamp, whose offset is the bare
+ * numeric `+0000` form (NO colon) — e.g. `2026-07-03T12:17:29.572+0000`, the
+ * exact shape probed live. Neither `OffsetDateTime.parse` (needs `+00:00`/`Z`)
+ * nor `Instant.parse` (needs `Z`) accepts it, so this fallback does.
+ */
+private val TIDAL_CREATED_FORMAT: DateTimeFormatter = DateTimeFormatterBuilder()
+    .append(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+    .appendOffset("+HHMM", "Z")
+    .toFormatter()
+
+/**
+ * Parse an ISO-8601 date-time (`created`) to epoch millis. Tolerant of the three
+ * forms seen on the wire: `+00:00`/`+01:00` (colon offset), `Z` (UTC), and — the
+ * form the internal-v1 favorites endpoint actually returns — `+0000` (bare
+ * numeric offset, no colon). Null on absence/parse failure.
+ */
 fun parseIso8601Millis(value: String?): Long? {
     if (value.isNullOrBlank()) return null
     return runCatching { OffsetDateTime.parse(value).toInstant().toEpochMilli() }.getOrNull()
+        ?: runCatching { OffsetDateTime.parse(value, TIDAL_CREATED_FORMAT).toInstant().toEpochMilli() }.getOrNull()
         ?: runCatching { Instant.parse(value).toEpochMilli() }.getOrNull()
 }
 
