@@ -529,6 +529,53 @@ class TidalProvider(
         return runCatching { delete(url.toString(), token) }.isSuccess
     }
 
+    /**
+     * The user's Tidal favorite PLAYLISTS (own + followed), paginated — the
+     * internal-v1 port of `session.user.favorites.playlists()`. LIST only: each
+     * carries its uuid + title, NOT its tracks (those are fetched lazily via
+     * [playlistItems] when a playlist is opened). Same not-logged-in / degrade
+     * contract as [favoriteTracks] (a missing collection degrades the Playlists
+     * tab, never breaks it).
+     */
+    suspend fun favoritePlaylists(): List<TidalPlaylist> {
+        val token = validToken() ?: return emptyList()
+        val uid = userId ?: return emptyList()
+        val all = mutableListOf<TidalPlaylist>()
+        var offset = 0
+        while (offset < FAVORITES_MAX) {
+            val url = favoritePlaylistsUrl(API_BASE, uid, countryCode, FAVORITES_PAGE, offset)
+            val body = runCatching { get(url.toString(), token) }.getOrNull() ?: break
+            val page = favoritePlaylistsFrom(body, json)
+            all += page
+            if (page.size < FAVORITES_PAGE) break
+            offset += FAVORITES_PAGE
+        }
+        return all
+    }
+
+    /**
+     * One Tidal playlist's tracks by its [uuid], paginated — the internal-v1
+     * `playlists/{uuid}/items`. Non-track items (e.g. videos) are dropped by
+     * [playlistTracksFrom]; pagination advances on the RAW page item count (via
+     * [TidalPlaylistPage.rawItemCount]) so filtering never truncates a large
+     * playlist early. Metadata only: resolves no stream. Empty when not logged in
+     * / any page fails.
+     */
+    suspend fun playlistItems(uuid: String): List<Track> {
+        val token = validToken() ?: return emptyList()
+        val all = mutableListOf<Track>()
+        var offset = 0
+        while (offset < FAVORITES_MAX) {
+            val url = playlistItemsUrl(API_BASE, uuid, countryCode, FAVORITES_PAGE, offset)
+            val body = runCatching { get(url.toString(), token) }.getOrNull() ?: break
+            val page = playlistTracksFrom(body, json)
+            all += page.tracks
+            if (page.rawItemCount < FAVORITES_PAGE) break
+            offset += FAVORITES_PAGE
+        }
+        return all
+    }
+
     // ------------------------------------------------------------------
     // Internals
     // ------------------------------------------------------------------
