@@ -69,9 +69,6 @@ private data class Destination(val route: String, val label: String, val icon: @
 /** The four primary bottom-nav destinations that show the brand top bar. */
 private val TAB_ROUTES = setOf("home", "library", "search", "collection")
 
-/** Global overlay routes pushed from the top bar, outside the tab back stacks. */
-private val OVERLAY_ROUTES = setOf("equalizer", "account", "settings", "queue")
-
 /**
  * Comfortable reading width for the main content on medium/expanded widths
  * (unfolded foldable, tablet). Content is capped to this and centered so it
@@ -166,12 +163,22 @@ private fun MainScreen(viewModel: PlayerViewModel, widthSizeClass: WindowWidthSi
     val useRail = widthSizeClass != WindowWidthSizeClass.Compact
 
     // Shared tab navigation, used identically by the bottom bar and the rail so
-    // a tab tap behaves the same in either layout: pop any global overlay first
-    // (so a tab's saved state never captures one — restoring such state made
-    // tab taps appear dead), then navigate with the same
-    // saveState/launchSingleTop/restoreState back-stack handling.
+    // a tab tap behaves the same in either layout: pop any pushed screen off the
+    // current tab's back stack before switching. A pushed screen is anything
+    // that is not a primary tab -- a global overlay (equalizer/settings/queue/
+    // account) OR a parameterized detail page (album/artist/playlist). Without
+    // this pop, navigate(restoreState) restores that pushed screen's own saved
+    // state and lands you right back on it, so the tab tap appears dead. The
+    // loop stops at the first primary tab; nowplaying keeps its own back stack
+    // and is unreachable here (its layout hides the nav bar/rail) but is guarded
+    // so a stray tap could never pop it. Because the start destination (home) is
+    // a tab, the loop always bottoms out and terminates.
     val onSelectTab: (String) -> Unit = { route ->
-        while (navController.currentDestination?.route in OVERLAY_ROUTES) {
+        while (
+            navController.currentDestination?.route.let { current ->
+                current != null && current != "nowplaying" && current !in TAB_ROUTES
+            }
+        ) {
             navController.popBackStack()
         }
         navController.navigate(route) {
