@@ -7,7 +7,7 @@ import io.github.auxen.model.Source
 import kotlinx.coroutines.flow.first
 
 /** What one full pull added locally, per favorite type. */
-data class CollectionPullSummary(val albums: Int, val artists: Int)
+data class CollectionPullSummary(val albums: Int, val artists: Int, val tracks: Int)
 
 /**
  * Two-way reconcile between the user's Tidal favorites (internal-v1, via
@@ -41,9 +41,27 @@ class TidalCollectionSync(
         return fresh.size
     }
 
-    /** One pull of both favorite types. */
-    suspend fun pullAll(): CollectionPullSummary =
-        CollectionPullSummary(albums = pullFavoriteAlbums(), artists = pullFavoriteArtists())
+    /**
+     * Pull Tidal favorite tracks into the EXISTING `tracks`+`favorites` tables
+     * (additive union: never deletes a local favorite). Reuses the pure
+     * [newRemoteFavorites] set-difference (keyed `TIDAL:<sourceId>`), then
+     * favorites each fresh track at its remote `created` millis (falling back to
+     * the clock only when the wrapper carried none). Returns the number newly
+     * added; a re-pull of an already-favorited track is a no-op.
+     */
+    suspend fun pullFavoriteTracks(): Int {
+        val remote = tidal.favoriteTracks()
+        val fresh = newRemoteFavorites(remote, library.favoriteKeys().first()) { it.track.sourceId }
+        fresh.forEach { library.favoriteTrack(it.track, it.addedAtMillis ?: clock()) }
+        return fresh.size
+    }
+
+    /** One pull of all three favorite types. */
+    suspend fun pullAll(): CollectionPullSummary = CollectionPullSummary(
+        albums = pullFavoriteAlbums(),
+        artists = pullFavoriteArtists(),
+        tracks = pullFavoriteTracks(),
+    )
 
     /**
      * Push an album favorite toggle to Tidal. Best-effort and optimistic — the
@@ -59,6 +77,17 @@ class TidalCollectionSync(
     suspend fun pushArtistFavorite(source: Source, sourceId: String, favorite: Boolean) {
         if (source != Source.TIDAL) return
         if (favorite) tidal.addFavoriteArtist(sourceId) else tidal.removeFavoriteArtist(sourceId)
+    }
+
+    /**
+     * Push a track favorite toggle to Tidal. Same optimistic, Tidal-only contract
+     * as [pushAlbumFavorite]: the caller has already written the local favorite; a
+     * failure here is not rolled back, and a LOCAL-source track is a no-op (it is
+     * not on Tidal), so in-app hearting of a local track stays local-only.
+     */
+    suspend fun pushTrackFavorite(source: Source, sourceId: String, favorite: Boolean) {
+        if (source != Source.TIDAL) return
+        if (favorite) tidal.addFavoriteTrack(sourceId) else tidal.removeFavoriteTrack(sourceId)
     }
 }
 

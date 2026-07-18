@@ -55,6 +55,19 @@ class LibraryRepositoryTest {
     }
 
     @Test
+    fun favoriteTrackOrdersByRemoteAddedAtNotThePullClock() = runBlocking {
+        // A pulled Tidal favorite is favorited at its remote `created` millis, not
+        // the pull clock (`now` = 1000). Two favorites pulled under the SAME clock
+        // but different remote added_at must come back in added_at DESC order
+        // (the Tracks-tab query), proving favoriteTrack threads the explicit
+        // timestamp instead of stamping clock() like setFavorite does.
+        repo.favoriteTrack(tidalTrack, addedAtMillis = 100)
+        repo.favoriteTrack(tidalTrack.copy(sourceId = "100", title = "Walk"), addedAtMillis = 300)
+        assertEquals(setOf("TIDAL:99", "TIDAL:100"), repo.favoriteKeys().first())
+        assertEquals(listOf("Walk", "Everlong"), repo.favorites().first().map { it.title })
+    }
+
+    @Test
     fun recordPlayIncrementsCountAndWritesHistory() = runBlocking {
         val id = repo.upsert(tidalTrack)
         now = 2000

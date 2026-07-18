@@ -536,7 +536,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleFavorite(track: Track) {
         viewModelScope.launch {
             val key = "${track.source.name}:${track.sourceId}"
-            runCatching { Graph.library.setFavorite(track, key !in favoriteKeys.value) }
+            val favorite = key !in favoriteKeys.value
+            runCatching { Graph.library.setFavorite(track, favorite) }
+            // Two-way: a TIDAL track's heart round-trips to the user's Tidal
+            // favorites (best-effort, optimistic). pushTrackFavorite no-ops for a
+            // non-TIDAL source, so local-track hearting stays local-only.
+            runCatching { Graph.tidalCollectionSync.pushTrackFavorite(track.source, track.sourceId, favorite) }
         }
     }
 
@@ -553,7 +558,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _tidalCollectionStatus.value = "Syncing favorites from Tidal…"
             _tidalCollectionStatus.value = runCatching { Graph.tidalCollectionSync.pullAll() }.fold(
-                onSuccess = { "Synced +${it.albums} album(s), +${it.artists} artist(s) from Tidal." },
+                onSuccess = { "Synced +${it.albums} album(s), +${it.artists} artist(s), +${it.tracks} track(s) from Tidal." },
                 onFailure = { collectionSynced = false; "Favorites sync failed: ${it.message}" },
             )
         }

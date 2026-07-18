@@ -45,6 +45,20 @@ class LibraryRepository(
     }
 
     /**
+     * Favorite [track] at an EXPLICIT [addedAtMillis] — the remote Tidal `created`
+     * timestamp for a pulled favorite — so the Tracks tab (ORDER BY added_at DESC)
+     * preserves Tidal's own favorite order. Upserts the track first (preserving
+     * its id/added_at/play_count on conflict), then inserts the favorite row.
+     * Idempotent: a re-pull REPLACEs the favorite row (FavoriteDao.insert is
+     * OnConflictStrategy.REPLACE). The in-app heart path stays on [setFavorite],
+     * which stamps the wall clock (correct for a just-now action).
+     */
+    suspend fun favoriteTrack(track: Track, addedAtMillis: Long) {
+        val id = upsert(track)
+        db.favoriteDao().insert(FavoriteEntity(id, track.matchGroupId, addedAtMillis))
+    }
+
+    /**
      * Record a play for a mediaId of the form "SOURCE:sourceId". Unknown
      * tracks and malformed ids are ignored — playback must never crash on
      * bookkeeping.
