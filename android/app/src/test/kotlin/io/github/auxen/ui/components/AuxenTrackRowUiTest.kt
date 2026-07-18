@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
@@ -98,6 +99,42 @@ class AuxenTrackRowUiTest {
         compose.onNodeWithText("My Hero").performTouchInput { longClick() }
 
         assertEquals(1, longPressed)
+    }
+
+    @Test
+    fun longPressExposesALabelledSemanticsActionWhenHandlerPresent() {
+        compose.setContent {
+            AuxenTheme(darkTheme = true) {
+                AuxenTrackRow(
+                    track = track(title = "My Hero"),
+                    isFavorite = false,
+                    onPlay = {},
+                    onToggleFavorite = {},
+                    onLongPress = {},
+                )
+            }
+        }
+
+        val node = compose.onNodeWithText("My Hero").fetchSemanticsNode()
+        assertEquals("Show track actions", node.config[SemanticsActions.OnLongClick].label)
+    }
+
+    /** No handler -> no long-click action advertised, so no dead affordance. */
+    @Test
+    fun noLongClickActionWhenHandlerAbsent() {
+        compose.setContent {
+            AuxenTheme(darkTheme = true) {
+                AuxenTrackRow(
+                    track = track(title = "My Hero"),
+                    isFavorite = false,
+                    onPlay = {},
+                    onToggleFavorite = {},
+                )
+            }
+        }
+
+        val node = compose.onNodeWithText("My Hero").fetchSemanticsNode()
+        assertEquals(false, node.config.contains(SemanticsActions.OnLongClick))
     }
 
     @Test

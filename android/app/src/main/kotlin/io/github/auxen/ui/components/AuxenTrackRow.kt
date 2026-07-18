@@ -25,6 +25,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -59,10 +61,24 @@ fun AuxenTrackRow(
     onLongPress: (() -> Unit)? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
+    val haptics = LocalHapticFeedback.current
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onPlay, onLongClick = onLongPress)
+            .combinedClickable(
+                onClick = onPlay,
+                // Both are gated on the SAME null check as onLongClick, so a
+                // host that offers no sheet advertises no long-press action and
+                // buzzes for nothing. Foundation 1.7.6's combinedClickable does
+                // NOT self-haptic — this call is required and does not double-buzz.
+                onLongClickLabel = onLongPress?.let { "Show track actions" },
+                onLongClick = onLongPress?.let { handler ->
+                    {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        handler()
+                    }
+                },
+            )
             .background(if (isPlaying) AuxenColors.AmberPrimary.copy(alpha = 0.08f) else Color.Transparent)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
