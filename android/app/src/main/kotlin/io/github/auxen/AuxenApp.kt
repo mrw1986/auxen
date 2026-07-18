@@ -24,9 +24,6 @@ import io.github.auxen.playback.QueueStateStore
 import io.github.auxen.playback.TrackResolver
 import io.github.auxen.provider.local.LocalProvider
 import io.github.auxen.provider.tidal.TidalAuth
-import io.github.auxen.provider.tidal.TidalMetadataRepository
-import io.github.auxen.provider.tidal.TidalOfficialClient
-import io.github.auxen.provider.tidal.TidalOfficialSession
 import io.github.auxen.provider.tidal.TidalProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -143,14 +140,6 @@ object Graph {
         private set
     lateinit var tidal: TidalProvider
         private set
-    /** Official Tidal API PKCE session (Tidal official-API migration, Task 1) -- additive, independent of [tidalAuth]. */
-    lateinit var tidalOfficialSession: TidalOfficialSession
-        private set
-    lateinit var tidalOfficialApi: TidalOfficialClient
-        private set
-    /** Official-API metadata seam (validAccessToken -> getArtist -> compound projection); metadata only, streaming stays internal-v1. */
-    lateinit var tidalMetadata: TidalMetadataRepository
-        private set
     lateinit var db: AuxenDatabase
         private set
     lateinit var library: LibraryRepository
@@ -185,15 +174,6 @@ object Graph {
         local = LocalProvider(context)
         tidalAuth = TidalAuth(context, httpClient)
         tidal = TidalProvider(tidalAuth, httpClient)
-        tidalOfficialSession = TidalOfficialSession(context, httpClient)
-        tidalOfficialApi = TidalOfficialClient(httpClient)
-        tidalMetadata = TidalMetadataRepository(
-            session = tidalOfficialSession,
-            client = tidalOfficialApi,
-            json = json,
-            countryCode = java.util.Locale.getDefault().country.ifBlank { "US" },
-            locale = java.util.Locale.getDefault().toLanguageTag(),
-        )
         db = AuxenDatabase.build(context)
         library = LibraryRepository(db)
         queueStore = QueueStateStore(db)

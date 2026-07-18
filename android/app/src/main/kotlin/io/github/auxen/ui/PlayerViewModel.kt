@@ -2,7 +2,6 @@ package io.github.auxen.ui
 
 import android.app.Application
 import android.content.ComponentName
-import android.net.Uri
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -15,7 +14,6 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
@@ -31,16 +29,12 @@ import io.github.auxen.playback.PlaybackService
 import io.github.auxen.provider.tidal.ArtistLink
 import io.github.auxen.provider.tidal.TidalAlbumResult
 import io.github.auxen.provider.tidal.TidalSearchResults
-import io.github.auxen.provider.tidal.formatTidalStreamingProbeResult
-import io.github.auxen.provider.tidal.probePlayback
-import io.github.auxen.provider.tidal.probeStreaming
 import io.github.auxen.ui.theme.ThemeMode
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
@@ -220,280 +214,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     /** Source-priority tie-break for search-result merging (Settings screen; consumed by [search]). */
     val sourcePriority = MutableStateFlow(SourcePriority.PREFER_QUALITY)
 
-    /**
-     * The go/no-go streaming spike's visible status readout (Tidal
-     * official-API migration, Task 1; "Try official Tidal login (beta)" in
-     * Settings) -- null until a login/probe has run this session.
-     */
-    val tidalOfficialStatus = MutableStateFlow<String?>(null)
-
-    /** The spike's throwaway validation player -- NOT the app's real playback pipeline; see [probePlayback]'s KDoc. */
-    private var tidalOfficialProbePlayer: ExoPlayer? = null
-
-    /** Step 1 of the official-API login: the URL to open in a Custom Tab. */
-    fun beginTidalOfficialLogin(): String = Graph.tidalOfficialSession.beginLogin()
-
-    /** Step 2: call from `MainActivity.onNewIntent` with the `auxen://auth-callback` redirect. */
-    fun completeTidalOfficialLogin(redirect: Uri) {
-        viewModelScope.launch {
-            val result = Graph.tidalOfficialSession.completeLogin(redirect)
-            tidalOfficialStatus.value = result.fold(
-                onSuccess = { "Logged in via the official Tidal API. Access token acquired -- run the streaming probe below." },
-                onFailure = { "Official-API login failed: ${it.message}" },
-            )
-        }
-    }
-
-    /**
-     * Runs the go/no-go streaming spike for [trackId]: fetches
-     * `/trackManifests/{id}` + `/trackFiles/{id}`, and -- if either came
-     * back FULL with a usable URL -- attempts a throwaway Media3 play to
-     * confirm it's genuinely playable (manifest URL preferred; a DASH
-     * manifest is required for [probePlayback]'s MIME hint, which a bare
-     * `trackFiles` file URL isn't).
-     */
-    fun runTidalOfficialStreamingProbe(trackId: String) {
-        viewModelScope.launch {
-            val session = Graph.tidalOfficialSession.storedSession()
-            if (session == null) {
-                tidalOfficialStatus.value = "Not logged in via the official API yet -- tap \"Try official Tidal login\" first."
-                return@launch
-            }
-            tidalOfficialStatus.value = "Probing track $trackId…"
-            val probe = probeStreaming(Graph.tidalOfficialApi, session.accessToken, trackId)
-            Log.i("AuxenTidalOfficial", formatTidalStreamingProbeResult(probe))
-
-            val manifestUrl = probe.manifestUri.takeIf { probe.manifestPresentation == "FULL" }
-            if (manifestUrl == null) {
-                tidalOfficialStatus.value = formatTidalStreamingProbeResult(probe)
-                return@launch
-            }
-
-            tidalOfficialProbePlayer?.release()
-            tidalOfficialProbePlayer = probePlayback(getApplication(), manifestUrl) { playbackResult ->
-                val withPlayback = probe.copy(playbackConfirmed = playbackResult.isSuccess)
-                tidalOfficialStatus.value = formatTidalStreamingProbeResult(withPlayback)
-                Log.i("AuxenTidalOfficial", formatTidalStreamingProbeResult(withPlayback))
-            }
-        }
-    }
-
-    /**
-     * The metadata analogue of [tidalOfficialStatus]: the official-API
-     * artist-metadata probe's visible readout (Tidal metadata-layer
-     * Foundation, Slice 0) -- null until [runTidalMetadataProbe] has run.
-     */
-    private val _tidalMetadataStatus = MutableStateFlow<String?>(null)
-    val tidalMetadataStatus: StateFlow<String?> = _tidalMetadataStatus.asStateFlow()
-
-    /** Debug/probe: fetch an artist's official-API metadata overview and render it as a status string. */
-    fun runTidalMetadataProbe(artistId: String) {
-        viewModelScope.launch {
-            _tidalMetadataStatus.value = "Fetching artist $artistId…"
-            _tidalMetadataStatus.value = Graph.tidalMetadata.artistOverview(artistId.trim()).fold(
-                onSuccess = { o ->
-                    buildString {
-                        appendLine("Artist: ${o.name} (id ${o.id})")
-                        appendLine("Biography: ${o.biography?.take(160) ?: "—"}")
-                        appendLine("Similar (${o.similarArtistNames.size}): ${o.similarArtistNames.take(5).joinToString()}")
-                        appendLine("Albums (${o.albumTitles.size}): ${o.albumTitles.take(5).joinToString()}")
-                    }
-                },
-                onFailure = { "Metadata probe failed: ${it.message}" },
-            )
-        }
-    }
-
-    private val _tidalIdProbeStatus = MutableStateFlow<String?>(null)
-    val tidalIdProbeStatus: StateFlow<String?> = _tidalIdProbeStatus.asStateFlow()
-
-    /**
-     * Slice-1 gate: prove an internal-v1 track id is the SAME catalog id the
-     * official v2 API accepts. Resolves the track's artist/album ids on the
-     * official API, then fetches the artist name to make the match
-     * human-verifiable. Only names/ids/ISRC in the readout — never a token.
-     */
-    fun runTidalIdEquivalenceProbe(tidalTrackId: String) {
-        viewModelScope.launch {
-            val id = tidalTrackId.trim()
-            _tidalIdProbeStatus.value = "Resolving track $id on the official v2 API…"
-            val repo = Graph.tidalMetadata
-            val relations = repo.trackRelations(id)
-            val rel = relations.getOrNull()
-            if (rel == null) {
-                _tidalIdProbeStatus.value =
-                    "FAIL: the official API rejected track id $id — ${relations.exceptionOrNull()?.message}. " +
-                        "id-equivalence does NOT hold; fall back to ISRC/barcodeId matching."
-                return@launch
-            }
-            val artistName = rel.artistId?.let { repo.artistOverview(it).getOrNull()?.name }
-            // Slice 1 Task 3: prove the artist id official-v2 just handed us is
-            // ALSO accepted by internal-v1, which is where the discography, the
-            // top tracks and the by-name id resolution all come from (official
-            // v2's ?include= returns an arbitrary page). Names/titles/ids only —
-            // never a token, never a full request URL.
-            val artistId = rel.artistId
-            val discography = artistId?.let { Graph.tidal.artistAlbums(it) }.orEmpty()
-            val top = artistId?.let { Graph.tidal.artistTopTracks(it) }.orEmpty()
-            // Decision 4, both directions: the real name must resolve, and a
-            // near-miss must resolve to NOTHING rather than to a nearby artist.
-            val exactHit = artistName?.let { Graph.tidal.searchArtistIdExact(it) }
-            val nearMissName = artistName?.let { "$it Zzz" }
-            val nearMissHit = nearMissName?.let { Graph.tidal.searchArtistIdExact(it) }
-            _tidalIdProbeStatus.value = buildString {
-                appendLine("Track id $id resolves on the official v2 API (same catalog id).")
-                appendLine("ISRC: ${rel.isrc ?: "—"}")
-                appendLine("Artist: ${artistName ?: "—"} (id ${artistId ?: "—"})")
-                appendLine("Album id: ${rel.albumId ?: "—"}")
-                appendLine(
-                    if (artistId != null && rel.albumId != null) {
-                        "PASS — the internal-v1 track id is the same catalog id the official v2 API accepts."
-                    } else {
-                        "PARTIAL — track resolved but a relationship was missing; inspect the ids above."
-                    },
-                )
-                appendLine()
-                appendLine("Discography (internal-v1 artists/$artistId/albums?limit=50): ${discography.size}")
-                discography.take(8).forEach { appendLine("  • ${it.title} (${it.albumType ?: "—"}, ${it.releaseYear ?: "—"})") }
-                appendLine(
-                    if (discography.isEmpty()) {
-                        "FAIL — internal-v1 returned no albums for artist id $artistId. Either the " +
-                            "official-v2 artist id is NOT an internal-v1 artist id, or you are not logged in " +
-                            "on the internal-v1 path (Account → Log in to Tidal). Task 3's discography " +
-                            "depends on this — do not build Task 6 until it passes."
-                    } else {
-                        "PASS — the official-v2 artist id is accepted by internal-v1."
-                    },
-                )
-                appendLine()
-                appendLine("Top tracks (internal-v1 artists/$artistId/toptracks?limit=50): ${top.size}")
-                top.take(8).forEach { appendLine("  • ${it.title}") }
-                appendLine(
-                    if (top.isEmpty()) {
-                        "FAIL — internal-v1 returned no top tracks for artist id $artistId. Task 3's " +
-                            "top-tracks section depends on this — do not build Task 6 until it passes."
-                    } else {
-                        "PASS — toptracks answered. EYEBALL THE ORDER: it must read like the artist's " +
-                            "best-known songs, not an arbitrary page of remixes/B-sides."
-                    },
-                )
-                appendLine()
-                appendLine("Exact-match search for \"${artistName ?: "—"}\": id ${exactHit ?: "null"}")
-                appendLine("Near-miss search for \"${nearMissName ?: "—"}\": id ${nearMissHit ?: "null"}")
-                appendLine(
-                    when {
-                        exactHit == null ->
-                            "FAIL — the exact name did not resolve. Decision 4's fallback would never fire; " +
-                                "check the internal-v1 login and the `types=artists` param."
-                        nearMissHit != null ->
-                            "FAIL — a NEAR-MISS resolved to id $nearMissHit. artistIdFromSearch is matching " +
-                                "fuzzily; it must require an exact case-insensitive name match. This is the " +
-                                "desktop bug we are here to NOT ship."
-                        exactHit != artistId ->
-                            "PARTIAL — the exact name resolved to $exactHit but the track's artist id is " +
-                                "$artistId. Two artists share this name; inspect before relying on the fallback."
-                        else -> "PASS — exact name resolves to the same artist id; a near-miss resolves to nothing."
-                    },
-                )
-            }
-        }
-    }
-
-    private val _tidalArtistPageProbeStatus = MutableStateFlow<String?>(null)
-    val tidalArtistPageProbeStatus: StateFlow<String?> = _tidalArtistPageProbeStatus.asStateFlow()
-
-    /**
-     * The artist-page-rebuild gate: prove `pages/artist` answers from the app's
-     * OWN internal-v1 session and carries what the probe of 2026-07-16 saw.
-     *
-     * It also settles the one open payload question: whether `pagedList.items`
-     * is fully materialised or a first page. The section counts below are what
-     * we ACTUALLY parsed, so they answer it directly.
-     *
-     * Names, titles, ids and counts only — never a token, never a full URL.
-     */
-    fun runTidalArtistPageProbe(artistId: String) {
-        viewModelScope.launch {
-            val id = artistId.trim()
-            _tidalArtistPageProbeStatus.value = "Fetching pages/artist for $id…"
-            val page = Graph.tidal.artistPage(id)
-            if (page == null) {
-                _tidalArtistPageProbeStatus.value =
-                    "FAIL: pages/artist returned nothing for artist id $id. Either you are not logged in " +
-                        "on the internal-v1 path (Account → Log in to Tidal), or the request shape is " +
-                        "wrong. Check FIRST that no `limit` param is being sent — this endpoint answers " +
-                        "400 when one is present, and that is the known trap."
-                return@launch
-            }
-            _tidalArtistPageProbeStatus.value = buildString {
-                appendLine("Artist: ${page.name} (id ${page.id})")
-                appendLine("Picture: ${if (page.artworkUrl != null) "present (480x480)" else "— MISSING"}")
-                appendLine()
-                appendLine("Biography: ${page.biography?.length?.let { "$it chars" } ?: "— MISSING"}")
-                page.biography?.take(160)?.let { appendLine("  \"$it…\"") }
-                appendLine(
-                    if (page.biography != null) {
-                        "PASS — the bio official v2 has not got at our tier. EYEBALL IT: it must read as " +
-                            "prose, with NO raw [wimpLink] or <br> tags left in."
-                    } else {
-                        "FAIL — no biography. This is the headline fix; if it is missing for a major " +
-                            "artist, do not proceed to Task 3."
-                    },
-                )
-                appendLine()
-                appendLine("Top tracks: ${page.topTracks.size}")
-                page.topTracks.take(5).forEach { appendLine("  • ${it.title} — ${it.artist} [${it.qualityLabel}]") }
-                appendLine(
-                    if (page.topTracks.isEmpty()) {
-                        "FAIL — no top tracks."
-                    } else if (page.topTracks.any { it.artist.isBlank() }) {
-                        "FAIL — a track has a BLANK artist name. The projection is reading the singular " +
-                            "`artist` key, which this payload does not have; it must read `artists[0]`."
-                    } else {
-                        "PASS — EYEBALL THE ORDER: it must read like the artist's best-known songs."
-                    },
-                )
-                appendLine()
-                appendLine("Album sections: ${page.albumSections.size}")
-                page.albumSections.forEach { section ->
-                    appendLine("  ${section.title} (${section.albums.size})")
-                    section.albums.take(3).forEach { appendLine("    • ${it.title} (${it.releaseYear ?: "—"})") }
-                }
-                appendLine(
-                    if (page.albumSections.isEmpty()) {
-                        "FAIL — no album sections."
-                    } else {
-                        "PASS — EYEBALL THE CATEGORIES: real studio albums under the FIRST section, and " +
-                            "the Fixxxer rough mixes under 'EP & Singles' rather than in the discography. " +
-                            "The first section is where local albums merge (Task 4), so confirm it IS the " +
-                            "primary discography."
-                    },
-                )
-                appendLine()
-                appendLine("Artist sections: ${page.artistSections.size}")
-                page.artistSections.forEach { section ->
-                    val withArt = section.artists.count { it.artworkUrl != null }
-                    appendLine("  ${section.title} (${section.artists.size}, $withArt with photos)")
-                    section.artists.take(3).forEach { appendLine("    • ${it.name}") }
-                }
-                appendLine(
-                    if (page.artistSections.flatMap { it.artists }.none { it.artworkUrl != null }) {
-                        "FAIL — no photos on any similar artist. That is the user's actual ask."
-                    } else {
-                        "PASS — the photos are here. CONFIRM ON SCREEN that they LOAD: a 480x480 URL is " +
-                            "only correct if the CDN renders it (tidalapi allows 160/320/480/750 for an " +
-                            "artist; 640 — the ALBUM size — would 404)."
-                    },
-                )
-                appendLine()
-                appendLine(
-                    "Section counts above are what we PARSED — they settle whether pagedList.items is " +
-                        "fully materialised or a first page. Record them in the report.",
-                )
-            }
-        }
-    }
-
     // ---- The artist page: ONE internal-v1 read (pages/artist) ----
 
     /**
@@ -512,10 +232,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
      * or the call failed. The screen then renders exactly what it renders today
      * off its offline-safe local base.
      *
-     * This lives here, not on [io.github.auxen.provider.tidal.TidalMetadataRepository],
-     * because that class's constructor is FROZEN and holds no internal-v1
-     * provider — the same reason `artistAlbums`/`artistTopTracks` were composed
-     * here before it.
+     * Composition lives here in the ViewModel, alongside the album and track
+     * detail loaders, stitching the internal-v1 read to the offline-safe local
+     * base — the same place `artistAlbums`/`artistTopTracks` were composed.
      */
     val artistPage = MutableStateFlow<io.github.auxen.provider.tidal.TidalArtistPage?>(null)
     val artistDetailLoading = MutableStateFlow(false)
@@ -1107,7 +826,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         controller?.release()
-        tidalOfficialProbePlayer?.release()
         super.onCleared()
     }
 }

@@ -174,21 +174,4 @@
 
     <string name="empty_home_title">Nothing here yet</string>
     <string name="empty_home_subtitle">Play something from your Library or Search.</string>
-
-    <!-- Tidal official-API migration, Task 1: go/no-go streaming spike. -->
-    <string name="settings_advanced_title">Advanced</string>
-    <string name="settings_advanced_subtitle">Experimental features under evaluation.</string>
-    <string name="settings_tidal_official_link">Try official Tidal login (beta)</string>
-
-    <string name="tidal_official_title">Official Tidal API (beta)</string>
-    <string name="tidal_official_description">Additive spike — does not affect your existing Tidal login. Logs in via the official openapi.tidal.com API and checks whether full-length Hi-Res streaming works for this app\'s registration.</string>
-    <string name="tidal_official_login_button">Try official Tidal login (beta)</string>
-    <string name="tidal_official_track_id_label">Tidal track id</string>
-    <string name="tidal_official_probe_button">Run streaming probe</string>
-    <string name="tidal_official_artist_id_label">Tidal artist id</string>
-    <string name="tidal_official_metadata_button">Fetch artist metadata</string>
-    <string name="tidal_official_id_probe_label">Tidal track id (internal-v1) for id check</string>
-    <string name="tidal_official_id_probe_button">Check id equivalence (official v2)</string>
-    <string name="tidal_artist_page_probe_label">Tidal artist id for pages/artist probe</string>
-    <string name="tidal_artist_page_probe_button">Probe pages/artist (internal-v1)</string>
 </resources>

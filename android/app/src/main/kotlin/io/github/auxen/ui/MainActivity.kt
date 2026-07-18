@@ -1,7 +1,6 @@
 package io.github.auxen.ui
 
 import android.Manifest
-import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -71,7 +70,7 @@ private data class Destination(val route: String, val label: String, val icon: @
 private val TAB_ROUTES = setOf("home", "library", "search", "collection")
 
 /** Global overlay routes pushed from the top bar, outside the tab back stacks. */
-private val OVERLAY_ROUTES = setOf("equalizer", "account", "settings", "queue", "tidal-official-debug")
+private val OVERLAY_ROUTES = setOf("equalizer", "account", "settings", "queue")
 
 /**
  * Comfortable reading width for the main content on medium/expanded widths
@@ -95,7 +94,6 @@ private fun topBarTitle(route: String?): String = when (route) {
     "queue" -> "Queue"
     "equalizer" -> "Equalizer"
     "account" -> "Account"
-    "tidal-official-debug" -> "Tidal Debug"
     else -> ""
 }
 
@@ -125,25 +123,6 @@ class MainActivity : ComponentActivity() {
             io.github.auxen.ui.theme.AuxenTheme(darkTheme = darkTheme) {
                 MainScreen(viewModel, widthSizeClass = windowSizeClass.widthSizeClass)
             }
-        }
-
-        handleTidalOfficialRedirect(intent)
-    }
-
-    /**
-     * `singleTask` (see the manifest) means the official-API PKCE redirect
-     * lands here, not a fresh [onCreate] -- see the `auxen://auth-callback`
-     * intent-filter (Tidal official-API migration, Task 1).
-     */
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        handleTidalOfficialRedirect(intent)
-    }
-
-    private fun handleTidalOfficialRedirect(intent: Intent?) {
-        val uri = intent?.data ?: return
-        if (uri.scheme == "auxen" && uri.host == "auth-callback") {
-            viewModel.completeTidalOfficialLogin(uri)
         }
     }
 
@@ -228,7 +207,7 @@ private fun MainScreen(viewModel: PlayerViewModel, widthSizeClass: WindowWidthSi
                     )
                 }
                 // Detail (album/artist/playlist) + overlay (settings/queue/
-                // equalizer/account/tidal-debug) screens are pushed onto a tab's
+                // equalizer/account) screens are pushed onto a tab's
                 // back stack: give them a persistent back affordance and a short
                 // static route label, and none of the tab-level actions -- they
                 // don't belong on a pushed screen, and each screen already shows
@@ -384,13 +363,7 @@ private fun MainScreen(viewModel: PlayerViewModel, widthSizeClass: WindowWidthSi
                         )
                     }
                     composable("equalizer") { EqualizerScreen() }
-                    composable("settings") {
-                        SettingsScreen(
-                            viewModel,
-                            onOpenTidalOfficialDebug = { navController.navigate("tidal-official-debug") { launchSingleTop = true } },
-                        )
-                    }
-                    composable("tidal-official-debug") { TidalOfficialDebugScreen(viewModel) }
+                    composable("settings") { SettingsScreen(viewModel) }
                     composable("queue") { QueueScreen(viewModel) }
                     composable("account") { AccountScreen(viewModel) }
                     composable("nowplaying") {
