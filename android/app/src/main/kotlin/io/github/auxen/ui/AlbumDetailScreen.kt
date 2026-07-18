@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import io.github.auxen.R
 import io.github.auxen.data.groupAlbums
+import io.github.auxen.data.groupTracksByDisc
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.ui.components.ArtworkImage
@@ -100,6 +101,10 @@ fun AlbumDetailScreen(
     // Tidal-only album is fully playable; an empty/absent remote list falls back
     // to the local group, leaving a non-Tidal album exactly as it is today.
     val displayTracks = detail?.tracks?.takeIf { it.isNotEmpty() } ?: tracks
+    // Split into "Disc N" sections only when the album spans >1 disc; a single-
+    // disc album yields one null-disc section (no header) with its tracks in the
+    // same order as before (polish Fix A).
+    val discSections = groupTracksByDisc(displayTracks)
 
     // `TidalAlbumDetail.title`/`.artistName` are NON-NULL Strings (projected in
     // `TidalInternalAlbum.kt`, `artistName` via `.orEmpty()`), so a `?:` on the nullable
@@ -208,14 +213,29 @@ fun AlbumDetailScreen(
                 }
             }
         }
-        items(displayTracks, key = { "${it.source}:${it.sourceId}" }) { track ->
-            AuxenTrackRow(
-                track = track,
-                isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
-                onPlay = { viewModel.play(track) },
-                onToggleFavorite = { viewModel.toggleFavorite(track) },
-                onLongPress = { sheetTrack = track },
-            )
+        discSections.forEach { section ->
+            section.discNumber?.let { disc ->
+                item(key = "disc-$disc") {
+                    Text(
+                        "Disc $disc",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+                    )
+                }
+            }
+            items(section.tracks, key = { "${it.source}:${it.sourceId}" }) { track ->
+                AuxenTrackRow(
+                    track = track,
+                    trackNumber = track.trackNumber,
+                    isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+                    onPlay = { viewModel.play(track) },
+                    onToggleFavorite = { viewModel.toggleFavorite(track) },
+                    onLongPress = { sheetTrack = track },
+                )
+            }
         }
     }
 

@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.auxen.model.Source
@@ -54,6 +55,7 @@ fun AuxenTrackRow(
     onToggleFavorite: () -> Unit,
     modifier: Modifier = Modifier,
     isPlaying: Boolean = false,
+    trackNumber: Int? = null,
     onLongPress: (() -> Unit)? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
@@ -65,11 +67,26 @@ fun AuxenTrackRow(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ArtworkImage(
-            model = track.albumArtUrl,
-            contentDescription = null,
-            modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
-        )
+        // On an album page every row shares one cover, so a right-aligned track
+        // number is more useful than N identical thumbnails. When [trackNumber]
+        // is null (every non-album caller) the leading slot is the art, byte-for-
+        // byte as before — the number path is purely additive.
+        if (trackNumber != null) {
+            Text(
+                trackNumber.toString(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = FontFamily.Monospace,
+                textAlign = TextAlign.End,
+                modifier = Modifier.width(32.dp),
+            )
+        } else {
+            ArtworkImage(
+                model = track.albumArtUrl,
+                contentDescription = null,
+                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
+            )
+        }
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
