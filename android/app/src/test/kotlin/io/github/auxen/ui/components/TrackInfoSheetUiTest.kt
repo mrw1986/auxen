@@ -9,6 +9,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
+import io.github.auxen.model.Source
+import io.github.auxen.model.Track
 import io.github.auxen.provider.tidal.TidalTrackDetail
 import io.github.auxen.provider.tidal.TrackCredit
 import io.github.auxen.ui.testutil.TEST_DEVICE
@@ -51,6 +53,15 @@ class TrackInfoSheetUiTest {
     @get:Rule
     val compose = createComposeRule()
 
+    private val tidalTrack = Track(
+        title = "Nightcall",
+        artist = "Kavinsky",
+        source = Source.TIDAL,
+        sourceId = "t1",
+        format = "FLAC",
+        bitrateKbps = 1411,
+    )
+
     private fun detail(
         credits: List<TrackCredit> = listOf(
             TrackCredit("Producer", listOf("Alice", "Bob")),
@@ -67,10 +78,10 @@ class TrackInfoSheetUiTest {
         similarTracks = emptyList(),
     )
 
-    private fun show(detail: TidalTrackDetail?, loading: Boolean = false) {
+    private fun show(detail: TidalTrackDetail?, loading: Boolean = false, track: Track = tidalTrack) {
         compose.setContent {
             AuxenTheme(darkTheme = true) {
-                TrackInfoSheetContent(detail = detail, loading = loading)
+                TrackInfoSheetContent(track = track, detail = detail, loading = loading)
             }
         }
         compose.waitForIdle()
@@ -99,9 +110,36 @@ class TrackInfoSheetUiTest {
         compose.mainClock.autoAdvance = false
         compose.setContent {
             AuxenTheme(darkTheme = true) {
-                TrackInfoSheetContent(detail = null, loading = true)
+                TrackInfoSheetContent(track = tidalTrack, detail = null, loading = true)
             }
         }
+    }
+
+    @Test
+    fun detailsSectionRendersLocalTechnicalMetadata() {
+        compose.setContent {
+            AuxenTheme(darkTheme = true) {
+                TrackInfoSheetContent(
+                    track = Track(
+                        title = "My Hero",
+                        artist = "Foo Fighters",
+                        source = Source.LOCAL,
+                        sourceId = "1",
+                        format = "FLAC",
+                        bitrateKbps = 1000,
+                    ),
+                    detail = null,
+                    loading = false,
+                )
+            }
+        }
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Details").assertExists()
+        compose.onNodeWithText("FLAC").assertExists()
+        compose.onNodeWithText("Local").assertExists()
+        // A local track has no catalog-keyed credits/lyrics block.
+        compose.onNodeWithText("Lyrics").assertDoesNotExist()
     }
 
     @Test
@@ -154,35 +192,27 @@ class TrackInfoSheetUiTest {
     fun settledWithNoDetailShowsTheFallbackNotice() {
         show(null, loading = false)
 
-        compose.onNodeWithText("Track info").assertExists()
-        compose.onNodeWithText("No details available.").assertExists()
+        // The credits/lyrics block settles on its notice; Details still renders.
+        compose.onNodeWithText("No credits or lyrics available.").assertExists()
+        compose.onNodeWithText("Details").assertExists()
         compose.onNodeWithText("Lyrics").assertDoesNotExist()
     }
 
     @Test
     fun blankTitleFallsBackToThePlaceholderHeader() {
-        // `title` is projected with `.orEmpty()`, so an absent title attribute
-        // arrives as "" on a perfectly resolved document — a bare elvis would
-        // render an empty header. Pins the `?.takeIf { it.isNotBlank() }`.
-        show(detail().copy(title = ""))
+        // The header now comes from the Track's own title; a blank one falls back.
+        show(detail(), track = tidalTrack.copy(title = ""))
 
         compose.onNodeWithText("Track info").assertExists()
     }
 
     @Test
     fun loadingWithNoDetailShowsTheSpinnerAndNotTheFallbackNotice() {
-        // The branch the on-device checkpoint would otherwise be the ONLY
-        // evidence for. Two things are pinned:
-        //  1. loading && detail == null renders the spinner and NOT
-        //     "No details available." — i.e. a failure settling on the notice
-        //     (settledWithNoDetailShowsTheFallbackNotice) is a real transition,
-        //     not a state the sheet was already in.
-        //  2. LoadingState's `fillMaxSize()` sits inside a `verticalScroll`ed
-        //     Column here — an UNBOUNDED-height context, unlike the bounded
-        //     `fillMaxSize()` Columns it was written for. `fillMaxHeight` no-ops
-        //     when `!constraints.hasBoundedHeight`, so the Box wraps its content
-        //     instead of blowing the scroll content up to Constraints.Infinity.
-        //     The height assert is what would catch that regressing.
+        // NOT unchanged: the header now comes from `track.title` (D1), and the
+        // settled-notice text changed to "No credits or lyrics available." — both
+        // assertions this test used to make had to move. showLoading() renders the
+        // tidalTrack (title "Nightcall") with detail == null and loading == true,
+        // so the spinner shows and the settled notice does not.
         showLoading()
 
         compose.onNode(
@@ -191,12 +221,16 @@ class TrackInfoSheetUiTest {
                 ProgressBarRangeInfo.Indeterminate,
             ),
         ).assertExists()
-        compose.onNodeWithText("Track info").assertExists()
-        compose.onNodeWithText("No details available.").assertDoesNotExist()
-        // Title + divider + a wrapped 40dp spinner in 32dp padding is ~150dp.
-        // An unbounded-height leak would measure orders of magnitude past this.
-        // (Compose 1.7.6's bounds API has assertHeightIsAtLeast/EqualTo but no
-        // AtMost, hence the explicit bounds read.)
+        // Header is the Track's own title now, not the detail's — pins that the
+        // body composed while the spinner is up.
+        compose.onNodeWithText("Nightcall").assertExists()
+        // The settled notice must NOT show while loading (the spinner is up), and
+        // its text changed with the Details reshaping.
+        compose.onNodeWithText("No credits or lyrics available.").assertDoesNotExist()
+        // Title + divider + a wrapped 40dp spinner + the small Details block stays
+        // well bounded; an unbounded-height fillMaxSize leak would measure orders
+        // of magnitude past this. (Compose 1.7.6's bounds API has
+        // assertHeightIsAtLeast/EqualTo but no AtMost, hence the explicit read.)
         val height = compose.onRoot().getUnclippedBoundsInRoot().height
         assertTrue("spinner frame measured $height — fillMaxSize leaked", height < 600.dp)
     }

@@ -260,6 +260,7 @@ fun AlbumDetailScreen(
         val detailLoading by viewModel.trackDetailLoading.collectAsState()
         LaunchedEffect(track) { viewModel.loadTrackDetail(track) }
         TrackInfoSheet(
+            track = track,
             detail = detail,
             loading = detailLoading,
             onDismiss = { infoTrack = null; viewModel.clearTrackDetail() },
