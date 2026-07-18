@@ -71,6 +71,68 @@ interface FavoriteDao {
 }
 
 @Dao
+interface FavoriteAlbumDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIgnore(album: FavoriteAlbumEntity): Long
+
+    @Update
+    suspend fun update(album: FavoriteAlbumEntity)
+
+    @Query("SELECT * FROM favorite_albums WHERE source = :source AND source_id = :sourceId")
+    suspend fun bySourceId(source: String, sourceId: String): FavoriteAlbumEntity?
+
+    /** Insert-or-refresh keyed by (source, source_id); the row id is preserved. Idempotent. */
+    @Transaction
+    suspend fun upsert(album: FavoriteAlbumEntity): Long {
+        val existing = bySourceId(album.source, album.sourceId)
+            ?: return insertIgnore(album.copy(id = 0))
+        update(album.copy(id = existing.id))
+        return existing.id
+    }
+
+    @Query("DELETE FROM favorite_albums WHERE source = :source AND source_id = :sourceId")
+    suspend fun delete(source: String, sourceId: String)
+
+    @Query("SELECT * FROM favorite_albums ORDER BY added_at DESC")
+    fun all(): Flow<List<FavoriteAlbumEntity>>
+
+    /** "SOURCE:sourceId" identity keys — the same shape as FavoriteDao.favoriteKeys(). */
+    @Query("SELECT source || ':' || source_id FROM favorite_albums")
+    fun keys(): Flow<List<String>>
+}
+
+@Dao
+interface FavoriteArtistDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIgnore(artist: FavoriteArtistEntity): Long
+
+    @Update
+    suspend fun update(artist: FavoriteArtistEntity)
+
+    @Query("SELECT * FROM favorite_artists WHERE source = :source AND source_id = :sourceId")
+    suspend fun bySourceId(source: String, sourceId: String): FavoriteArtistEntity?
+
+    /** Insert-or-refresh keyed by (source, source_id); the row id is preserved. Idempotent. */
+    @Transaction
+    suspend fun upsert(artist: FavoriteArtistEntity): Long {
+        val existing = bySourceId(artist.source, artist.sourceId)
+            ?: return insertIgnore(artist.copy(id = 0))
+        update(artist.copy(id = existing.id))
+        return existing.id
+    }
+
+    @Query("DELETE FROM favorite_artists WHERE source = :source AND source_id = :sourceId")
+    suspend fun delete(source: String, sourceId: String)
+
+    @Query("SELECT * FROM favorite_artists ORDER BY added_at DESC")
+    fun all(): Flow<List<FavoriteArtistEntity>>
+
+    /** "SOURCE:sourceId" identity keys — the same shape as FavoriteDao.favoriteKeys(). */
+    @Query("SELECT source || ':' || source_id FROM favorite_artists")
+    fun keys(): Flow<List<String>>
+}
+
+@Dao
 interface PlaylistDao {
     @Insert
     suspend fun insert(playlist: PlaylistEntity): Long

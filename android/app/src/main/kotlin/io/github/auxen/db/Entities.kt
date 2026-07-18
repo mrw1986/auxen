@@ -50,6 +50,44 @@ data class FavoriteEntity(
     @ColumnInfo(name = "added_at") val addedAtMillis: Long,
 )
 
+/**
+ * A favorited album — the local surface for Tidal saved albums (user decision
+ * 2026-07-15). Deliberately NOT a catalog mirror: only the favorite record plus
+ * the minimal display metadata Collection renders. On internal-v1 [artist] and
+ * [artUrl] are POPULATED on a pull (the album carries its artist name + cover),
+ * so a remote-only album card renders fully.
+ */
+@Entity(
+    tableName = "favorite_albums",
+    indices = [Index(value = ["source", "source_id"], unique = true)],
+)
+data class FavoriteAlbumEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val source: String,
+    @ColumnInfo(name = "source_id") val sourceId: String,
+    val title: String,
+    val artist: String? = null,
+    @ColumnInfo(name = "art_url") val artUrl: String? = null,
+    @ColumnInfo(name = "added_at") val addedAtMillis: Long,
+)
+
+/**
+ * A favorited (followed) artist — the local surface for Tidal followed artists
+ * (user decision 2026-07-15). [artUrl] is the picture @480, populated on a pull.
+ */
+@Entity(
+    tableName = "favorite_artists",
+    indices = [Index(value = ["source", "source_id"], unique = true)],
+)
+data class FavoriteArtistEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val source: String,
+    @ColumnInfo(name = "source_id") val sourceId: String,
+    val name: String,
+    @ColumnInfo(name = "art_url") val artUrl: String? = null,
+    @ColumnInfo(name = "added_at") val addedAtMillis: Long,
+)
+
 @Entity(tableName = "playlists")
 data class PlaylistEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
