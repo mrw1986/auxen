@@ -1,7 +1,8 @@
 package io.github.auxen.ui.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
@@ -20,6 +21,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.auxen.model.Source
@@ -35,6 +38,7 @@ import io.github.auxen.ui.theme.AuxenColors
  * `Modifier.width(150.dp)`) since a fill-width card has no width constraint
  * inside a LazyRow.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AlbumCard(
     title: String,
@@ -43,9 +47,24 @@ fun AlbumCard(
     source: Source?,
     onClick: () -> Unit,
     onPlay: (() -> Unit)? = null,
+    onLongPress: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    val haptics = LocalHapticFeedback.current
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClickLabel = onLongPress?.let { "Show album actions" },
+                onLongClick = onLongPress?.let { handler ->
+                    {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        handler()
+                    }
+                },
+            ),
+    ) {
         Box(modifier = Modifier.fillMaxWidth()) {
             ArtworkImage(
                 model = artUrl,
