@@ -120,7 +120,9 @@ class LocalFoldersTest {
         )
         assertEquals(2, folders.size)
         // Jazz sorts before Rock (case-insensitive display-name order).
-        assertEquals(listOf("Jazz", "Rock"), folders.map { it.displayName })
+        // displayName is the full relative path (folderDisplayName strips only the
+        // primary-volume prefix) — same-named subfolders never collide in the picker.
+        assertEquals(listOf("Music/Jazz", "Music/Rock"), folders.map { it.displayName })
         assertEquals("/storage/emulated/0/Music/Jazz", folders[0].path)
         assertEquals(1, folders[0].trackCount)
         assertEquals(2, folders[1].trackCount)
