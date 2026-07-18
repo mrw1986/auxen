@@ -633,7 +633,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _tidalCollectionStatus.value = "Syncing favorites from Tidal…"
             _tidalCollectionStatus.value = runCatching { Graph.tidalCollectionSync.pullAll() }.fold(
-                onSuccess = { "Synced +${it.albums} album(s), +${it.artists} artist(s), +${it.tracks} track(s) from Tidal." },
+                onSuccess = { "Synced +${it.albums} album(s), +${it.artists} artist(s), +${it.tracks} track(s), +${it.playlists} playlist(s) from Tidal." },
                 onFailure = { collectionSynced = false; "Favorites sync failed: ${it.message}" },
             )
         }
@@ -952,7 +952,20 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadPlaylist(id: Long) {
         viewModelScope.launch {
-            runCatching { Graph.library.playlistTracks(id) }.onSuccess { playlistTracks.value = it }
+            val local = runCatching { Graph.library.playlistTracks(id) }.getOrDefault(emptyList())
+            playlistTracks.value = local
+            // Tracks-lazy import: a Tidal playlist is synced LIST-only (an empty
+            // shell) until first opened. When a Tidal shell has no local tracks,
+            // fetch its items now, import them in Tidal order, then re-read. Local
+            // playlists and already-populated Tidal playlists skip the network.
+            if (local.isEmpty()) {
+                val playlist = runCatching { Graph.library.playlist(id) }.getOrNull()
+                val uuid = playlist?.tidalPlaylistId
+                if (playlist?.source == Source.TIDAL.name && uuid != null) {
+                    runCatching { Graph.tidalCollectionSync.importPlaylistTracks(id, uuid) }
+                    runCatching { Graph.library.playlistTracks(id) }.onSuccess { playlistTracks.value = it }
+                }
+            }
         }
     }
 

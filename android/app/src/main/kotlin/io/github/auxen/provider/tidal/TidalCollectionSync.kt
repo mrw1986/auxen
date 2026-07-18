@@ -7,7 +7,7 @@ import io.github.auxen.model.Source
 import kotlinx.coroutines.flow.first
 
 /** What one full pull added locally, per favorite type. */
-data class CollectionPullSummary(val albums: Int, val artists: Int, val tracks: Int)
+data class CollectionPullSummary(val albums: Int, val artists: Int, val tracks: Int, val playlists: Int)
 
 /**
  * Two-way reconcile between the user's Tidal favorites (internal-v1, via
@@ -56,11 +56,43 @@ class TidalCollectionSync(
         return fresh.size
     }
 
-    /** One pull of all three favorite types. */
+    /**
+     * Pull the user's Tidal favorite playlists as local SHELLS — LIST-eager,
+     * tracks-lazy. Find-or-creates a `source=TIDAL` [io.github.auxen.db.PlaylistEntity]
+     * per remote playlist (idempotent by uuid) but does NOT fetch its ~tracks —
+     * those are imported lazily by [importPlaylistTracks] when a playlist is first
+     * opened, keeping the Collection-open pull to one cheap LIST call. Returns the
+     * number of NEWLY-created shells (an already-imported playlist is a no-op, not
+     * recounted); additive — never deletes a local playlist.
+     */
+    suspend fun pullPlaylists(): Int {
+        val remote = tidal.favoritePlaylists()
+        var added = 0
+        remote.forEach { playlist ->
+            if (library.playlistByTidalId(playlist.uuid) == null) added++
+            library.importTidalPlaylistShell(playlist.uuid, playlist.title)
+        }
+        return added
+    }
+
+    /**
+     * Fetch a Tidal playlist's items and set the local membership in Tidal order
+     * (clear + re-insert). The tracks-lazy half of the import: called when a Tidal
+     * playlist shell is first opened (see PlayerViewModel.loadPlaylist). Returns
+     * the number of tracks imported.
+     */
+    suspend fun importPlaylistTracks(playlistId: Long, uuid: String): Int {
+        val tracks = tidal.playlistItems(uuid)
+        library.importTidalPlaylistTracks(playlistId, tracks)
+        return tracks.size
+    }
+
+    /** One pull of all favorite types (playlists are LIST-eager; their tracks lazy). */
     suspend fun pullAll(): CollectionPullSummary = CollectionPullSummary(
         albums = pullFavoriteAlbums(),
         artists = pullFavoriteArtists(),
         tracks = pullFavoriteTracks(),
+        playlists = pullPlaylists(),
     )
 
     /**
