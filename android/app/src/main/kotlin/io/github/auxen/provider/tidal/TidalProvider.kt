@@ -488,6 +488,47 @@ class TidalProvider(
         return runCatching { delete(url.toString(), token) }.isSuccess
     }
 
+    /**
+     * The user's Tidal favorite tracks, paginated — the internal-v1 port of the
+     * desktop's `session.user.favorites.tracks()`. Each is a fully-playable
+     * [Track] (via [TidalV1PageTrack.toTrack]) paired with its remote `created`
+     * millis. Metadata only: resolves no stream. Same not-logged-in / degrade
+     * contract as [favoriteAlbums] (a missing collection degrades the Tracks tab,
+     * never breaks it).
+     */
+    suspend fun favoriteTracks(): List<TidalFavoriteTrack> {
+        val token = validToken() ?: return emptyList()
+        val uid = userId ?: return emptyList()
+        val all = mutableListOf<TidalFavoriteTrack>()
+        var offset = 0
+        while (offset < FAVORITES_MAX) {
+            val url = favoriteTracksUrl(API_BASE, uid, countryCode, FAVORITES_PAGE, offset)
+            val body = runCatching { get(url.toString(), token) }.getOrNull() ?: break
+            val page = favoriteTracksFrom(body, json)
+            all += page
+            if (page.size < FAVORITES_PAGE) break
+            offset += FAVORITES_PAGE
+        }
+        return all
+    }
+
+    /** Save [trackId] to the user's Tidal favorite tracks. Best-effort — false on any failure. */
+    suspend fun addFavoriteTrack(trackId: String): Boolean {
+        val token = validToken() ?: return false
+        val uid = userId ?: return false
+        val url = favoriteTracksWriteUrl(API_BASE, uid, countryCode)
+        val form = FormBody.Builder().add("trackId", trackId).build()
+        return runCatching { post(url.toString(), form, token) }.isSuccess
+    }
+
+    /** Remove [trackId] from the user's Tidal favorite tracks. Best-effort. */
+    suspend fun removeFavoriteTrack(trackId: String): Boolean {
+        val token = validToken() ?: return false
+        val uid = userId ?: return false
+        val url = favoriteTrackDeleteUrl(API_BASE, uid, trackId, countryCode)
+        return runCatching { delete(url.toString(), token) }.isSuccess
+    }
+
     // ------------------------------------------------------------------
     // Internals
     // ------------------------------------------------------------------
