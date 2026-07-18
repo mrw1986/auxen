@@ -57,9 +57,33 @@ data class TidalFavoriteTrack(val track: Track, val addedAtMillis: Long?)
  * the envelope's OWN `totalNumberOfItems` — carried alongside so the read loop
  * ([TidalProvider.favoriteAlbums] and its siblings) can apply the M1
  * cross-check ([orNullIfDriftedEmpty]) to the FIRST page's total against the
- * fully-accumulated result.
+ * fully-accumulated result — and [rawCount], the number of wrapper entries
+ * actually on the wire BEFORE projection (`response.items.size`). [rawCount]
+ * can exceed `items.size`: an UNAVAILABLE favorite (its wrapper's `item` is
+ * `null`) is still counted on the wire but drops out of the projection. The
+ * read loop's pagination MUST key off [rawCount] (C1) — keying off
+ * `items.size` makes a full page with one unavailable favorite look SHORT,
+ * ending pagination early and truncating the fetch, which then reads every
+ * un-fetched favorite as gone and deletes it on mirror.
  */
-data class FavoritesPage<T>(val items: List<T>, val totalCount: Int)
+data class FavoritesPage<T>(val items: List<T>, val totalCount: Int, val rawCount: Int)
+
+/**
+ * The outcome of one favorites READ ([TidalProvider.favoriteAlbums] and its
+ * siblings): [items] is `null` on ANY failure (not logged in, a page fetch
+ * failed, a page didn't strictly decode, or the M1 cross-check fired) or a
+ * complete, possibly-empty list on success. [fullyProjected] is only
+ * meaningful when [items] is non-null: `true` when every raw wrapper across
+ * every page projected (`rawCount` summed == `items.size`); `false` when at
+ * least one wrapper didn't (an unavailable favorite — [FavoritesPage]'s
+ * `item == null` case — whose id is UNRECOVERABLE, so it can't be told apart
+ * from a genuinely-unfollowed one). The mirror pulls gate deletes on this
+ * ([TidalCollectionSync]'s `gatedOnFullProjection`): adds proceed regardless
+ * (a resolved remote favorite is always safe to add), but a partial fetch
+ * skips ALL deletes that cycle rather than risk deleting an item that's
+ * merely temporarily unavailable — closing C1.
+ */
+data class FavoritesFetch<T>(val items: List<T>?, val fullyProjected: Boolean)
 
 // ---- internal-v1 response DTOs (every field nullable/defaulted, the tolerance
 // every DTO in this package applies to a reverse-engineered endpoint) ----
@@ -185,7 +209,7 @@ fun favoriteAlbumsFrom(body: String, json: Json): List<TidalFavoriteAlbum> = run
  */
 fun favoriteAlbumsPageOrNull(body: String, json: Json): FavoritesPage<TidalFavoriteAlbum>? = runCatching {
     val decoded = json.decodeFromString<TidalV1FavoriteAlbumsResponse>(body)
-    FavoritesPage(decoded.toFavoriteAlbums(), decoded.totalNumberOfItems)
+    FavoritesPage(decoded.toFavoriteAlbums(), decoded.totalNumberOfItems, decoded.items.size)
 }.getOrNull()
 
 /** Pure projection of a decoded artists page — the tested body shared by the lenient and strict parsers. */
@@ -216,7 +240,7 @@ fun favoriteArtistsFrom(body: String, json: Json): List<TidalFavoriteArtist> = r
  */
 fun favoriteArtistsPageOrNull(body: String, json: Json): FavoritesPage<TidalFavoriteArtist>? = runCatching {
     val decoded = json.decodeFromString<TidalV1FavoriteArtistsResponse>(body)
-    FavoritesPage(decoded.toFavoriteArtists(), decoded.totalNumberOfItems)
+    FavoritesPage(decoded.toFavoriteArtists(), decoded.totalNumberOfItems, decoded.items.size)
 }.getOrNull()
 
 /** Pure projection of a decoded tracks page — the tested body shared by the lenient and strict parsers. */
@@ -244,7 +268,7 @@ fun favoriteTracksFrom(body: String, json: Json): List<TidalFavoriteTrack> = run
  */
 fun favoriteTracksPageOrNull(body: String, json: Json): FavoritesPage<TidalFavoriteTrack>? = runCatching {
     val decoded = json.decodeFromString<TidalV1FavoriteTracksResponse>(body)
-    FavoritesPage(decoded.toFavoriteTracks(), decoded.totalNumberOfItems)
+    FavoritesPage(decoded.toFavoriteTracks(), decoded.totalNumberOfItems, decoded.items.size)
 }.getOrNull()
 
 // ---- request URL builders (pure; `order=DATE&orderDirection=DESC` gives

@@ -245,4 +245,24 @@ class TidalFavoritesTest {
         val genuineEmpty = favoriteAlbumsPageOrNull("""{"items":[],"totalNumberOfItems":0}""", json)!!
         assertEquals(emptyList<TidalFavoriteAlbum>(), genuineEmpty.items.orNullIfDriftedEmpty(genuineEmpty.totalCount))
     }
+
+    @Test
+    fun `C1- strict page parsers report the RAW wrapper count separately from the (possibly shorter) projected items`() {
+        // A page with one UNAVAILABLE favorite (its wrapper's `item` is null --
+        // the favorite still exists, Tidal just can't resolve it right now) still
+        // carries a FULL raw wrapper count. Pagination MUST key off rawCount, not
+        // items.size, or an unavailable favorite on a page boundary makes a full
+        // page look short and truncates the fetch early (C1: a partial fetch then
+        // reads as "everything after this point is gone" and gets mass-deleted).
+        val pageWithOneUnavailable = """
+            {"items":[
+              { "created": "2023-01-01T00:00:00Z",
+                "item": { "id": 1, "title": "A", "artists": [] } },
+              { "created": "2023-01-01T00:00:00Z", "item": null }
+            ],"totalNumberOfItems":10}
+        """.trimIndent()
+        val page = favoriteAlbumsPageOrNull(pageWithOneUnavailable, json)!!
+        assertEquals(1, page.items.size) // one wrapper failed to project
+        assertEquals(2, page.rawCount) // but BOTH wrappers were on the wire
+    }
 }

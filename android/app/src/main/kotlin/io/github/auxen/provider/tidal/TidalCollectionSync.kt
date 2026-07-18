@@ -26,12 +26,19 @@ class TidalCollectionSync(
      * Pull Tidal saved albums into `favorite_albums`, MIRRORING Tidal: ADD
      * remote-not-local favorites and REMOVE local TIDAL-source favorites gone
      * from Tidal (via [reconcileFavorites], keyed `TIDAL:<id>`). A null (failed)
-     * fetch reconciles nothing — no add, no delete. Returns the applied reconcile
-     * (its sizes are the adds/removes performed). LOCAL favorites are never touched.
+     * fetch reconciles nothing — no add, no delete. A fetch that only PARTIALLY
+     * projected (an unavailable favorite — see [FavoritesFetch]) still adds
+     * everything it resolved, but skips ALL deletes this cycle
+     * ([gatedOnFullProjection], C1) — an unresolvable favorite's id can't be
+     * told apart from a genuinely-unfollowed one, so deleting on a partial read
+     * would risk deleting something that's merely temporarily unavailable.
+     * Returns the APPLIED reconcile (its sizes are the adds/removes actually
+     * performed). LOCAL favorites are never touched.
      */
     suspend fun pullFavoriteAlbums(): FavoriteReconcile<TidalFavoriteAlbum> {
         val localKeys = library.favoriteAlbumKeys().first()
-        val reconcile = reconcileFavorites(tidal.favoriteAlbums(), localKeys) { it.id }
+        val fetch = tidal.favoriteAlbums()
+        val reconcile = reconcileFavorites(fetch.items, localKeys) { it.id }.gatedOnFullProjection(fetch.fullyProjected)
         reconcile.toAdd.forEach { library.favoriteAlbum(favoriteAlbumEntityFor(it, it.addedAtMillis ?: clock())) }
         reconcile.staleTidalIds.forEach { library.unfavoriteAlbum(Source.TIDAL.name, it) }
         return reconcile
@@ -40,7 +47,8 @@ class TidalCollectionSync(
     /** Pull Tidal followed artists into `favorite_artists`, mirroring Tidal (add + remove). Same contract as [pullFavoriteAlbums]. */
     suspend fun pullFavoriteArtists(): FavoriteReconcile<TidalFavoriteArtist> {
         val localKeys = library.favoriteArtistKeys().first()
-        val reconcile = reconcileFavorites(tidal.favoriteArtists(), localKeys) { it.id }
+        val fetch = tidal.favoriteArtists()
+        val reconcile = reconcileFavorites(fetch.items, localKeys) { it.id }.gatedOnFullProjection(fetch.fullyProjected)
         reconcile.toAdd.forEach { library.favoriteArtist(favoriteArtistEntityFor(it, it.addedAtMillis ?: clock())) }
         reconcile.staleTidalIds.forEach { library.unfavoriteArtist(Source.TIDAL.name, it) }
         return reconcile
@@ -52,11 +60,13 @@ class TidalCollectionSync(
      * `created` millis (falling back to the clock when the wrapper carried none);
      * removes local TIDAL-source favorite tracks gone from Tidal via
      * [LibraryRepository.unfavoriteTrack] (drops only the favorite row). Same
-     * null-safe, LOCAL-preserving contract as [pullFavoriteAlbums].
+     * null-safe, LOCAL-preserving, partial-fetch-gated (C1) contract as
+     * [pullFavoriteAlbums].
      */
     suspend fun pullFavoriteTracks(): FavoriteReconcile<TidalFavoriteTrack> {
         val localKeys = library.favoriteKeys().first()
-        val reconcile = reconcileFavorites(tidal.favoriteTracks(), localKeys) { it.track.sourceId }
+        val fetch = tidal.favoriteTracks()
+        val reconcile = reconcileFavorites(fetch.items, localKeys) { it.track.sourceId }.gatedOnFullProjection(fetch.fullyProjected)
         reconcile.toAdd.forEach { library.favoriteTrack(it.track, it.addedAtMillis ?: clock()) }
         reconcile.staleTidalIds.forEach { library.unfavoriteTrack(Source.TIDAL.name, it) }
         return reconcile
@@ -161,7 +171,8 @@ data class FavoriteReconcile<T>(val toAdd: List<T>, val staleTidalIds: List<Stri
  * out first, so a local favorite is NEVER deleted by a Tidal pull.
  *
  * **Data-loss guard:** a NULL [remote] means the fetch FAILED / is untrusted
- * (see [TidalProvider.favoriteAlbums] — it returns null on any page failure).
+ * (see [TidalProvider.favoriteAlbums] — its [FavoritesFetch.items] is null on
+ * any page failure).
  * Both lists are then EMPTY, so a failed/partial fetch adds nothing and — the
  * point of this whole design — deletes nothing. Only a genuinely-empty CONFIRMED
  * fetch (`remote = []`) can yield a non-empty stale set. Idempotent: an unchanged
@@ -177,6 +188,20 @@ fun <T> reconcileFavorites(remote: List<T>?, localKeys: Set<String>, id: (T) -> 
         .filter { it !in remoteIds }
     return FavoriteReconcile(newRemoteFavorites(remote, localKeys, id), staleTidalIds)
 }
+
+/**
+ * The C1 partial-projection guard: applied to a computed [reconcileFavorites]
+ * result alongside the originating [FavoritesFetch.fullyProjected]. When
+ * [fullyProjected] is false — at least one raw favorite on the read failed to
+ * project (e.g. a temporarily-unavailable favorite, whose id is unrecoverable
+ * and so cannot be told apart from a genuinely-unfollowed one) — the deletes
+ * are suppressed for this cycle; adds pass through unaffected, since a remote
+ * favorite this reconcile DID resolve is always safe to add. A clean
+ * (fully-projected) fetch passes the reconcile through unchanged. Pure; every
+ * mirror pull in [TidalCollectionSync] applies it.
+ */
+fun <T> FavoriteReconcile<T>.gatedOnFullProjection(fullyProjected: Boolean): FavoriteReconcile<T> =
+    if (fullyProjected) this else copy(staleTidalIds = emptyList())
 
 /**
  * A [FavoriteAlbumEntity] for a pulled Tidal album favorite — cover + artist

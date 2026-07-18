@@ -114,4 +114,23 @@ class TidalCollectionSyncTest {
         assertTrue(toAdd.isEmpty())
         assertTrue(stale.isEmpty())
     }
+
+    @Test
+    fun `C1- gatedOnFullProjection suppresses deletes on a partial (not fully projected) fetch, keeps adds`() {
+        // An unavailable favorite (its wrapper's item was null) has no id to
+        // protect it from looking "stale" -- so on a fetch that didn't fully
+        // project, deletes are suppressed entirely this cycle. Adds are
+        // unaffected: a remote favorite we DID resolve is safe to add regardless.
+        val reconcile = FavoriteReconcile(toAdd = listOf(album("1")), staleTidalIds = listOf("2", "3"))
+        val gated = reconcile.gatedOnFullProjection(fullyProjected = false)
+        assertEquals(listOf("1"), gated.toAdd.map { it.id })
+        assertTrue(gated.staleTidalIds.isEmpty())
+    }
+
+    @Test
+    fun `C1- gatedOnFullProjection passes deletes through unchanged on a fully-projected fetch`() {
+        val reconcile = FavoriteReconcile(toAdd = emptyList<TidalFavoriteAlbum>(), staleTidalIds = listOf("2", "3"))
+        val gated = reconcile.gatedOnFullProjection(fullyProjected = true)
+        assertEquals(listOf("2", "3"), gated.staleTidalIds)
+    }
 }
