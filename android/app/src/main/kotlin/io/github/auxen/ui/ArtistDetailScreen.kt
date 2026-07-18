@@ -41,11 +41,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import io.github.auxen.R
+import io.github.auxen.data.AlbumGroup
 import io.github.auxen.data.groupAlbums
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.provider.tidal.dedupRemoteAlbums
 import io.github.auxen.provider.tidal.mergeArtistTracks
+import io.github.auxen.ui.components.AlbumActionSheet
 import io.github.auxen.ui.components.AlbumCard
 import io.github.auxen.ui.components.ArtistRow
 import io.github.auxen.ui.components.ArtworkImage
@@ -83,6 +85,7 @@ fun ArtistDetailScreen(
     val playlists by viewModel.playlists.collectAsState()
     var sheetTrack by remember { mutableStateOf<Track?>(null) }
     var infoTrack by remember { mutableStateOf<Track?>(null) }
+    var albumSheet by remember { mutableStateOf<AlbumGroup?>(null) }
     // Hoisted above the LazyColumn deliberately: state remembered inside an
     // `item {}` is disposed when that item scrolls out of the viewport, which
     // would silently collapse an expanded biography on scroll-back.
@@ -244,6 +247,7 @@ fun ArtistDetailScreen(
                                 source = album.tracks.firstOrNull()?.source,
                                 onClick = { onOpenAlbum(album.album, album.albumArtist, null) },
                                 onPlay = { viewModel.playAll(album.tracks) },
+                                onLongPress = { albumSheet = album },
                                 // Carousel item — a fill-width card has no width
                                 // constraint inside a LazyRow, so pin it here.
                                 modifier = Modifier.width(150.dp),
@@ -273,6 +277,7 @@ fun ArtistDetailScreen(
                                 source = album.tracks.firstOrNull()?.source,
                                 onClick = { onOpenAlbum(album.album, album.albumArtist, null) },
                                 onPlay = { viewModel.playAll(album.tracks) },
+                                onLongPress = { albumSheet = album },
                                 modifier = Modifier.width(150.dp),
                             )
                         }
@@ -410,6 +415,22 @@ fun ArtistDetailScreen(
             detail = detail,
             loading = detailLoading,
             onDismiss = { infoTrack = null; viewModel.clearTrackDetail() },
+        )
+    }
+
+    albumSheet?.let { group ->
+        AlbumActionSheet(
+            albumTitle = group.album,
+            albumArtist = group.albumArtist,
+            playlists = playlists,
+            onDismiss = { albumSheet = null },
+            onPlay = { viewModel.playAll(group.tracks) },
+            onShuffle = { viewModel.playAll(group.tracks, shuffled = true) },
+            onPlayNext = { viewModel.playNextAll(group.tracks) },
+            onEnqueue = { viewModel.enqueueAll(group.tracks) },
+            onAddToPlaylist = { viewModel.addTracksToPlaylist(group.tracks, it) },
+            onCreatePlaylist = { viewModel.createPlaylistAndAddAll(group.tracks, it) },
+            onGoToArtist = { onOpenArtist(group.albumArtist, null) },
         )
     }
 }

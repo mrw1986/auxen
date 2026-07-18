@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import io.github.auxen.R
 import io.github.auxen.data.AlbumGroup
+import io.github.auxen.data.ArtistGroup
 import io.github.auxen.data.LibrarySort
 import io.github.auxen.data.groupAlbums
 import io.github.auxen.data.groupArtists
@@ -50,7 +51,9 @@ import io.github.auxen.data.sortAlbums
 import io.github.auxen.data.sortArtists
 import io.github.auxen.data.sortTracks
 import io.github.auxen.model.Track
+import io.github.auxen.ui.components.AlbumActionSheet
 import io.github.auxen.ui.components.AlbumCard
+import io.github.auxen.ui.components.ArtistActionSheet
 import io.github.auxen.ui.components.ArtistRow
 import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
@@ -97,6 +100,8 @@ fun LibraryScreen(
     var sortMenuOpen by remember { mutableStateOf(false) }
     var sheetTrack by remember { mutableStateOf<Track?>(null) }
     var infoTrack by remember { mutableStateOf<Track?>(null) }
+    var albumSheet by remember { mutableStateOf<AlbumGroup?>(null) }
+    var artistSheet by remember { mutableStateOf<ArtistGroup?>(null) }
     LaunchedEffect(Unit) { viewModel.loadLibrary() }
 
     // Group + sort the active tab's data ONCE, reused for both the header count
@@ -188,6 +193,7 @@ fun LibraryScreen(
                             source = null,
                             onClick = { onOpenAlbum(album) },
                             onPlay = { viewModel.playAll(album.tracks) },
+                            onLongPress = { albumSheet = album },
                         )
                     }
                 }
@@ -208,6 +214,7 @@ fun LibraryScreen(
                             subtitle = "${artist.tracks.size} tracks",
                             artUrl = artist.artUrl,
                             onClick = { onOpenArtist(artist.artist) },
+                            onLongPress = { artistSheet = artist },
                         )
                     }
                 }
@@ -270,6 +277,32 @@ fun LibraryScreen(
             detail = detail,
             loading = detailLoading,
             onDismiss = { infoTrack = null; viewModel.clearTrackDetail() },
+        )
+    }
+
+    albumSheet?.let { group ->
+        AlbumActionSheet(
+            albumTitle = group.album,
+            albumArtist = group.albumArtist,
+            playlists = playlists,
+            onDismiss = { albumSheet = null },
+            onPlay = { viewModel.playAll(group.tracks) },
+            onShuffle = { viewModel.playAll(group.tracks, shuffled = true) },
+            onPlayNext = { viewModel.playNextAll(group.tracks) },
+            onEnqueue = { viewModel.enqueueAll(group.tracks) },
+            onAddToPlaylist = { viewModel.addTracksToPlaylist(group.tracks, it) },
+            onCreatePlaylist = { viewModel.createPlaylistAndAddAll(group.tracks, it) },
+            onGoToArtist = { onOpenArtist(group.albumArtist) },
+        )
+    }
+    artistSheet?.let { group ->
+        ArtistActionSheet(
+            artistName = group.artist,
+            onDismiss = { artistSheet = null },
+            onPlay = { viewModel.playAll(group.tracks) },
+            onShuffle = { viewModel.playAll(group.tracks, shuffled = true) },
+            onPlayNext = { viewModel.playNextAll(group.tracks) },
+            onEnqueue = { viewModel.enqueueAll(group.tracks) },
         )
     }
 }

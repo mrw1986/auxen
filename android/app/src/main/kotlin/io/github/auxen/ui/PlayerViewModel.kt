@@ -725,6 +725,51 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** List form of [playNext] — insert the whole block after the current item,
+     *  in ONE addMediaItems call so album/artist order survives. */
+    fun playNextAll(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        viewModelScope.launch {
+            val c = controller ?: return@launch
+            runCatching { tracks.forEach { Graph.library.upsert(it) } }
+            val items = tracks.mapNotNull { runCatching { Graph.mediaItemFor(it) }.getOrNull() }
+            if (items.isEmpty()) return@launch
+            val index = if (c.mediaItemCount == 0) 0 else c.currentMediaItemIndex + 1
+            c.addMediaItems(index, items)
+        }
+    }
+
+    /** List form of [enqueue] — append the whole block to the queue, in order. */
+    fun enqueueAll(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        viewModelScope.launch {
+            val c = controller ?: return@launch
+            runCatching { tracks.forEach { Graph.library.upsert(it) } }
+            val items = tracks.mapNotNull { runCatching { Graph.mediaItemFor(it) }.getOrNull() }
+            if (items.isEmpty()) return@launch
+            c.addMediaItems(items)
+        }
+    }
+
+    /** List form of [addToPlaylist] — appendTrack (which upserts) per track, in
+     *  order. */
+    fun addTracksToPlaylist(tracks: List<Track>, playlistId: Long) {
+        viewModelScope.launch {
+            runCatching { tracks.forEach { Graph.library.addTrackToPlaylist(it, playlistId) } }
+        }
+    }
+
+    /** List form of [createPlaylistAndAdd] — one new playlist, then every track
+     *  appended in order. */
+    fun createPlaylistAndAddAll(tracks: List<Track>, name: String) {
+        viewModelScope.launch {
+            runCatching {
+                val id = Graph.library.createPlaylist(name)
+                tracks.forEach { Graph.library.addTrackToPlaylist(it, id) }
+            }
+        }
+    }
+
     /** Ordered tracks of the open playlist — reloaded after every membership/order change. */
     val playlistTracks = MutableStateFlow<List<Track>>(emptyList())
 

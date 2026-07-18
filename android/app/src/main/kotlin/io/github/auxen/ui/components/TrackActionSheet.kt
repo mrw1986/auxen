@@ -229,7 +229,7 @@ internal fun TrackActionSheetContent(
 }
 
 @Composable
-private fun SheetAction(label: String, leading: @Composable () -> Unit, onClick: () -> Unit) {
+internal fun SheetAction(label: String, leading: @Composable () -> Unit, onClick: () -> Unit) {
     ListItem(
         headlineContent = { Text(label, style = MaterialTheme.typography.bodyLarge) },
         leadingContent = leading,
