@@ -984,15 +984,27 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun removeFromPlaylist(id: Long, track: Track) {
         viewModelScope.launch {
             runCatching { Graph.library.removeFromPlaylist(id, track) }
-            loadPlaylist(id)
+            refreshPlaylistTracks(id)
         }
     }
 
     fun movePlaylistTrack(id: Long, from: Int, to: Int) {
         viewModelScope.launch {
             runCatching { Graph.library.movePlaylistTrack(id, from, to) }
-            loadPlaylist(id)
+            refreshPlaylistTracks(id)
         }
+    }
+
+    /**
+     * Re-read the open playlist's tracks after a LOCAL mutation — deliberately
+     * WITHOUT the lazy-import branch in [loadPlaylist]. Otherwise removing the
+     * LAST track of an imported Tidal playlist would empty it, re-trip the lazy
+     * guard, and silently re-import the whole playlist from Tidal, reverting the
+     * user's edit in the same action. A re-import still happens on a fresh screen
+     * OPEN (loadPlaylist), matching the "imported playlists mirror Tidal" design.
+     */
+    private suspend fun refreshPlaylistTracks(id: Long) {
+        playlistTracks.value = runCatching { Graph.library.playlistTracks(id) }.getOrDefault(emptyList())
     }
 
     fun togglePlayPause() {
