@@ -1,6 +1,8 @@
 package io.github.auxen.data
 
 import io.github.auxen.db.AuxenDatabase
+import io.github.auxen.db.FavoriteAlbumEntity
+import io.github.auxen.db.FavoriteArtistEntity
 import io.github.auxen.db.FavoriteEntity
 import io.github.auxen.db.PlayHistoryEntity
 import io.github.auxen.db.PlaylistEntity
@@ -124,6 +126,28 @@ class LibraryRepository(
     suspend fun deleteSearchHistoryItem(query: String) = db.searchHistoryDao().delete(query)
 
     suspend fun clearSearchHistory() = db.searchHistoryDao().clear()
+
+    /** Favorited albums, newest favorite first (the Collection Albums tab's remote half). */
+    fun favoriteAlbums(): Flow<List<FavoriteAlbumEntity>> = db.favoriteAlbumDao().all()
+
+    /** "SOURCE:sourceId" keys of favorited albums — the album analogue of [favoriteKeys]. */
+    fun favoriteAlbumKeys(): Flow<Set<String>> = db.favoriteAlbumDao().keys().map { it.toSet() }
+
+    /** Insert-or-refresh a favorite album row. Idempotent on (source, source_id). */
+    suspend fun favoriteAlbum(album: FavoriteAlbumEntity): Long = db.favoriteAlbumDao().upsert(album)
+
+    suspend fun unfavoriteAlbum(source: String, sourceId: String) = db.favoriteAlbumDao().delete(source, sourceId)
+
+    /** Favorited (followed) artists, newest favorite first. */
+    fun favoriteArtists(): Flow<List<FavoriteArtistEntity>> = db.favoriteArtistDao().all()
+
+    /** "SOURCE:sourceId" keys of favorited artists — the artist analogue of [favoriteKeys]. */
+    fun favoriteArtistKeys(): Flow<Set<String>> = db.favoriteArtistDao().keys().map { it.toSet() }
+
+    /** Insert-or-refresh a favorite artist row. Idempotent on (source, source_id). */
+    suspend fun favoriteArtist(artist: FavoriteArtistEntity): Long = db.favoriteArtistDao().upsert(artist)
+
+    suspend fun unfavoriteArtist(source: String, sourceId: String) = db.favoriteArtistDao().delete(source, sourceId)
 
     private companion object {
         const val KEY_SOURCE_PRIORITY = "source_priority"

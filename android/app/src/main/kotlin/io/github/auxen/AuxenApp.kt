@@ -24,6 +24,7 @@ import io.github.auxen.playback.QueueStateStore
 import io.github.auxen.playback.TrackResolver
 import io.github.auxen.provider.local.LocalProvider
 import io.github.auxen.provider.tidal.TidalAuth
+import io.github.auxen.provider.tidal.TidalCollectionSync
 import io.github.auxen.provider.tidal.TidalProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -144,6 +145,8 @@ object Graph {
         private set
     lateinit var library: LibraryRepository
         private set
+    lateinit var tidalCollectionSync: TidalCollectionSync
+        private set
     lateinit var queueStore: QueueStateStore
         private set
     lateinit var autoEq: AutoEqRepository
@@ -176,6 +179,7 @@ object Graph {
         tidal = TidalProvider(tidalAuth, httpClient)
         db = AuxenDatabase.build(context)
         library = LibraryRepository(db)
+        tidalCollectionSync = TidalCollectionSync(tidal = tidal, library = library)
         queueStore = QueueStateStore(db)
         autoEq = AutoEqRepository(context)
         resolver = TrackResolver(fetch = { id -> tidal.getStreamInfoById(id) })
