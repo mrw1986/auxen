@@ -23,6 +23,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
@@ -37,6 +40,9 @@ import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.LoadingState
 import io.github.auxen.ui.components.SectionHeader
+import io.github.auxen.ui.components.TrackActionSheet
+import io.github.auxen.ui.components.TrackInfoSheet
+import io.github.auxen.ui.components.albumTargetFor
 import java.util.Calendar
 
 /** Time-of-day greeting — desktop HomePage header. */
@@ -52,13 +58,21 @@ internal fun greetingForHour(hour: Int): String = when (hour) {
  */
 @UnstableApi
 @Composable
-fun HomeScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
+fun HomeScreen(
+    viewModel: PlayerViewModel,
+    onOpenAlbumForTrack: (album: String, artist: String, seedTrackId: String?) -> Unit,
+    onOpenArtistByName: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val recentlyPlayed by viewModel.recentlyPlayed.collectAsState()
     val recentlyAdded by viewModel.recentlyAdded.collectAsState()
     val localTracks by viewModel.localTracks.collectAsState()
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
+    val playlists by viewModel.playlists.collectAsState()
     val filter by viewModel.homeFilter.collectAsState()
     val loading by viewModel.homeLoading.collectAsState()
+    var sheetTrack by remember { mutableStateOf<Track?>(null) }
+    var infoTrack by remember { mutableStateOf<Track?>(null) }
     LaunchedEffect(Unit) {
         viewModel.loadLibrary()
         viewModel.refreshHome()
@@ -143,6 +157,7 @@ fun HomeScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                     isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
                     onPlay = { viewModel.play(track) },
                     onToggleFavorite = { viewModel.toggleFavorite(track) },
+                    onLongPress = { sheetTrack = track },
                 )
             }
         } else if (addedAlbums.isEmpty()) {
@@ -161,6 +176,38 @@ fun HomeScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
                 }
             }
         }
+    }
+
+    sheetTrack?.let { track ->
+        TrackActionSheet(
+            track = track,
+            isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+            playlists = playlists,
+            onDismiss = { sheetTrack = null },
+            onPlay = { viewModel.play(track) },
+            onPlayNext = { viewModel.playNext(track) },
+            onEnqueue = { viewModel.enqueue(track) },
+            onToggleFavorite = { viewModel.toggleFavorite(track) },
+            onAddToPlaylist = { viewModel.addToPlaylist(track, it) },
+            onCreatePlaylist = { viewModel.createPlaylistAndAdd(track, it) },
+            onShowInfo = { infoTrack = track },
+            onGoToAlbum = albumTargetFor(track)?.let { target ->
+                { onOpenAlbumForTrack(target.album, target.albumArtist, track.sourceId.takeIf { track.isTidal }) }
+            },
+            onGoToArtist = { onOpenArtistByName(track.artist) },
+        )
+    }
+
+    infoTrack?.let { track ->
+        val detail by viewModel.trackDetail.collectAsState()
+        val detailLoading by viewModel.trackDetailLoading.collectAsState()
+        LaunchedEffect(track) { viewModel.loadTrackDetail(track) }
+        TrackInfoSheet(
+            track = track,
+            detail = detail,
+            loading = detailLoading,
+            onDismiss = { infoTrack = null; viewModel.clearTrackDetail() },
+        )
     }
 }
 

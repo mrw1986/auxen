@@ -33,6 +33,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -58,6 +59,8 @@ import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.LoadingState
 import io.github.auxen.ui.components.TrackActionSheet
+import io.github.auxen.ui.components.TrackInfoSheet
+import io.github.auxen.ui.components.albumTargetFor
 import io.github.auxen.ui.theme.AuxenColors
 
 private val COLLECTION_TABS = listOf("Tracks", "Albums", "Artists", "Playlists")
@@ -73,6 +76,7 @@ fun CollectionScreen(
     onOpenPlaylist: (Long) -> Unit,
     onOpenAlbum: (AlbumGroup) -> Unit,
     onOpenArtist: (String) -> Unit,
+    onOpenAlbumForTrack: (album: String, artist: String, seedTrackId: String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val favorites by viewModel.favorites.collectAsState()
@@ -82,6 +86,7 @@ fun CollectionScreen(
     val loading by viewModel.collectionLoading.collectAsState()
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var sheetTrack by remember { mutableStateOf<Track?>(null) }
+    var infoTrack by remember { mutableStateOf<Track?>(null) }
 
     fun matches(track: Track): Boolean = when (filter) {
         "tidal" -> track.source == Source.TIDAL
@@ -275,6 +280,23 @@ fun CollectionScreen(
             onToggleFavorite = { viewModel.toggleFavorite(track) },
             onAddToPlaylist = { viewModel.addToPlaylist(track, it) },
             onCreatePlaylist = { viewModel.createPlaylistAndAdd(track, it) },
+            onShowInfo = { infoTrack = track },
+            onGoToAlbum = albumTargetFor(track)?.let { target ->
+                { onOpenAlbumForTrack(target.album, target.albumArtist, track.sourceId.takeIf { track.isTidal }) }
+            },
+            onGoToArtist = { onOpenArtist(track.artist) },
+        )
+    }
+
+    infoTrack?.let { track ->
+        val detail by viewModel.trackDetail.collectAsState()
+        val detailLoading by viewModel.trackDetailLoading.collectAsState()
+        LaunchedEffect(track) { viewModel.loadTrackDetail(track) }
+        TrackInfoSheet(
+            track = track,
+            detail = detail,
+            loading = detailLoading,
+            onDismiss = { infoTrack = null; viewModel.clearTrackDetail() },
         )
     }
 }

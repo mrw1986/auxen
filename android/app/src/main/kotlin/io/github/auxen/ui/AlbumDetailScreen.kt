@@ -64,6 +64,7 @@ fun AlbumDetailScreen(
     album: String,
     artist: String,
     tidalAlbumId: String? = null,
+    seedTrackId: String? = null,
     onOpenArtist: (name: String, tidalArtistId: String?) -> Unit,
 ) {
     val localTracks by viewModel.localTracks.collectAsState()
@@ -92,7 +93,12 @@ fun AlbumDetailScreen(
     // album already. So — unlike the artist screen, whose seed must match on the
     // PRIMARY artist to avoid resolving a compilation's albumArtist — no further
     // guard is needed here.
-    val seedTidalTrackId = tracks.firstOrNull { it.isTidal }?.sourceId
+    // The nav-arg seed wins: it is the Tidal track the user long-pressed, and
+    // the ONLY seed available when this album has no local group (a "Go to
+    // album" from a Tidal search result). Without it, loadAlbumDetail takes its
+    // early return and the screen settles on "no tracks". The local fallback
+    // keeps every existing card-tap navigation (which passes no seed) unchanged.
+    val seedTidalTrackId = seedTrackId ?: tracks.firstOrNull { it.isTidal }?.sourceId
     LaunchedEffect(album, artist, tidalAlbumId, seedTidalTrackId) {
         viewModel.loadAlbumDetail(album, artist, tidalAlbumId, seedTidalTrackId)
     }
@@ -252,6 +258,7 @@ fun AlbumDetailScreen(
             onAddToPlaylist = { viewModel.addToPlaylist(track, it) },
             onCreatePlaylist = { viewModel.createPlaylistAndAdd(track, it) },
             onShowInfo = { infoTrack = track },
+            onGoToArtist = { onOpenArtist(track.artist, null) },
         )
     }
 

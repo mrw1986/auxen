@@ -84,7 +84,7 @@ private val MAX_CONTENT_WIDTH = 840.dp
  * the entity name is shown in each screen's own content header, not here.
  */
 private fun topBarTitle(route: String?): String = when (route) {
-    "album/{album}/{artist}?tidalAlbumId={tidalAlbumId}" -> "Album"
+    "album/{album}/{artist}?tidalAlbumId={tidalAlbumId}&seedTrackId={seedTrackId}" -> "Album"
     "artist/{artist}?tidalArtistId={tidalArtistId}" -> "Artist"
     "playlist/{playlistId}" -> "Playlist"
     "settings" -> "Settings"
@@ -154,8 +154,12 @@ private fun MainScreen(viewModel: PlayerViewModel, widthSizeClass: WindowWidthSi
     // encoding.
     fun artistRoute(name: String, tidalArtistId: String? = null): String =
         "artist/${Uri.encode(name)}" + (tidalArtistId?.let { "?tidalArtistId=$it" } ?: "")
-    fun albumRoute(album: String, artist: String, tidalAlbumId: String? = null): String =
-        "album/${Uri.encode(album)}/${Uri.encode(artist)}" + (tidalAlbumId?.let { "?tidalAlbumId=$it" } ?: "")
+    fun albumRoute(album: String, artist: String, tidalAlbumId: String? = null, seedTrackId: String? = null): String =
+        "album/${Uri.encode(album)}/${Uri.encode(artist)}" +
+            listOfNotNull(
+                tidalAlbumId?.let { "tidalAlbumId=$it" },
+                seedTrackId?.let { "seedTrackId=$it" },
+            ).joinToString("&").let { if (it.isEmpty()) "" else "?$it" }
 
     // Compact width (folded phone / narrow) keeps the bottom NavigationBar;
     // medium/expanded (unfolded foldable, tablet) moves nav to a leading
@@ -311,23 +315,38 @@ private fun MainScreen(viewModel: PlayerViewModel, widthSizeClass: WindowWidthSi
                         Modifier.fillMaxSize()
                     },
                 ) {
-                    composable("home") { HomeScreen(viewModel) }
+                    composable("home") {
+                        HomeScreen(
+                            viewModel,
+                            onOpenAlbumForTrack = { album, artist, seed ->
+                                navController.navigate(albumRoute(album, artist, seedTrackId = seed))
+                            },
+                            onOpenArtistByName = { name -> navController.navigate(artistRoute(name)) },
+                        )
+                    }
                     composable("library") {
                         LibraryScreen(
                             viewModel,
                             onOpenAlbum = { album -> navController.navigate(albumRoute(album.album, album.albumArtist)) },
                             onOpenArtist = { artist -> navController.navigate(artistRoute(artist)) },
+                            onOpenAlbumForTrack = { album, artist, seed ->
+                                navController.navigate(albumRoute(album, artist, seedTrackId = seed))
+                            },
                         )
                     }
                     composable(
-                        "album/{album}/{artist}?tidalAlbumId={tidalAlbumId}",
-                        arguments = listOf(navArgument("tidalAlbumId") { nullable = true; defaultValue = null }),
+                        "album/{album}/{artist}?tidalAlbumId={tidalAlbumId}&seedTrackId={seedTrackId}",
+                        arguments = listOf(
+                            navArgument("tidalAlbumId") { nullable = true; defaultValue = null },
+                            navArgument("seedTrackId") { nullable = true; defaultValue = null },
+                        ),
                     ) { backStack ->
                         AlbumDetailScreen(
                             viewModel,
                             album = backStack.arguments?.getString("album").orEmpty(),
                             artist = backStack.arguments?.getString("artist").orEmpty(),
                             tidalAlbumId = backStack.arguments?.getString("tidalAlbumId"),
+                            seedTrackId = backStack.arguments?.getString("seedTrackId"),
                             onOpenArtist = { name, id -> navController.navigate(artistRoute(name, id)) },
                         )
                     }
@@ -343,6 +362,9 @@ private fun MainScreen(viewModel: PlayerViewModel, widthSizeClass: WindowWidthSi
                                 navController.navigate(albumRoute(album, artist, tidalAlbumId))
                             },
                             onOpenArtist = { name, id -> navController.navigate(artistRoute(name, id)) },
+                            onOpenAlbumForTrack = { album, artist, seed ->
+                                navController.navigate(albumRoute(album, artist, seedTrackId = seed))
+                            },
                         )
                     }
                     composable("search") {
@@ -352,6 +374,9 @@ private fun MainScreen(viewModel: PlayerViewModel, widthSizeClass: WindowWidthSi
                             onOpenAlbum = { album, artist, tidalAlbumId ->
                                 navController.navigate(albumRoute(album, artist, tidalAlbumId))
                             },
+                            onOpenAlbumForTrack = { album, artist, seed ->
+                                navController.navigate(albumRoute(album, artist, seedTrackId = seed))
+                            },
                         )
                     }
                     composable("collection") {
@@ -360,6 +385,9 @@ private fun MainScreen(viewModel: PlayerViewModel, widthSizeClass: WindowWidthSi
                             onOpenPlaylist = { id -> navController.navigate("playlist/$id") },
                             onOpenAlbum = { album -> navController.navigate(albumRoute(album.album, album.albumArtist)) },
                             onOpenArtist = { artist -> navController.navigate(artistRoute(artist)) },
+                            onOpenAlbumForTrack = { album, artist, seed ->
+                                navController.navigate(albumRoute(album, artist, seedTrackId = seed))
+                            },
                         )
                     }
                     composable("playlist/{playlistId}") { backStack ->

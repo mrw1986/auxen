@@ -55,6 +55,7 @@ import io.github.auxen.ui.components.LoadingState
 import io.github.auxen.ui.components.SectionHeader
 import io.github.auxen.ui.components.TrackActionSheet
 import io.github.auxen.ui.components.TrackInfoSheet
+import io.github.auxen.ui.components.albumTargetFor
 import io.github.auxen.ui.theme.AuxenColors
 
 /**
@@ -74,6 +75,7 @@ fun ArtistDetailScreen(
     tidalArtistId: String? = null,
     onOpenAlbum: (album: String, artist: String, tidalAlbumId: String?) -> Unit,
     onOpenArtist: (name: String, tidalArtistId: String?) -> Unit,
+    onOpenAlbumForTrack: (album: String, artist: String, seedTrackId: String?) -> Unit,
 ) {
     val localTracks by viewModel.localTracks.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
@@ -393,6 +395,9 @@ fun ArtistDetailScreen(
             onAddToPlaylist = { viewModel.addToPlaylist(track, it) },
             onCreatePlaylist = { viewModel.createPlaylistAndAdd(track, it) },
             onShowInfo = { infoTrack = track },
+            onGoToAlbum = albumTargetFor(track)?.let { target ->
+                { onOpenAlbumForTrack(target.album, target.albumArtist, track.sourceId.takeIf { track.isTidal }) }
+            },
         )
     }
 

@@ -60,6 +60,8 @@ import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.SectionHeader
 import io.github.auxen.ui.components.TrackActionSheet
+import io.github.auxen.ui.components.TrackInfoSheet
+import io.github.auxen.ui.components.albumTargetFor
 import kotlinx.coroutines.delay
 
 private val TYPE_FILTERS = listOf("All", "Local", "Tidal")
@@ -111,6 +113,7 @@ fun SearchScreen(
     viewModel: PlayerViewModel,
     onOpenArtist: (String, String?) -> Unit,
     onOpenAlbum: (String, String, String?) -> Unit,
+    onOpenAlbumForTrack: (album: String, artist: String, seedTrackId: String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val query by viewModel.searchQuery.collectAsState()
@@ -123,6 +126,7 @@ fun SearchScreen(
     var typeFilter by rememberSaveable { mutableStateOf("All") }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var sheetTrack by remember { mutableStateOf<Track?>(null) }
+    var infoTrack by remember { mutableStateOf<Track?>(null) }
     val keyboard = LocalSoftwareKeyboardController.current
 
     // Local mirror of the VM's debounce: true while a keystroke is still waiting
@@ -390,6 +394,23 @@ fun SearchScreen(
             onToggleFavorite = { viewModel.toggleFavorite(track) },
             onAddToPlaylist = { viewModel.addToPlaylist(track, it) },
             onCreatePlaylist = { viewModel.createPlaylistAndAdd(track, it) },
+            onShowInfo = { infoTrack = track },
+            onGoToAlbum = albumTargetFor(track)?.let { target ->
+                { onOpenAlbumForTrack(target.album, target.albumArtist, track.sourceId.takeIf { track.isTidal }) }
+            },
+            onGoToArtist = { onOpenArtist(track.artist, null) },
+        )
+    }
+
+    infoTrack?.let { track ->
+        val detail by viewModel.trackDetail.collectAsState()
+        val detailLoading by viewModel.trackDetailLoading.collectAsState()
+        LaunchedEffect(track) { viewModel.loadTrackDetail(track) }
+        TrackInfoSheet(
+            track = track,
+            detail = detail,
+            loading = detailLoading,
+            onDismiss = { infoTrack = null; viewModel.clearTrackDetail() },
         )
     }
 }

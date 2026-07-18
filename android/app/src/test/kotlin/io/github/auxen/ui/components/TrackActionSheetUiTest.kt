@@ -20,9 +20,10 @@ import org.robolectric.annotation.Config
 private fun track(
     title: String = "Everlong",
     artist: String = "Foo Fighters",
+    album: String? = "The Colour and the Shape",
     source: Source = Source.LOCAL,
     sourceId: String = "x",
-) = Track(title = title, artist = artist, source = source, sourceId = sourceId)
+) = Track(title = title, artist = artist, album = album, source = source, sourceId = sourceId)
 
 /**
  * Behavior tests for [TrackActionSheet] — the long-press action sheet shared
@@ -181,15 +182,13 @@ class TrackActionSheetUiTest {
     }
 
     /**
-     * The "Credits & lyrics" action is gated on BOTH `track.source == TIDAL` and
-     * a non-null `onShowInfo` — the three tests below pin each half of that gate
-     * plus the happy path. The LOCAL case is the one that matters: credits and
-     * lyrics come from the official Tidal metadata API keyed on the track's
-     * catalog id, so the action is meaningless (and would open an empty sheet)
-     * for a MediaStore track.
+     * The "Track info" action is gated on a non-null `onShowInfo` alone (D1: no
+     * longer Tidal-gated — the info sheet carries a Details section read off the
+     * Track, so it is useful for a local track too). The three tests below pin the
+     * happy path, the local-track case, and the null-handler gate.
      */
     @Test
-    fun creditsActionShownForTidalTrackAndInvokesHandler() {
+    fun trackInfoActionShownAndInvokesHandler() {
         var infoShown = 0
         var dismissed = 0
         compose.setContent {
@@ -211,7 +210,7 @@ class TrackActionSheetUiTest {
         }
         compose.waitForIdle()
 
-        compose.onNodeWithText("Credits & lyrics").performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithText("Track info").performSemanticsAction(SemanticsActions.OnClick)
 
         // The sheet must dismiss as it opens the info sheet — two stacked
         // ModalBottomSheets would otherwise fight for the same surface.
@@ -220,7 +219,8 @@ class TrackActionSheetUiTest {
     }
 
     @Test
-    fun creditsActionAbsentForLocalTrack() {
+    fun trackInfoActionShownForLocalTrackWithHandler() {
+        // D1: the Details section makes the info sheet useful for local tracks.
         compose.setContent {
             AuxenTheme(darkTheme = true) {
                 TrackActionSheet(
@@ -240,12 +240,11 @@ class TrackActionSheetUiTest {
         }
         compose.waitForIdle()
 
-        compose.onNodeWithText("Credits & lyrics").assertDoesNotExist()
-        compose.onNodeWithText("Add to playlist").assertExists()
+        compose.onNodeWithText("Track info").assertExists()
     }
 
     @Test
-    fun creditsActionAbsentWhenHostProvidesNoHandler() {
+    fun trackInfoActionAbsentWhenHostProvidesNoHandler() {
         compose.setContent {
             AuxenTheme(darkTheme = true) {
                 TrackActionSheet(
@@ -264,10 +263,68 @@ class TrackActionSheetUiTest {
         }
         compose.waitForIdle()
 
-        // A host that cannot show the sheet (no `onShowInfo`) must not offer a
-        // dead action. This is also what keeps the `action-sheet-*` Roborazzi
-        // goldens — captured from a TIDAL fixture with no handler — stable.
-        compose.onNodeWithText("Credits & lyrics").assertDoesNotExist()
+        // No handler -> no dead row; also what keeps the action-sheet golden stable.
+        compose.onNodeWithText("Track info").assertDoesNotExist()
+    }
+
+    @Test
+    fun goToAlbumAndArtistShownWithHandlersAndInvokeThem() {
+        var album = 0
+        var artist = 0
+        var dismissed = 0
+        compose.setContent {
+            AuxenTheme(darkTheme = true) {
+                TrackActionSheet(
+                    track = track(),
+                    isFavorite = false,
+                    playlists = playlists,
+                    onDismiss = { dismissed++ },
+                    onPlay = {},
+                    onPlayNext = {},
+                    onEnqueue = {},
+                    onToggleFavorite = {},
+                    onAddToPlaylist = {},
+                    onCreatePlaylist = {},
+                    onGoToAlbum = { album++ },
+                    onGoToArtist = { artist++ },
+                )
+            }
+        }
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Go to album").performSemanticsAction(SemanticsActions.OnClick)
+        assertEquals(1, album)
+        assertEquals(1, dismissed)
+
+        compose.onNodeWithText("Go to artist").performSemanticsAction(SemanticsActions.OnClick)
+        assertEquals(1, artist)
+        assertEquals(2, dismissed)
+    }
+
+    @Test
+    fun goToAlbumAbsentForTrackWithNoAlbum() {
+        compose.setContent {
+            AuxenTheme(darkTheme = true) {
+                TrackActionSheet(
+                    track = track().copy(album = null),
+                    isFavorite = false,
+                    playlists = playlists,
+                    onDismiss = {},
+                    onPlay = {},
+                    onPlayNext = {},
+                    onEnqueue = {},
+                    onToggleFavorite = {},
+                    onAddToPlaylist = {},
+                    onCreatePlaylist = {},
+                    onGoToAlbum = {},
+                    onGoToArtist = {},
+                )
+            }
+        }
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Go to album").assertDoesNotExist()
+        compose.onNodeWithText("Go to artist").assertExists()
     }
 
     @Test

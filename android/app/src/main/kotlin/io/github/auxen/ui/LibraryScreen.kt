@@ -56,6 +56,8 @@ import io.github.auxen.ui.components.AuxenTrackRow
 import io.github.auxen.ui.components.EmptyState
 import io.github.auxen.ui.components.LoadingState
 import io.github.auxen.ui.components.TrackActionSheet
+import io.github.auxen.ui.components.TrackInfoSheet
+import io.github.auxen.ui.components.albumTargetFor
 
 private val TAB_LABELS = listOf("Albums", "Artists", "Tracks")
 
@@ -82,6 +84,7 @@ fun LibraryScreen(
     viewModel: PlayerViewModel,
     onOpenAlbum: (AlbumGroup) -> Unit,
     onOpenArtist: (String) -> Unit,
+    onOpenAlbumForTrack: (album: String, artist: String, seedTrackId: String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tracks by viewModel.localTracks.collectAsState()
@@ -93,6 +96,7 @@ fun LibraryScreen(
     val ascending by viewModel.librarySortAscending.collectAsState()
     var sortMenuOpen by remember { mutableStateOf(false) }
     var sheetTrack by remember { mutableStateOf<Track?>(null) }
+    var infoTrack by remember { mutableStateOf<Track?>(null) }
     LaunchedEffect(Unit) { viewModel.loadLibrary() }
 
     // Group + sort the active tab's data ONCE, reused for both the header count
@@ -249,6 +253,23 @@ fun LibraryScreen(
             onToggleFavorite = { viewModel.toggleFavorite(track) },
             onAddToPlaylist = { viewModel.addToPlaylist(track, it) },
             onCreatePlaylist = { viewModel.createPlaylistAndAdd(track, it) },
+            onShowInfo = { infoTrack = track },
+            onGoToAlbum = albumTargetFor(track)?.let { target ->
+                { onOpenAlbumForTrack(target.album, target.albumArtist, track.sourceId.takeIf { track.isTidal }) }
+            },
+            onGoToArtist = { onOpenArtist(track.artist) },
+        )
+    }
+
+    infoTrack?.let { track ->
+        val detail by viewModel.trackDetail.collectAsState()
+        val detailLoading by viewModel.trackDetailLoading.collectAsState()
+        LaunchedEffect(track) { viewModel.loadTrackDetail(track) }
+        TrackInfoSheet(
+            track = track,
+            detail = detail,
+            loading = detailLoading,
+            onDismiss = { infoTrack = null; viewModel.clearTrackDetail() },
         )
     }
 }

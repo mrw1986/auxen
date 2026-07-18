@@ -12,9 +12,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.AlertDialog
@@ -38,7 +40,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import io.github.auxen.db.PlaylistEntity
-import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.ui.theme.AuxenColors
 
@@ -65,6 +66,8 @@ fun TrackActionSheet(
     onAddToPlaylist: (Long) -> Unit,
     onCreatePlaylist: (String) -> Unit,
     onShowInfo: (() -> Unit)? = null,
+    onGoToAlbum: (() -> Unit)? = null,
+    onGoToArtist: (() -> Unit)? = null,
 ) {
     var showPlaylists by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
@@ -87,6 +90,8 @@ fun TrackActionSheet(
             // Dismiss FIRST, then open the info sheet: two stacked
             // ModalBottomSheets would otherwise contend for the same surface.
             onShowInfo = onShowInfo?.let { { it(); onDismiss() } },
+            onGoToAlbum = onGoToAlbum?.let { { it(); onDismiss() } },
+            onGoToArtist = onGoToArtist?.let { { it(); onDismiss() } },
         )
     }
 
@@ -139,6 +144,8 @@ internal fun TrackActionSheetContent(
     onShowPlaylists: () -> Unit,
     onNewPlaylist: () -> Unit,
     onShowInfo: (() -> Unit)? = null,
+    onGoToAlbum: (() -> Unit)? = null,
+    onGoToArtist: (() -> Unit)? = null,
 ) {
     Column(modifier = Modifier.padding(bottom = 24.dp)) {
         Text(
@@ -155,28 +162,43 @@ internal fun TrackActionSheetContent(
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
         if (!showPlaylists) {
-            SheetAction("Play", { Icon(Icons.Filled.PlayArrow, null) }) { onPlay() }
-            SheetAction("Play next", { Icon(Icons.Filled.SkipNext, null) }) { onPlayNext() }
-            SheetAction("Add to queue", { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) }) { onEnqueue() }
-            SheetAction(
-                if (isFavorite) "Remove from favorites" else "Add to favorites",
-                {
-                    Icon(
-                        if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                        null,
-                        tint = if (isFavorite) AuxenColors.FavoriteRed else MaterialTheme.colorScheme.onSurface,
-                    )
-                },
-            ) { onToggleFavorite() }
-            SheetAction("Add to playlist", { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) }) { onShowPlaylists() }
-            // Tidal only, and only when the host can actually show the sheet.
-            // Credits and lyrics come from the official metadata API keyed on the
-            // track's CATALOG id, so there is nothing to fetch for a local
-            // MediaStore track — offering the action would open an empty sheet.
-            // The null-handler half of the gate is also what keeps the
-            // `action-sheet-*` goldens (a TIDAL fixture, no handler) stable.
-            if (track.source == Source.TIDAL && onShowInfo != null) {
-                SheetAction("Credits & lyrics", { Icon(Icons.Filled.Info, null) }) { onShowInfo() }
+            // Which entries appear is decided by the PURE model (unit-tested in
+            // ActionSheetModelTest); this only maps id -> icon + handler.
+            val entries = trackActions(
+                track = track,
+                isFavorite = isFavorite,
+                canGoToAlbum = onGoToAlbum != null,
+                canGoToArtist = onGoToArtist != null,
+                canShowInfo = onShowInfo != null,
+            )
+            entries.forEach { entry ->
+                when (entry.id) {
+                    ActionId.PLAY ->
+                        SheetAction(entry.label, { Icon(Icons.Filled.PlayArrow, null) }) { onPlay() }
+                    ActionId.PLAY_NEXT ->
+                        SheetAction(entry.label, { Icon(Icons.Filled.SkipNext, null) }) { onPlayNext() }
+                    ActionId.ENQUEUE ->
+                        SheetAction(entry.label, { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) }) { onEnqueue() }
+                    ActionId.TOGGLE_FAVORITE ->
+                        SheetAction(
+                            entry.label,
+                            {
+                                Icon(
+                                    if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                                    null,
+                                    tint = if (isFavorite) AuxenColors.FavoriteRed else MaterialTheme.colorScheme.onSurface,
+                                )
+                            },
+                        ) { onToggleFavorite() }
+                    ActionId.ADD_TO_PLAYLIST ->
+                        SheetAction(entry.label, { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) }) { onShowPlaylists() }
+                    ActionId.GO_TO_ALBUM ->
+                        SheetAction(entry.label, { Icon(Icons.Filled.Album, null) }) { onGoToAlbum?.invoke() }
+                    ActionId.GO_TO_ARTIST ->
+                        SheetAction(entry.label, { Icon(Icons.Filled.Person, null) }) { onGoToArtist?.invoke() }
+                    ActionId.SHOW_INFO ->
+                        SheetAction(entry.label, { Icon(Icons.Filled.Info, null) }) { onShowInfo?.invoke() }
+                }
             }
         } else {
             SheetAction("New playlist…", { Icon(Icons.Filled.Add, null) }) { onNewPlaylist() }
