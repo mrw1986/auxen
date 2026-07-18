@@ -79,6 +79,16 @@
     <string name="settings_theme_dark">Dark</string>
     <string name="settings_theme_light">Light</string>
 
+    <string name="settings_music_folders_title">Music folders</string>
+    <string name="settings_music_folders_label">Included folders</string>
+    <string name="settings_music_folders_all">All folders</string>
+    <string name="settings_music_folders_count">%1$d folder(s) selected</string>
+    <string name="settings_music_folders_hint">Only music in the selected folders will appear. Select none to include all.</string>
+    <string name="settings_music_folders_empty">No music folders found.</string>
+    <string name="settings_music_folders_track_count">%1$d tracks</string>
+    <string name="settings_music_folders_save">Save</string>
+    <string name="settings_music_folders_cancel">Cancel</string>
+
     <string name="settings_playback_title">Playback</string>
     <string name="settings_bit_perfect_label">Bit-Perfect / Direct</string>
     <string name="settings_bit_perfect_subtitle">Plays audio untouched at full resolution; bypasses all DSP/EQ</string>

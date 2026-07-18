@@ -31,6 +31,9 @@ import io.github.auxen.model.Source
 import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
 import io.github.auxen.playback.PlaybackService
+import io.github.auxen.provider.local.MusicFolder
+import io.github.auxen.provider.local.decodeFolders
+import io.github.auxen.provider.local.encodeFolders
 import io.github.auxen.provider.tidal.ArtistLink
 import io.github.auxen.provider.tidal.TidalAlbumResult
 import io.github.auxen.provider.tidal.TidalSearchResults
@@ -74,6 +77,15 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     val localTracks = MutableStateFlow<List<Track>>(emptyList())
+
+    /** The device's music folders for the "Music folders" picker; loaded lazily when the dialog opens. */
+    val musicFolders = MutableStateFlow<List<MusicFolder>>(emptyList())
+
+    private val _selectedFolders = MutableStateFlow<Set<String>>(emptySet())
+
+    /** The persisted folder-selection identities (empty = all folders). */
+    val selectedFolders: StateFlow<Set<String>> = _selectedFolders
+
     val searchQuery = MutableStateFlow("")
     val searchResults = MutableStateFlow<List<Track>>(emptyList())
 
@@ -525,6 +537,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             homeLoading.value = true
             try {
+                applyFolderSelection()
                 loadRecentlyPlayed()
                 runCatching { Graph.local.recentlyAdded() }.onSuccess { recentlyAdded.value = it }
             } finally {
@@ -678,16 +691,52 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         restoreLibraryState()
+        viewModelScope.launch { applyFolderSelection() }
     }
 
     fun loadLibrary() {
         viewModelScope.launch {
             libraryLoading.value = true
             try {
+                applyFolderSelection()
                 runCatching { Graph.local.allTracks() }.onSuccess { localTracks.value = it }
             } finally {
                 libraryLoading.value = false
             }
+        }
+    }
+
+    /**
+     * Read the persisted folder selection into [_selectedFolders] and push it
+     * onto the local provider, so the next query (allTracks/recentlyAdded/
+     * search) filters to it. Called before each library/home load and once at
+     * init, so a filter set on a prior launch is honoured from the first read.
+     */
+    private suspend fun applyFolderSelection() {
+        val folders = decodeFolders(runCatching { Graph.library.getSetting(KEY_MUSIC_FOLDERS) }.getOrNull())
+        _selectedFolders.value = folders
+        Graph.local.setIncludedFolders(folders)
+    }
+
+    /** Populate [musicFolders] for the picker dialog. Idempotent; safe to call on every open. */
+    fun loadMusicFolders() {
+        viewModelScope.launch {
+            runCatching { Graph.local.musicFolders() }.onSuccess { musicFolders.value = it }
+        }
+    }
+
+    /**
+     * Persist a new folder selection ([folders]; empty = all), push it onto the
+     * local provider, and rescan Library + Home so the change is visible
+     * immediately. Search re-reads the same provider field on its next query.
+     */
+    fun setMusicFolders(folders: Set<String>) {
+        viewModelScope.launch {
+            runCatching { Graph.library.setSetting(KEY_MUSIC_FOLDERS, encodeFolders(folders)) }
+            _selectedFolders.value = folders
+            Graph.local.setIncludedFolders(folders)
+            loadLibrary()
+            refreshHome()
         }
     }
 
@@ -936,5 +985,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         controller?.release()
         super.onCleared()
+    }
+
+    private companion object {
+        const val KEY_MUSIC_FOLDERS = "local_music_folders"
     }
 }

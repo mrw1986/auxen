@@ -1037,15 +1037,19 @@ class ComponentScreenshotTest {
         }
     }
 
-    // --- Settings screen (Desktop-Parity Screens, sub-batch A, Task 1) ---
+    // --- Settings screen (Desktop-Parity Screens, sub-batch A, Task 1;
+    // Music folders row added by local-library Task 4) ---
     // Captures SettingsContent, the stateless body SettingsScreen delegates
     // to (same split as AutoEqPickerResults/TrackActionSheetContent) --
-    // takes plain themeMode/sourcePriority/bitPerfect params, no live
-    // PlayerViewModel needed. Dark selected, Prefer Tidal selected, and
-    // Bit-Perfect ON -- none is its option's default (SYSTEM / PREFER_QUALITY
-    // / false), so a regression that silently fell back to the default would
-    // be visible in the pixel diff. Bit-Perfect ON also pins the switch's
-    // checked state and the Playback-section divider above source priority.
+    // takes plain themeMode/sourcePriority/bitPerfect/musicFoldersSummary
+    // params, no live PlayerViewModel needed. Dark selected, Prefer Tidal
+    // selected, and Bit-Perfect ON -- none is its option's default (SYSTEM /
+    // PREFER_QUALITY / false), so a regression that silently fell back to the
+    // default would be visible in the pixel diff. Bit-Perfect ON also pins
+    // the switch's checked state and the Playback-section divider above
+    // source priority. musicFoldersSummary is a non-default "3 folder(s)
+    // selected" (not the "All folders" default), so a regression that
+    // dropped the Music folders row would show in the diff.
 
     @Test
     fun settingsScreen_light() = captureComponent("settings-screen-light", darkTheme = false) { SettingsPreview() }
@@ -1062,6 +1066,8 @@ class ComponentScreenshotTest {
             onSourcePriorityChange = {},
             bitPerfect = true,
             onBitPerfectChange = {},
+            musicFoldersSummary = "3 folder(s) selected",
+            onOpenMusicFolders = {},
         )
     }
 
