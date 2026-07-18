@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -138,6 +139,48 @@ class LibraryRepositoryTest {
 
         repo.deletePlaylist(id)
         assertTrue(repo.playlists().first().isEmpty())
+    }
+
+    @Test
+    fun importTidalPlaylistShellIsIdempotentByUuidAndStampsSource() = runBlocking {
+        val id = repo.importTidalPlaylistShell("uuid-1", "2024")
+        // Re-import the SAME uuid (even under a different Tidal-side name) -> the
+        // SAME playlist id, no duplicate. Create-only: the first name sticks.
+        val again = repo.importTidalPlaylistShell("uuid-1", "2024 (renamed on Tidal)")
+        assertEquals(id, again)
+        assertEquals(1, repo.playlists().first().size)
+
+        val entity = repo.playlist(id)!!
+        assertEquals("TIDAL", entity.source)
+        assertEquals("uuid-1", entity.tidalPlaylistId)
+        assertEquals("2024", entity.name)
+    }
+
+    @Test
+    fun importTidalPlaylistTracksSetsMembershipInTidalOrderAndReimportMirrors() = runBlocking {
+        val id = repo.importTidalPlaylistShell("uuid-1", "2024")
+        val a = tidalTrack.copy(sourceId = "1", title = "A")
+        val b = tidalTrack.copy(sourceId = "2", title = "B")
+        val c = tidalTrack.copy(sourceId = "3", title = "C")
+
+        repo.importTidalPlaylistTracks(id, listOf(a, b, c))
+        assertEquals(listOf("A", "B", "C"), repo.playlistTracks(id).map { it.title })
+
+        // A re-import mirrors Tidal exactly: a dropped track leaves, order follows.
+        repo.importTidalPlaylistTracks(id, listOf(c, a))
+        assertEquals(listOf("C", "A"), repo.playlistTracks(id).map { it.title })
+    }
+
+    @Test
+    fun playlistByTidalIdFindsOnlyTidalShellsAndPlaylistReadsById() = runBlocking {
+        val localId = repo.createPlaylist("Local Mix")
+        val tidalId = repo.importTidalPlaylistShell("uuid-9", "Tidal Mix")
+
+        assertEquals(tidalId, repo.playlistByTidalId("uuid-9")!!.id)
+        assertNull(repo.playlistByTidalId("nope"))
+        // A locally-created playlist has a null tidal_playlist_id and is not found by uuid.
+        assertNull(repo.playlist(localId)!!.tidalPlaylistId)
+        assertNull(repo.playlist(localId)!!.source)
     }
 
     @Test

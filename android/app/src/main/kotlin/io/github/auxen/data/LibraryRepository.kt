@@ -10,6 +10,7 @@ import io.github.auxen.db.SearchHistoryEntity
 import io.github.auxen.db.SettingEntity
 import io.github.auxen.db.toEntity
 import io.github.auxen.db.toTrack
+import io.github.auxen.model.Source
 import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
 import kotlinx.coroutines.flow.Flow
@@ -96,6 +97,43 @@ class LibraryRepository(
     suspend fun recolorPlaylist(id: Long, color: String) = db.playlistDao().recolor(id, color)
 
     suspend fun deletePlaylist(id: Long) = db.playlistDao().deleteWithTracks(id)
+
+    /** The playlist row by id (with source + tidal_playlist_id), or null — the lazy-fetch guard reads it. */
+    suspend fun playlist(id: Long): PlaylistEntity? = db.playlistDao().byId(id)
+
+    /** An imported Tidal playlist by its Tidal [uuid], or null. */
+    suspend fun playlistByTidalId(uuid: String): PlaylistEntity? = db.playlistDao().playlistByTidalId(uuid)
+
+    /**
+     * Find-or-create the LOCAL shell for a Tidal playlist, keyed by its Tidal
+     * [uuid]. Idempotent in CODE (there is no unique index on tidal_playlist_id,
+     * so uniqueness is enforced by finding first): a re-import of the same uuid
+     * returns the SAME playlist id and never duplicates. Create-only — an
+     * existing shell is returned untouched (a local rename is NOT clobbered by a
+     * re-sync; the tradeoff: a Tidal-side rename does not propagate without
+     * delete+resync). Stamps source = TIDAL + tidalPlaylistId = uuid, with the
+     * default amber color so the tab's color-dot renders (playlist art is
+     * deferred this slice). Creates only the shell — the tracks are imported
+     * lazily by [importTidalPlaylistTracks] when the playlist is first opened.
+     */
+    suspend fun importTidalPlaylistShell(uuid: String, name: String): Long {
+        db.playlistDao().playlistByTidalId(uuid)?.let { return it.id }
+        return db.playlistDao().insert(
+            PlaylistEntity(name = name, color = "#d4a039", source = Source.TIDAL.name, tidalPlaylistId = uuid),
+        )
+    }
+
+    /**
+     * Replace a playlist's membership with [tracks] in the given order — the
+     * import of a Tidal playlist's items in Tidal order (a re-import mirrors
+     * Tidal exactly). Upserts each track into `tracks` first, then rewrites the
+     * ordering in one transaction (clear + re-insert by index) via the existing
+     * [PlaylistDao.reorder].
+     */
+    suspend fun importTidalPlaylistTracks(playlistId: Long, tracks: List<Track>) {
+        val trackIds = tracks.map { upsert(it) }
+        db.playlistDao().reorder(playlistId, trackIds)
+    }
 
     suspend fun removeFromPlaylist(playlistId: Long, track: Track) {
         val entity = db.trackDao().bySourceId(track.source.name, track.sourceId) ?: return

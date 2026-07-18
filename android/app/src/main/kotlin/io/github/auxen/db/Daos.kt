@@ -137,6 +137,13 @@ interface PlaylistDao {
     @Insert
     suspend fun insert(playlist: PlaylistEntity): Long
 
+    @Query("SELECT * FROM playlists WHERE id = :id")
+    suspend fun byId(id: Long): PlaylistEntity?
+
+    /** The imported shell for a Tidal playlist, keyed by its Tidal uuid (no unique index — LIMIT 1). */
+    @Query("SELECT * FROM playlists WHERE tidal_playlist_id = :uuid LIMIT 1")
+    suspend fun playlistByTidalId(uuid: String): PlaylistEntity?
+
     @Query("SELECT * FROM playlists ORDER BY name")
     fun playlists(): Flow<List<PlaylistEntity>>
 
