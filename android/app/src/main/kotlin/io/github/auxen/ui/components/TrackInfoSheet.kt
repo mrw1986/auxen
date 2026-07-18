@@ -28,9 +28,12 @@ import io.github.auxen.provider.tidal.TidalTrackDetail
  *  - **Credits** and **Lyrics** for a Tidal track, backed by the internal-v1
  *    `tracks/{id}/credits` and `tracks/{id}/lyrics` reads (assembled by
  *    `TidalProvider.trackDetail`) — metadata only; nothing here resolves a stream.
- *  - A **Details** section (format / bitrate / sample rate / bit depth / source)
- *    read straight off the [track] model — no fetch (D1). This is what makes the
- *    sheet worth opening on a LOCAL track, whose credits/lyrics block is skipped.
+ *  - A **Details** section (format / bitrate / sample rate / bit depth / genre /
+ *    disc number / source) read straight off the [track] model — no fetch (D1).
+ *    This is what makes the sheet worth opening on a LOCAL track, whose
+ *    credits/lyrics block is skipped. For a local track, genre/disc/sample-rate/
+ *    bit-depth are absent until the caller passes an enriched copy (see
+ *    `PlayerViewModel.enrichedInfoTrack`) — the sheet itself does no I/O.
  *
  * [detail] is null both while [loading] and when the fetch failed / the track
  * has no document; the body tells those apart with [loading] alone, so a
@@ -117,6 +120,11 @@ internal fun TrackInfoSheetContent(track: Track, detail: TidalTrackDetail?, load
         DetailRow("Bitrate", track.bitrateKbps?.let { "$it kbps" })
         DetailRow("Sample rate", track.sampleRateHz?.let { "%.1f kHz".format(it / 1000.0) })
         DetailRow("Bit depth", track.bitDepth?.let { "$it-bit" })
+        // Genre / disc number: MediaStore leaves these null for most local
+        // files; they fill once the lazy tag-enrichment pass (`Graph.local.enrich`)
+        // reads the embedded tags, so these rows appear only after that lands.
+        DetailRow("Genre", track.genre)
+        DetailRow("Disc", track.discNumber?.let { "$it" })
         DetailRow("Source", if (track.isTidal) "Tidal" else "Local")
     }
 }

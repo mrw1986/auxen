@@ -213,9 +213,13 @@ fun HomeScreen(
     infoTrack?.let { track ->
         val detail by viewModel.trackDetail.collectAsState()
         val detailLoading by viewModel.trackDetailLoading.collectAsState()
+        val enriched by viewModel.enrichedInfoTrack.collectAsState()
         LaunchedEffect(track) { viewModel.loadTrackDetail(track) }
         TrackInfoSheet(
-            track = track,
+            // The enriched copy for THIS track (guarded against a stale value
+            // from a previous open); falls back to the un-enriched track until
+            // MediaMetadataRetriever lands.
+            track = enriched?.takeIf { it.source == track.source && it.sourceId == track.sourceId } ?: track,
             detail = detail,
             loading = detailLoading,
             onDismiss = { infoTrack = null; viewModel.clearTrackDetail() },

@@ -394,6 +394,21 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private var trackDetailJob: Job? = null
 
     /**
+     * The enriched-on-demand copy of the track whose info sheet is open — its
+     * genre / disc number / sample rate / bit depth filled from embedded tags.
+     * Null until enrichment lands (the sheet shows the un-enriched track's
+     * MediaStore values meanwhile, then upgrades). Cleared on dismiss.
+     */
+    val enrichedInfoTrack = MutableStateFlow<Track?>(null)
+
+    /**
+     * Process-lifetime cache of enriched local tracks, keyed by "source:sourceId",
+     * shared by the info sheet and now-playing so MediaMetadataRetriever runs at
+     * most once per track per process.
+     */
+    private val enrichedCache = mutableMapOf<String, Track>()
+
+    /**
      * Load credits + lyrics for a Tidal track (its sourceId IS the catalog id —
      * no resolution needed).
      *
@@ -417,7 +432,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun loadTrackDetail(track: Track) {
         trackDetail.value = null
-        if (!track.isTidal) return
+        // Seed from cache (may be null) + kick off local enrichment. Both lines run
+        // BEFORE the isTidal guard, so a LOCAL track still enriches even though it
+        // skips the Tidal credits/lyrics fetch below.
+        enrichedInfoTrack.value = enrichedCache[trackKey(track)]
+        enrichLocalTrackForInfo(track)
+        if (!track.isTidal) return // PRESERVED guard — a LOCAL track must NOT hit Graph.tidal.trackDetail (its sourceId is a MediaStore id, not a Tidal track id).
         val token = ++trackDetailToken
         trackDetailJob?.cancel()
         trackDetailJob = viewModelScope.launch {
@@ -431,7 +451,49 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun clearTrackDetail() { trackDetail.value = null }
+    fun clearTrackDetail() {
+        trackDetail.value = null
+        enrichedInfoTrack.value = null
+    }
+
+    /**
+     * Enrich a LOCAL info-sheet track off the main thread; publish to
+     * [enrichedInfoTrack] + cache.
+     *
+     * LOAD-BEARING INVARIANT: enrichment publishes ONLY to `enrichedInfoTrack` /
+     * `currentTrack` / `enrichedCache` — it must NEVER write `localTracks`. The
+     * merge fills `discNumber`, which is a grouping/sort key
+     * (`LibraryGrouping.groupTracksByDisc`), so folding enriched rows back into
+     * `localTracks` would silently regroup the library (e.g. flip a single-disc
+     * album to multi-disc). Keep enrichment out of the grouping source.
+     */
+    private fun enrichLocalTrackForInfo(track: Track) {
+        if (track.source != Source.LOCAL) return
+        viewModelScope.launch {
+            val enriched = runCatching { Graph.local.enrich(track) }.getOrDefault(track)
+            enrichedCache[trackKey(enriched)] = enriched
+            enrichedInfoTrack.value = enriched
+        }
+    }
+
+    private fun trackKey(track: Track): String = "${track.source.name}:${track.sourceId}"
+
+    /**
+     * Enrich the now-playing track (if local) so its "Hi-Res" quality badge
+     * upgrades once tags are read. Uses the cache first; applies the result
+     * only if it is still the current track (the user may have skipped).
+     */
+    private fun enrichCurrentTrackIfLocal() {
+        val track = currentTrack ?: return
+        if (track.source != Source.LOCAL) return
+        val key = trackKey(track)
+        enrichedCache[key]?.let { currentTrack = it; return }
+        viewModelScope.launch {
+            val enriched = runCatching { Graph.local.enrich(track) }.getOrDefault(track)
+            enrichedCache[key] = enriched
+            if (currentTrack?.let(::trackKey) == key) currentTrack = enriched
+        }
+    }
 
     private fun libraryTabName(index: Int) = when (index) {
         0 -> "albums"
@@ -619,12 +681,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 val metadata = c.mediaMetadata
                 nowPlaying = metadata
                 currentTrack = Graph.trackFor(metadata)
+                enrichCurrentTrackIfLocal()
             }
             refreshQueue(c)
             c.addListener(object : Player.Listener {
                 override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
                     nowPlaying = mediaMetadata
                     currentTrack = Graph.trackFor(mediaMetadata)
+                    enrichCurrentTrackIfLocal()
                 }
 
                 override fun onIsPlayingChanged(playing: Boolean) {
