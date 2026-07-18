@@ -52,6 +52,15 @@ data class TidalFavoriteArtist(
  */
 data class TidalFavoriteTrack(val track: Track, val addedAtMillis: Long?)
 
+/**
+ * One strictly-decoded favorites page: [items] the projected rows, [totalCount]
+ * the envelope's OWN `totalNumberOfItems` — carried alongside so the read loop
+ * ([TidalProvider.favoriteAlbums] and its siblings) can apply the M1
+ * cross-check ([orNullIfDriftedEmpty]) to the FIRST page's total against the
+ * fully-accumulated result.
+ */
+data class FavoritesPage<T>(val items: List<T>, val totalCount: Int)
+
 // ---- internal-v1 response DTOs (every field nullable/defaulted, the tolerance
 // every DTO in this package applies to a reverse-engineered endpoint) ----
 
@@ -118,6 +127,27 @@ fun parseIso8601Millis(value: String?): Long? {
         ?: runCatching { Instant.parse(value).toEpochMilli() }.getOrNull()
 }
 
+/**
+ * M1 cross-check (data-loss guard): applied to a completed favorites read's
+ * accumulated items against the FIRST page's [firstPageTotalCount]. Closes the
+ * one wipe path [favoriteAlbumsPageOrNull] et al cannot: a WELL-FORMED envelope
+ * whose items all fail to PROJECT (e.g. every wrapper's `item` is null — a
+ * schema drift on the nested item shape) still strictly decodes, so the read
+ * would otherwise trust an empty `[]` and the mirror would delete every local
+ * TIDAL favorite. Returns `null` (untrusted — the mirror reconciles nothing)
+ * when the accumulated result is empty but the server's own total says it
+ * should not be; returns the list unchanged otherwise.
+ *
+ * Provably false-null-safe: a GENUINE empty collection reports
+ * `totalNumberOfItems == 0`, so `0 > 0` is false and a trusted `[]` still flows
+ * through — the to-zero mirror still works. A legitimate trailing empty page
+ * (pagination's natural end) only occurs once earlier pages had items, so the
+ * accumulated list is already non-empty by then regardless of that page's own
+ * total.
+ */
+fun <T> List<T>.orNullIfDriftedEmpty(firstPageTotalCount: Int): List<T>? =
+    if (isEmpty() && firstPageTotalCount > 0) null else this
+
 /** Pure projection of a decoded albums page — the tested body shared by the lenient and strict parsers. */
 private fun TidalV1FavoriteAlbumsResponse.toFavoriteAlbums(): List<TidalFavoriteAlbum> = items.mapNotNull { wrapper ->
     val album = wrapper.item ?: return@mapNotNull null
@@ -145,12 +175,17 @@ fun favoriteAlbumsFrom(body: String, json: Json): List<TidalFavoriteAlbum> = run
  * an HTML captive-portal page, a v1 error envelope, or drift that drops/renames
  * `items` (now that `totalNumberOfItems` is REQUIRED, all three fail to decode).
  * A GENUINE page — including a genuine empty `{"items":[],"totalNumberOfItems":0}`
- * — decodes to a TRUSTED (possibly-empty) list. The favorites reads gate on this
- * so an ambiguous empty from a bad 200 becomes `null` (mirror deletes nothing),
- * never a trusted `[]` that would wipe the collection.
+ * — decodes to a TRUSTED [FavoritesPage], its `totalCount` carrying the
+ * envelope's OWN `totalNumberOfItems` alongside the projected items. The
+ * favorites reads gate on `null` here so an ambiguous empty from a bad 200
+ * becomes `null` (mirror deletes nothing), never a trusted `[]` that would wipe
+ * the collection; `totalCount` feeds the read-level M1 cross-check
+ * ([orNullIfDriftedEmpty]) for the remaining case — a well-formed envelope
+ * whose items all fail to PROJECT (not decode).
  */
-fun favoriteAlbumsPageOrNull(body: String, json: Json): List<TidalFavoriteAlbum>? = runCatching {
-    json.decodeFromString<TidalV1FavoriteAlbumsResponse>(body).toFavoriteAlbums()
+fun favoriteAlbumsPageOrNull(body: String, json: Json): FavoritesPage<TidalFavoriteAlbum>? = runCatching {
+    val decoded = json.decodeFromString<TidalV1FavoriteAlbumsResponse>(body)
+    FavoritesPage(decoded.toFavoriteAlbums(), decoded.totalNumberOfItems)
 }.getOrNull()
 
 /** Pure projection of a decoded artists page — the tested body shared by the lenient and strict parsers. */
@@ -179,8 +214,9 @@ fun favoriteArtistsFrom(body: String, json: Json): List<TidalFavoriteArtist> = r
  * envelope / drift all fail now that `totalNumberOfItems` is REQUIRED, while a
  * genuine — including genuine-empty — page decodes to a trusted list).
  */
-fun favoriteArtistsPageOrNull(body: String, json: Json): List<TidalFavoriteArtist>? = runCatching {
-    json.decodeFromString<TidalV1FavoriteArtistsResponse>(body).toFavoriteArtists()
+fun favoriteArtistsPageOrNull(body: String, json: Json): FavoritesPage<TidalFavoriteArtist>? = runCatching {
+    val decoded = json.decodeFromString<TidalV1FavoriteArtistsResponse>(body)
+    FavoritesPage(decoded.toFavoriteArtists(), decoded.totalNumberOfItems)
 }.getOrNull()
 
 /** Pure projection of a decoded tracks page — the tested body shared by the lenient and strict parsers. */
@@ -206,8 +242,9 @@ fun favoriteTracksFrom(body: String, json: Json): List<TidalFavoriteTrack> = run
  * envelope / drift all fail now that `totalNumberOfItems` is REQUIRED, while a
  * genuine — including genuine-empty — page decodes to a trusted list).
  */
-fun favoriteTracksPageOrNull(body: String, json: Json): List<TidalFavoriteTrack>? = runCatching {
-    json.decodeFromString<TidalV1FavoriteTracksResponse>(body).toFavoriteTracks()
+fun favoriteTracksPageOrNull(body: String, json: Json): FavoritesPage<TidalFavoriteTrack>? = runCatching {
+    val decoded = json.decodeFromString<TidalV1FavoriteTracksResponse>(body)
+    FavoritesPage(decoded.toFavoriteTracks(), decoded.totalNumberOfItems)
 }.getOrNull()
 
 // ---- request URL builders (pure; `order=DATE&orderDirection=DESC` gives

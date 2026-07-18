@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import io.github.auxen.model.Source
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -189,15 +190,15 @@ class TidalFavoritesTest {
     @Test
     fun `strict page parsers decode a genuine page (incl a genuine EMPTY) to a trusted non-null list`() {
         // A real page decodes to the same projection the lenient parser produces...
-        assertEquals(2, favoriteAlbumsPageOrNull(albumsPage, json)!!.size)
-        assertEquals(2, favoriteArtistsPageOrNull(artistsPage, json)!!.size)
-        assertEquals(2, favoriteTracksPageOrNull(tracksPage, json)!!.size)
+        assertEquals(2, favoriteAlbumsPageOrNull(albumsPage, json)!!.items.size)
+        assertEquals(2, favoriteArtistsPageOrNull(artistsPage, json)!!.items.size)
+        assertEquals(2, favoriteTracksPageOrNull(tracksPage, json)!!.items.size)
         // ...and a GENUINE empty page (items:[] WITH totalNumberOfItems) is a
         // TRUSTED empty [] — non-null — so the to-zero mirror still works.
         val emptyPage = """{"items":[],"totalNumberOfItems":0}"""
-        assertEquals(emptyList<TidalFavoriteAlbum>(), favoriteAlbumsPageOrNull(emptyPage, json))
-        assertEquals(emptyList<TidalFavoriteArtist>(), favoriteArtistsPageOrNull(emptyPage, json))
-        assertEquals(emptyList<TidalFavoriteTrack>(), favoriteTracksPageOrNull(emptyPage, json))
+        assertEquals(emptyList<TidalFavoriteAlbum>(), favoriteAlbumsPageOrNull(emptyPage, json)!!.items)
+        assertEquals(emptyList<TidalFavoriteArtist>(), favoriteArtistsPageOrNull(emptyPage, json)!!.items)
+        assertEquals(emptyList<TidalFavoriteTrack>(), favoriteTracksPageOrNull(emptyPage, json)!!.items)
     }
 
     @Test
@@ -213,5 +214,35 @@ class TidalFavoritesTest {
             assertNull(favoriteArtistsPageOrNull(bad, json))
             assertNull(favoriteTracksPageOrNull(bad, json))
         }
+    }
+
+    @Test
+    fun `strict page parsers surface the envelope's own totalCount alongside the projected items`() {
+        assertEquals(2, favoriteAlbumsPageOrNull(albumsPage, json)!!.totalCount)
+        assertEquals(2, favoriteArtistsPageOrNull(artistsPage, json)!!.totalCount)
+        assertEquals(2, favoriteTracksPageOrNull(tracksPage, json)!!.totalCount)
+    }
+
+    @Test
+    fun `M1 cross-check- a well-formed page whose items all fail to project is untrusted, a genuine empty is trusted`() {
+        // A well-formed envelope whose items ALL fail to project (every wrapper's
+        // `item` is null -- a schema drift) still decodes -- the strict parser
+        // trusts the ENVELOPE, not the per-item shape -- to an EMPTY items list
+        // carrying the server's own non-zero total.
+        val driftedNonEmptyTotal =
+            """{"items":[{"created":"2023-01-01T00:00:00Z","item":null}],"totalNumberOfItems":5}"""
+        val drifted = favoriteAlbumsPageOrNull(driftedNonEmptyTotal, json)!!
+        assertTrue(drifted.items.isEmpty())
+        assertEquals(5, drifted.totalCount)
+        // The read-level M1 guard turns that mismatch into null (untrusted) --
+        // this is what stops a schema-drifted "successful" fetch from mirroring
+        // as a mass-delete.
+        assertNull(drifted.items.orNullIfDriftedEmpty(drifted.totalCount))
+
+        // A GENUINE empty collection reports totalNumberOfItems == 0, so the
+        // guard is false-null-safe: the trusted empty list flows through
+        // unchanged, and the to-zero mirror still works.
+        val genuineEmpty = favoriteAlbumsPageOrNull("""{"items":[],"totalNumberOfItems":0}""", json)!!
+        assertEquals(emptyList<TidalFavoriteAlbum>(), genuineEmpty.items.orNullIfDriftedEmpty(genuineEmpty.totalCount))
     }
 }

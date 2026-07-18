@@ -621,10 +621,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Pull the user's Tidal saved albums + followed artists into the local
-     * favorite tables. No-op when not signed in. Guarded to once per process
-     * (the auto-pull-on-Collection-open path passes force = false); the manual
-     * "Sync from Tidal" affordance passes force = true. Additive + idempotent.
+     * Pull the user's Tidal saved albums + followed artists + favorite tracks
+     * into the local favorite tables, mirroring Tidal (adds new remote
+     * favorites, removes local TIDAL-source favorites gone from Tidal;
+     * playlists stay additive). No-op when not signed in. Guarded to once per
+     * process (the auto-pull-on-Collection-open path passes force = false); the
+     * manual "Sync from Tidal" affordance passes force = true. Idempotent.
      */
     fun syncFavoritesFromTidal(force: Boolean = false) {
         if (!Graph.tidal.isLoggedIn) return
@@ -633,7 +635,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _tidalCollectionStatus.value = "Syncing favorites from Tidal…"
             _tidalCollectionStatus.value = runCatching { Graph.tidalCollectionSync.pullAll() }.fold(
-                onSuccess = { "Synced +${it.albums} album(s), +${it.artists} artist(s), +${it.tracks} track(s), +${it.playlists} playlist(s) from Tidal." },
+                onSuccess = { "Synced +${it.albums} album(s), +${it.artists} artist(s), +${it.tracks} track(s), +${it.playlists} playlist(s), -${it.removed} removed from Tidal." },
                 onFailure = { collectionSynced = false; "Favorites sync failed: ${it.message}" },
             )
         }

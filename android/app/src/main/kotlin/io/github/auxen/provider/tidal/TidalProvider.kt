@@ -411,47 +411,56 @@ class TidalProvider(
     /**
      * The user's Tidal saved albums, paginated — the internal-v1 port of the
      * desktop's `session.user.favorites.albums()` (`auxen/providers/tidal.py`
-     * `get_favorite_albums`). Metadata only: resolves no stream. Returns an
-     * empty list when not logged in / the user id is unresolved / any page
-     * fails, matching every other read here (a missing collection degrades the
-     * Collection tab, never breaks it).
+     * `get_favorite_albums`). Metadata only: resolves no stream. Returns
+     * **null** when not logged in, the user id is unresolved, any page's fetch
+     * fails, OR any page's body does not strictly decode as a favorites
+     * envelope (an HTML captive-portal page / v1 error envelope is never
+     * mistaken for an empty collection); a complete (possibly empty) list only
+     * on full success — the mirror in [TidalCollectionSync] relies on this to
+     * distinguish a genuine empty from a failure. The M1 cross-check
+     * ([orNullIfDriftedEmpty]) additionally guards a well-formed-but-drifted
+     * envelope whose items all fail to project.
      */
-    suspend fun favoriteAlbums(): List<TidalFavoriteAlbum> {
-        val token = validToken() ?: return emptyList()
-        val uid = userId ?: return emptyList()
+    suspend fun favoriteAlbums(): List<TidalFavoriteAlbum>? {
+        val token = validToken() ?: return null
+        val uid = userId ?: return null
         val all = mutableListOf<TidalFavoriteAlbum>()
         var offset = 0
+        var firstPageTotalCount = 0
         while (offset < FAVORITES_MAX) {
             val url = favoriteAlbumsUrl(API_BASE, uid, countryCode, FAVORITES_PAGE, offset)
-            val body = runCatching { get(url.toString(), token) }.getOrNull() ?: break
-            val page = favoriteAlbumsFrom(body, json)
-            all += page
-            if (page.size < FAVORITES_PAGE) break
+            val body = runCatching { get(url.toString(), token) }.getOrNull() ?: return null
+            val page = favoriteAlbumsPageOrNull(body, json) ?: return null
+            if (offset == 0) firstPageTotalCount = page.totalCount
+            all += page.items
+            if (page.items.size < FAVORITES_PAGE) break
             offset += FAVORITES_PAGE
         }
-        return all
+        return all.orNullIfDriftedEmpty(firstPageTotalCount)
     }
 
     /**
      * The user's Tidal followed artists, paginated — the internal-v1 port of
      * the desktop's `session.user.favorites.artists()`
-     * (`get_followed_artists`). Same not-logged-in / degrade contract as
-     * [favoriteAlbums].
+     * (`get_followed_artists`). Same null-on-any-failure / M1-guarded contract
+     * as [favoriteAlbums].
      */
-    suspend fun favoriteArtists(): List<TidalFavoriteArtist> {
-        val token = validToken() ?: return emptyList()
-        val uid = userId ?: return emptyList()
+    suspend fun favoriteArtists(): List<TidalFavoriteArtist>? {
+        val token = validToken() ?: return null
+        val uid = userId ?: return null
         val all = mutableListOf<TidalFavoriteArtist>()
         var offset = 0
+        var firstPageTotalCount = 0
         while (offset < FAVORITES_MAX) {
             val url = favoriteArtistsUrl(API_BASE, uid, countryCode, FAVORITES_PAGE, offset)
-            val body = runCatching { get(url.toString(), token) }.getOrNull() ?: break
-            val page = favoriteArtistsFrom(body, json)
-            all += page
-            if (page.size < FAVORITES_PAGE) break
+            val body = runCatching { get(url.toString(), token) }.getOrNull() ?: return null
+            val page = favoriteArtistsPageOrNull(body, json) ?: return null
+            if (offset == 0) firstPageTotalCount = page.totalCount
+            all += page.items
+            if (page.items.size < FAVORITES_PAGE) break
             offset += FAVORITES_PAGE
         }
-        return all
+        return all.orNullIfDriftedEmpty(firstPageTotalCount)
     }
 
     /** Save [albumId] to the user's Tidal collection. Best-effort — false on any failure. */
@@ -492,24 +501,26 @@ class TidalProvider(
      * The user's Tidal favorite tracks, paginated — the internal-v1 port of the
      * desktop's `session.user.favorites.tracks()`. Each is a fully-playable
      * [Track] (via [TidalV1PageTrack.toTrack]) paired with its remote `created`
-     * millis. Metadata only: resolves no stream. Same not-logged-in / degrade
-     * contract as [favoriteAlbums] (a missing collection degrades the Tracks tab,
-     * never breaks it).
+     * millis. Metadata only: resolves no stream. Same null-on-any-failure /
+     * M1-guarded contract as [favoriteAlbums] (a missing collection degrades the
+     * Tracks tab, never breaks it).
      */
-    suspend fun favoriteTracks(): List<TidalFavoriteTrack> {
-        val token = validToken() ?: return emptyList()
-        val uid = userId ?: return emptyList()
+    suspend fun favoriteTracks(): List<TidalFavoriteTrack>? {
+        val token = validToken() ?: return null
+        val uid = userId ?: return null
         val all = mutableListOf<TidalFavoriteTrack>()
         var offset = 0
+        var firstPageTotalCount = 0
         while (offset < FAVORITES_MAX) {
             val url = favoriteTracksUrl(API_BASE, uid, countryCode, FAVORITES_PAGE, offset)
-            val body = runCatching { get(url.toString(), token) }.getOrNull() ?: break
-            val page = favoriteTracksFrom(body, json)
-            all += page
-            if (page.size < FAVORITES_PAGE) break
+            val body = runCatching { get(url.toString(), token) }.getOrNull() ?: return null
+            val page = favoriteTracksPageOrNull(body, json) ?: return null
+            if (offset == 0) firstPageTotalCount = page.totalCount
+            all += page.items
+            if (page.items.size < FAVORITES_PAGE) break
             offset += FAVORITES_PAGE
         }
-        return all
+        return all.orNullIfDriftedEmpty(firstPageTotalCount)
     }
 
     /** Save [trackId] to the user's Tidal favorite tracks. Best-effort — false on any failure. */

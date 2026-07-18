@@ -6,8 +6,8 @@ import io.github.auxen.db.FavoriteArtistEntity
 import io.github.auxen.model.Source
 import kotlinx.coroutines.flow.first
 
-/** What one full pull added locally, per favorite type. */
-data class CollectionPullSummary(val albums: Int, val artists: Int, val tracks: Int, val playlists: Int)
+/** What one full pull changed locally: adds per favorite type + total mirror-removes across the three keyed types. */
+data class CollectionPullSummary(val albums: Int, val artists: Int, val tracks: Int, val playlists: Int, val removed: Int)
 
 /**
  * Two-way reconcile between the user's Tidal favorites (internal-v1, via
@@ -23,37 +23,43 @@ class TidalCollectionSync(
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     /**
-     * Pull Tidal saved albums into `favorite_albums` (additive union: never
-     * deletes a local favorite). Returns the number of newly-added favorites.
+     * Pull Tidal saved albums into `favorite_albums`, MIRRORING Tidal: ADD
+     * remote-not-local favorites and REMOVE local TIDAL-source favorites gone
+     * from Tidal (via [reconcileFavorites], keyed `TIDAL:<id>`). A null (failed)
+     * fetch reconciles nothing — no add, no delete. Returns the applied reconcile
+     * (its sizes are the adds/removes performed). LOCAL favorites are never touched.
      */
-    suspend fun pullFavoriteAlbums(): Int {
-        val remote = tidal.favoriteAlbums()
-        val fresh = newRemoteFavorites(remote, library.favoriteAlbumKeys().first()) { it.id }
-        fresh.forEach { library.favoriteAlbum(favoriteAlbumEntityFor(it, it.addedAtMillis ?: clock())) }
-        return fresh.size
+    suspend fun pullFavoriteAlbums(): FavoriteReconcile<TidalFavoriteAlbum> {
+        val localKeys = library.favoriteAlbumKeys().first()
+        val reconcile = reconcileFavorites(tidal.favoriteAlbums(), localKeys) { it.id }
+        reconcile.toAdd.forEach { library.favoriteAlbum(favoriteAlbumEntityFor(it, it.addedAtMillis ?: clock())) }
+        reconcile.staleTidalIds.forEach { library.unfavoriteAlbum(Source.TIDAL.name, it) }
+        return reconcile
     }
 
-    /** Pull Tidal followed artists into `favorite_artists` (additive union). Returns the number newly added. */
-    suspend fun pullFavoriteArtists(): Int {
-        val remote = tidal.favoriteArtists()
-        val fresh = newRemoteFavorites(remote, library.favoriteArtistKeys().first()) { it.id }
-        fresh.forEach { library.favoriteArtist(favoriteArtistEntityFor(it, it.addedAtMillis ?: clock())) }
-        return fresh.size
+    /** Pull Tidal followed artists into `favorite_artists`, mirroring Tidal (add + remove). Same contract as [pullFavoriteAlbums]. */
+    suspend fun pullFavoriteArtists(): FavoriteReconcile<TidalFavoriteArtist> {
+        val localKeys = library.favoriteArtistKeys().first()
+        val reconcile = reconcileFavorites(tidal.favoriteArtists(), localKeys) { it.id }
+        reconcile.toAdd.forEach { library.favoriteArtist(favoriteArtistEntityFor(it, it.addedAtMillis ?: clock())) }
+        reconcile.staleTidalIds.forEach { library.unfavoriteArtist(Source.TIDAL.name, it) }
+        return reconcile
     }
 
     /**
-     * Pull Tidal favorite tracks into the EXISTING `tracks`+`favorites` tables
-     * (additive union: never deletes a local favorite). Reuses the pure
-     * [newRemoteFavorites] set-difference (keyed `TIDAL:<sourceId>`), then
-     * favorites each fresh track at its remote `created` millis (falling back to
-     * the clock only when the wrapper carried none). Returns the number newly
-     * added; a re-pull of an already-favorited track is a no-op.
+     * Pull Tidal favorite tracks into the EXISTING `tracks`+`favorites` tables,
+     * mirroring Tidal (add + remove). Adds each fresh track at its remote
+     * `created` millis (falling back to the clock when the wrapper carried none);
+     * removes local TIDAL-source favorite tracks gone from Tidal via
+     * [LibraryRepository.unfavoriteTrack] (drops only the favorite row). Same
+     * null-safe, LOCAL-preserving contract as [pullFavoriteAlbums].
      */
-    suspend fun pullFavoriteTracks(): Int {
-        val remote = tidal.favoriteTracks()
-        val fresh = newRemoteFavorites(remote, library.favoriteKeys().first()) { it.track.sourceId }
-        fresh.forEach { library.favoriteTrack(it.track, it.addedAtMillis ?: clock()) }
-        return fresh.size
+    suspend fun pullFavoriteTracks(): FavoriteReconcile<TidalFavoriteTrack> {
+        val localKeys = library.favoriteKeys().first()
+        val reconcile = reconcileFavorites(tidal.favoriteTracks(), localKeys) { it.track.sourceId }
+        reconcile.toAdd.forEach { library.favoriteTrack(it.track, it.addedAtMillis ?: clock()) }
+        reconcile.staleTidalIds.forEach { library.unfavoriteTrack(Source.TIDAL.name, it) }
+        return reconcile
     }
 
     /**
@@ -87,13 +93,20 @@ class TidalCollectionSync(
         return tracks.size
     }
 
-    /** One pull of all favorite types (playlists are LIST-eager; their tracks lazy). */
-    suspend fun pullAll(): CollectionPullSummary = CollectionPullSummary(
-        albums = pullFavoriteAlbums(),
-        artists = pullFavoriteArtists(),
-        tracks = pullFavoriteTracks(),
-        playlists = pullPlaylists(),
-    )
+    /** One pull of all favorite types (playlists are LIST-eager, additive; the other three mirror Tidal). */
+    suspend fun pullAll(): CollectionPullSummary {
+        val albums = pullFavoriteAlbums()
+        val artists = pullFavoriteArtists()
+        val tracks = pullFavoriteTracks()
+        val playlists = pullPlaylists()
+        return CollectionPullSummary(
+            albums = albums.toAdd.size,
+            artists = artists.toAdd.size,
+            tracks = tracks.toAdd.size,
+            playlists = playlists,
+            removed = albums.staleTidalIds.size + artists.staleTidalIds.size + tracks.staleTidalIds.size,
+        )
+    }
 
     /**
      * Push an album favorite toggle to Tidal. Best-effort and optimistic — the
