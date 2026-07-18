@@ -101,8 +101,8 @@ fun AlbumDetailScreen(
     // to the local group, leaving a non-Tidal album exactly as it is today.
     val displayTracks = detail?.tracks?.takeIf { it.isNotEmpty() } ?: tracks
 
-    // `TidalAlbumDetail.title`/`.artistName` are NON-NULL Strings projected with
-    // `.orEmpty()` (TidalMetadataDetail.kt:278/280), so a `?:` on the nullable
+    // `TidalAlbumDetail.title`/`.artistName` are NON-NULL Strings (projected in
+    // `TidalInternalAlbum.kt`, `artistName` via `.orEmpty()`), so a `?:` on the nullable
     // `detail` alone would NOT guard a document that resolved but carried no
     // usable text — it would blank the header that the local group had filled
     // correctly. That is not hypothetical on this API: the same "linked but

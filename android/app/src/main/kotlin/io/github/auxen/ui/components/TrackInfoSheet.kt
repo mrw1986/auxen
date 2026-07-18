@@ -61,8 +61,8 @@ internal fun TrackInfoSheetContent(detail: TidalTrackDetail?, loading: Boolean) 
             .verticalScroll(rememberScrollState()),
     ) {
         // `?.takeIf { it.isNotBlank() }`, not a bare elvis: TidalTrackDetail.title
-        // is a non-null String projected with `.orEmpty()`
-        // (TidalMetadataDetail.kt:354), so a document whose title attribute is
+        // is a non-null String (projected from `track.title` in
+        // `TidalProvider.trackDetail`), so a title attribute that is
         // absent/blank resolves to "" and a bare elvis would never fire — leaving
         // an EMPTY header instead of the placeholder. Same trap, same fix as the
         // album header (AlbumDetailScreen.kt:111).

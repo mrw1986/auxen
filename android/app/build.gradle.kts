@@ -98,13 +98,6 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.core.splashscreen)
-    // Official Tidal API PKCE login (Tidal official-API migration, Task 1):
-    // Custom Tabs, not an embedded WebView, per RFC 8252 -- see
-    // TidalOfficialAuth.kt's KDoc. Explicitly named as the roll-your-own
-    // mechanism in the task brief (vs. adopting com.tidal.sdk:auth, which
-    // pulls in Dagger + Retrofit -- see the Task 1 report for why that was
-    // rejected).
-    implementation(libs.androidx.browser)
 
     // Animated drag-reorder for the Queue screen's up-next list (github.com/Calvin-LL/Reorderable).
     // 2.5.1 is the latest stable 2.x; it targets Compose 1.7.x, matching this
