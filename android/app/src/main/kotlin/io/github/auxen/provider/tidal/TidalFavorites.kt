@@ -210,6 +210,14 @@ fun <T> List<T>.orNullIfDriftedEmpty(firstPageTotalCount: Int): List<T>? =
  *   deletes so a merely-temporarily-unavailable favorite is never deleted.
  * Adds always proceed (a resolved remote favorite is safe to add regardless);
  * only deletes wait for a fully-trusted read.
+ *
+ * Irreducible residual (MINOR, unreached by internal-v1's accurate totals): the
+ * completeness yardstick is the FIRST page's own total, so a server that BOTH
+ * understates that total AND stops early via a well-formed empty page
+ * mid-collection could still look complete. The [maxItems] cap variant of this
+ * is closed (`reachedNaturalEnd`), but an empty page is structurally
+ * indistinguishable from a legitimate end without independently verifying the
+ * total — which the wire does not let us do.
  */
 suspend fun <T> paginateFavorites(
     pageSize: Int,
