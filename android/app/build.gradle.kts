@@ -7,6 +7,21 @@ plugins {
     alias(libs.plugins.roborazzi)
 }
 
+// Stamp every build with its git identity so an installed APK is uniquely
+// attributable (Settings > About shows versionName). `versionCode` is the git
+// commit count — strictly monotonic, so Android NEVER silently skips an update
+// as it would with a frozen code. `git(...)` is configuration-cache-safe via
+// providers.exec; falls back gracefully outside a git checkout (CI tarball).
+fun git(vararg args: String): String = runCatching {
+    providers.exec {
+        commandLine("git", *args)
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get().trim()
+}.getOrDefault("")
+
+val gitSha = git("rev-parse", "--short=7", "HEAD").ifEmpty { "nogit" }
+val gitCommitCount = git("rev-list", "--count", "HEAD").toIntOrNull() ?: 1
+
 android {
     namespace = "io.github.auxen"
     compileSdk = 35
@@ -15,8 +30,8 @@ android {
         applicationId = "io.github.auxen"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = gitCommitCount
+        versionName = "0.1.0+$gitSha"
 
         // Tidal API credentials are NOT checked into the repo. Put them in
         // ~/.gradle/gradle.properties or android/local.properties.
