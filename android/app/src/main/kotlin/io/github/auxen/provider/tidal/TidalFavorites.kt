@@ -74,13 +74,15 @@ data class FavoritesPage<T>(val items: List<T>, val totalCount: Int, val rawCoun
  * failed, a page didn't strictly decode, or the M1 cross-check fired) or a
  * complete, possibly-empty list on success. [fullyProjected] is only
  * meaningful when [items] is non-null and is the flag the mirror gates DELETES
- * on: `true` only when the read is BOTH COMPLETE (it saw the whole collection —
- * `rawSeen >= firstPageTotalCount`, so a short/capped read that fell short of
- * the server's own total can't delete the un-fetched tail — F1) and LOSSLESS
- * (every raw wrapper projected — `rawSeen == items.size` — C1); `false` when a
- * wrapper failed to project (an unavailable favorite, [FavoritesPage]'s
- * `item == null` case, whose id is UNRECOVERABLE) OR the read stopped short of
- * the total. [paginateFavorites] computes it. The mirror pulls
+ * on: `true` only when the read is BOTH COMPLETE (it paged to the server's EMPTY
+ * page rather than bailing at the [maxItems] cap — so a capped read on a huge
+ * collection can't delete the un-fetched tail) and LOSSLESS (every RETURNED
+ * wrapper projected — `rawSeen == items.size` — C1); `false` when a wrapper
+ * failed to project (an unavailable favorite, [FavoritesPage]'s `item == null`
+ * case, whose id is UNRECOVERABLE) OR the read stopped at the cap. NOTE: the
+ * endpoint returns SHORT non-final pages (dropping un-returnable items), so
+ * completeness is the empty page, NOT `rawSeen == totalNumberOfItems`. See
+ * [paginateFavorites], which computes it. The mirror pulls
  * ([TidalCollectionSync]'s `gatedOnFullProjection`) then let adds proceed
  * regardless (a resolved remote favorite is always safe to add), but skip ALL
  * deletes that cycle unless the read is fully trusted — rather than risk
@@ -186,38 +188,44 @@ fun <T> List<T>.orNullIfDriftedEmpty(firstPageTotalCount: Int): List<T>? =
  * didn't strictly decode — which aborts the whole read to an untrusted
  * [FavoritesFetch] (`items == null`, so the mirror reconciles nothing).
  *
- * Pagination keys off [FavoritesPage.rawCount] (C1): a full page whose raw count
- * equals [pageSize] never ends the loop even if some wrappers failed to project,
- * so an unavailable favorite on a page boundary can't truncate the read.
- * [maxItems] caps the total fetched (a runaway guard).
+ * ⚠️ The internal-v1 favorites endpoints return SHORT NON-FINAL pages: the
+ * server DROPS un-returnable entries (videos, region-locked) from a page's
+ * `items` while still counting them in `totalNumberOfItems`, so a page can carry
+ * FEWER than [pageSize] items even though more remain (probed live 2026-07-19:
+ * tracks total 124 paged as [47, 47, 21, 0]; artists 110 as [49, 50, 10, 0]).
+ * Pagination therefore advances by the OFFSET WINDOW (`offset += pageSize`) and
+ * ends only on an EMPTY page (`rawCount == 0`, i.e. offset past the collection)
+ * or the [maxItems] cap — NEVER on a short page. Breaking on a short page (the
+ * earlier design) truncated the read to the first partial page, which the delete
+ * gate below then read as "incomplete" and so silently stopped mirroring every
+ * removal. `rawSeen` (summed raw wrapper count) is legitimately LESS than
+ * `totalNumberOfItems` here (the dropped items), so it is NOT a completeness
+ * yardstick — the empty page is.
  *
  * [FavoritesFetch.fullyProjected] — the flag the mirror gates DELETES on — is
  * `true` only when the read is BOTH complete and lossless:
- * - COMPLETE (F1): the SERVER ended the list (a short/empty page fired, so
- *   `reachedNaturalEnd`) AND `rawSeen >= firstPageTotalCount`. Requiring BOTH
- *   closes two tail-delete paths: a short-but-not-final page (a server hiccup /
- *   rate-limited partial) fails the count check; and bailing at [maxItems] on an
- *   oversized collection fails `reachedNaturalEnd` — so even an UNDERSTATED
- *   total at the cap (where `rawSeen >= total` would otherwise look complete)
- *   can't trust the read. `>=` (not `==`) because the collection can GROW under
- *   concurrent edits between the first and last page. Termination stays
- *   raw-count driven (C1), never total-driven, so an understated total can only
- *   refuse a delete, never truncate the read. (A collection sized exactly
- *   [maxItems] exits at the cap without a trailing short page, so its deletes
- *   are conservatively suppressed — the safe direction.)
- * - LOSSLESS (C1): `rawSeen == items.size` — every wrapper projected. An
- *   unavailable favorite (its id unrecoverable) makes this false, suppressing
- *   deletes so a merely-temporarily-unavailable favorite is never deleted.
+ * - COMPLETE: the server ended the list with an EMPTY page (`reachedEnd`), so we
+ *   paged the whole offset range. Bailing at the [maxItems] cap leaves it false,
+ *   suppressing deletes rather than wiping an un-fetched tail on a >[maxItems]
+ *   collection. Ending on the empty page (not on `offset >= total`) also makes
+ *   this robust to an UNDERSTATED total — we keep paging until the server itself
+ *   returns empty. (A collection large enough to hit [maxItems] before an empty
+ *   page is conservatively treated as incomplete — the safe direction.)
+ * - LOSSLESS (C1): `rawSeen == items.size` — every RETURNED wrapper projected. A
+ *   null-item wrapper (an unavailable favorite whose id is unrecoverable) makes
+ *   this false, suppressing deletes so a merely-temporarily-unavailable favorite
+ *   is never deleted. (This endpoint DROPS rather than nulls, so in practice
+ *   rawCount == items.size; the guard is defence-in-depth.)
  * Adds always proceed (a resolved remote favorite is safe to add regardless);
  * only deletes wait for a fully-trusted read.
  *
- * Irreducible residual (MINOR, unreached by internal-v1's accurate totals): the
- * completeness yardstick is the FIRST page's own total, so a server that BOTH
- * understates that total AND stops early via a well-formed empty page
- * mid-collection could still look complete. The [maxItems] cap variant of this
- * is closed (`reachedNaturalEnd`), but an empty page is structurally
- * indistinguishable from a legitimate end without independently verifying the
- * total — which the wire does not let us do.
+ * Residuals (MINOR): (a) a genuine mid-collection EMPTY page from a server hiccup
+ * would look like the end and truncate the read — an empty page is structurally
+ * indistinguishable from a true end; the M1 cross-check ([orNullIfDriftedEmpty])
+ * still catches the worst case (page 0 empty while the total is non-zero). (b) a
+ * favorite that transitions to un-returnable (region-lock) BETWEEN syncs — was
+ * fetched+stored before, now dropped from the response — reconciles as removed;
+ * inherent to any mirror that can't tell "gone" from "temporarily hidden".
  */
 suspend fun <T> paginateFavorites(
     pageSize: Int,
@@ -228,24 +236,27 @@ suspend fun <T> paginateFavorites(
     var offset = 0
     var firstPageTotalCount = 0
     var rawSeen = 0
-    var reachedNaturalEnd = false
+    var reachedEnd = false
     while (offset < maxItems) {
         val page = fetchPage(offset) ?: return FavoritesFetch(null, fullyProjected = false)
         if (offset == 0) firstPageTotalCount = page.totalCount
         rawSeen += page.rawCount
         all += page.items
-        if (page.rawCount < pageSize) { reachedNaturalEnd = true; break }
+        // END on an EMPTY page only. A short (< pageSize) page is NORMAL here —
+        // the server drops un-returnable items mid-collection — so breaking on a
+        // short page would truncate the read and (via the delete gate) stop
+        // mirroring removals. The empty page means offset is past the collection.
+        if (page.rawCount == 0) { reachedEnd = true; break }
         offset += pageSize
     }
     val trusted = all.orNullIfDriftedEmpty(firstPageTotalCount)
         ?: return FavoritesFetch(null, fullyProjected = false)
-    // COMPLETE only when the SERVER ended the list (a short/empty page fired) AND
-    // we saw at least its claimed total. Requiring the natural end stops an
-    // understated total at the [maxItems] cap from looking complete and deleting
-    // the un-fetched tail (Finding A); an exactly-cap-sized collection exits at
-    // the cap and is conservatively treated as incomplete (deletes suppressed).
-    val complete = reachedNaturalEnd && rawSeen >= firstPageTotalCount
-    return FavoritesFetch(trusted, fullyProjected = complete && rawSeen == trusted.size)
+    // COMPLETE only when the server ended the list with an empty page (we paged
+    // the whole offset range); bailing at [maxItems] leaves it false and
+    // suppresses deletes. We do NOT require rawSeen >= firstPageTotalCount — this
+    // endpoint returns fewer items than the total (dropped un-returnable entries),
+    // so that check would never pass and would perma-suppress every removal.
+    return FavoritesFetch(trusted, fullyProjected = reachedEnd && rawSeen == trusted.size)
 }
 
 /** Pure projection of a decoded albums page — the tested body shared by the lenient and strict parsers. */

@@ -269,66 +269,88 @@ class TidalFavoritesTest {
     }
 
     // ---- paginateFavorites: the read loop that drives every favorites pull.
-    // Pure (network injected as `fetchPage`), so the data-loss invariants —
-    // raw-count pagination (C1) and full-collection completeness (F1) — are
-    // pinned here rather than only inside the untested suspend provider reads.
+    // Pure (network injected as `fetchPage`). The internal-v1 favorites endpoints
+    // return SHORT NON-FINAL pages (they drop un-returnable items but count them
+    // in the total), so pagination ends on an EMPTY page, not a short one, and
+    // completeness (the DELETE gate) is "reached the empty page", not
+    // "rawSeen == total". These pin that model + the data-loss guards.
 
     @Test
-    fun `C1- a full page with an unavailable favorite still pages to completion`() = runBlocking {
-        // Page 0 carries 50 raw wrappers but one is unavailable, so it PROJECTS
-        // to 49; page 1 has the last 10. Pagination MUST advance past page 0 on
-        // its raw count (50), not its projected size (49) — reverting the loop's
-        // break to `items.size` truncates the read at 49 and fails this.
-        val pages = listOf(
-            FavoritesPage((1..49).toList(), totalCount = 60, rawCount = 50),
-            FavoritesPage((50..59).toList(), totalCount = 60, rawCount = 10),
+    fun `short non-final pages page through to the empty page (regression- Tidal drops items mid-collection)`() = runBlocking {
+        // THE bug: the favorites/tracks endpoint returned [47, 47, 21, 0] for a
+        // 124-total collection (probed live). Breaking on a short page (rawCount <
+        // pageSize) truncated the read to the first 47, which the delete gate then
+        // read as incomplete -> every Tidal-side removal was silently suppressed.
+        // A short page must NOT end the read; only the empty page does.
+        val pages = mapOf(
+            0 to FavoritesPage((1..47).toList(), totalCount = 124, rawCount = 47),
+            50 to FavoritesPage((48..94).toList(), totalCount = 124, rawCount = 47),
+            100 to FavoritesPage((95..115).toList(), totalCount = 124, rawCount = 21),
+            150 to FavoritesPage(emptyList(), totalCount = 124, rawCount = 0),
         )
-        val fetch = paginateFavorites(pageSize = 50, maxItems = 5000) { offset -> pages[offset / 50] }
-        assertEquals(59, fetch.items?.size) // both pages fetched, not truncated at 49
-        assertFalse(fetch.fullyProjected)   // one wrapper never projected -> deletes suppressed
+        val fetch = paginateFavorites(pageSize = 50, maxItems = 5000) { offset -> pages.getValue(offset) }
+        assertEquals(115, fetch.items?.size) // all three partial pages, NOT truncated at 47
+        assertTrue(fetch.fullyProjected)     // empty page reached, all projected -> deletes TRUSTED
     }
 
     @Test
-    fun `F1- a short-but-not-final page below the claimed total is NOT trusted for deletes`() = runBlocking {
-        // The server claims 100 but returns a single short page of 30 (all of
-        // which project). Adds must still flow from what we got, but we fell
-        // short of the total, so deletes must be suppressed — otherwise the 70
-        // un-fetched (oldest) favorites get mirror-deleted.
-        val fetch = paginateFavorites(pageSize = 50, maxItems = 5000) { offset ->
-            if (offset == 0) FavoritesPage((1..30).toList(), totalCount = 100, rawCount = 30) else null
-        }
-        assertEquals(30, fetch.items?.size) // adds proceed
-        assertFalse(fetch.fullyProjected)   // but < total -> no deletes (F1)
+    fun `a null-item wrapper still pages on but suppresses deletes (C1)`() = runBlocking {
+        // A wrapper whose item is null (unavailable, id unrecoverable) drops in
+        // projection: rawCount(50) > items(49). The read still pages to the empty
+        // page, but the lossless check (rawSeen == items) fails, so deletes are
+        // suppressed this cycle rather than risk deleting the unavailable favorite.
+        val pages = mapOf(
+            0 to FavoritesPage((1..49).toList(), totalCount = 60, rawCount = 50),
+            50 to FavoritesPage((50..58).toList(), totalCount = 60, rawCount = 9),
+            100 to FavoritesPage(emptyList(), totalCount = 60, rawCount = 0),
+        )
+        val fetch = paginateFavorites(pageSize = 50, maxItems = 5000) { offset -> pages.getValue(offset) }
+        assertEquals(58, fetch.items?.size)
+        assertFalse(fetch.fullyProjected)   // rawSeen 59 != items 58 -> deletes suppressed
     }
 
     @Test
-    fun `F1- hitting the max cap on an oversized collection suppresses deletes`() = runBlocking {
-        // 120 favorites but the cap only lets us read 100. The 100 we get all
-        // project, yet we never saw favorites 101-120, so deletes must be
-        // suppressed (fullyProjected == false) rather than deleting that tail.
+    fun `a complete read that pages to an empty page is trusted for deletes`() = runBlocking {
+        val pages = mapOf(
+            0 to FavoritesPage((1..50).toList(), totalCount = 80, rawCount = 50),
+            50 to FavoritesPage((51..80).toList(), totalCount = 80, rawCount = 30),
+            100 to FavoritesPage(emptyList(), totalCount = 80, rawCount = 0),
+        )
+        val fetch = paginateFavorites(pageSize = 50, maxItems = 5000) { offset -> pages.getValue(offset) }
+        assertEquals(80, fetch.items?.size)
+        assertTrue(fetch.fullyProjected)
+    }
+
+    @Test
+    fun `hitting the max cap without an empty page suppresses deletes`() = runBlocking {
+        // Full pages all the way to the cap, never an empty page -> incomplete, so
+        // deletes are suppressed rather than wiping the un-fetched tail of a
+        // >maxItems collection. Adds still flow.
         val fetch = paginateFavorites(pageSize = 50, maxItems = 100) { offset ->
-            FavoritesPage((offset + 1..offset + 50).toList(), totalCount = 120, rawCount = 50)
+            FavoritesPage((offset + 1..offset + 50).toList(), totalCount = 300, rawCount = 50)
         }
         assertEquals(100, fetch.items?.size)
         assertFalse(fetch.fullyProjected)
     }
 
     @Test
-    fun `a complete, fully-projected read is trusted for deletes`() = runBlocking {
-        val fetch = paginateFavorites(pageSize = 50, maxItems = 5000) { offset ->
-            when (offset) {
-                0 -> FavoritesPage((1..50).toList(), totalCount = 80, rawCount = 50)
-                50 -> FavoritesPage((51..80).toList(), totalCount = 80, rawCount = 30)
-                else -> null
-            }
-        }
-        assertEquals(80, fetch.items?.size)
-        assertTrue(fetch.fullyProjected) // saw the whole 80 and every wrapper projected
+    fun `an understated total still pages to the empty page, no early stop`() = runBlocking {
+        // The server understates the total to 40, but really returns ~90 items.
+        // Because we page to the EMPTY page (not to offset >= total), we collect
+        // them all and only then trust -- an understated total cannot truncate.
+        val pages = mapOf(
+            0 to FavoritesPage((1..50).toList(), totalCount = 40, rawCount = 50),
+            50 to FavoritesPage((51..90).toList(), totalCount = 40, rawCount = 40),
+            100 to FavoritesPage(emptyList(), totalCount = 40, rawCount = 0),
+        )
+        val fetch = paginateFavorites(pageSize = 50, maxItems = 5000) { offset -> pages.getValue(offset) }
+        assertEquals(90, fetch.items?.size)
+        assertTrue(fetch.fullyProjected)
     }
 
     @Test
     fun `a genuine empty collection is trusted (mirror may delete all)`() = runBlocking {
-        // total 0 == rawSeen 0: a real to-zero, distinct from a failed fetch.
+        // total 0, page 0 empty: a real to-zero, distinct from a failed fetch.
         val fetch = paginateFavorites<Int>(pageSize = 50, maxItems = 5000) { _ ->
             FavoritesPage(emptyList(), totalCount = 0, rawCount = 0)
         }
@@ -337,7 +359,7 @@ class TidalFavoritesTest {
     }
 
     @Test
-    fun `M1- a drifted empty (total says items exist) is untrusted`() = runBlocking {
+    fun `M1- a drifted empty (page 0 empty but total says items exist) is untrusted`() = runBlocking {
         val fetch = paginateFavorites<Int>(pageSize = 50, maxItems = 5000) { _ ->
             FavoritesPage(emptyList(), totalCount = 100, rawCount = 0)
         }
@@ -353,17 +375,14 @@ class TidalFavoritesTest {
     }
 
     @Test
-    fun `F1- an UNDERSTATED total at the max cap is NOT trusted for deletes`() = runBlocking {
-        // The cap (100) is reached via two FULL pages, so no short-page break
-        // fires; the server also understates the total to 80 (<= the 100 we
-        // fetched). Keying completeness on `rawSeen >= total` alone would read
-        // 100 >= 80 as complete and delete the un-fetched tail; requiring a
-        // natural end (a short/empty page) suppresses deletes here.
-        val fetch = paginateFavorites(pageSize = 50, maxItems = 100) { offset ->
-            FavoritesPage((offset + 1..offset + 50).toList(), totalCount = 80, rawCount = 50)
+    fun `a later-page fetch failure aborts the whole read to untrusted`() = runBlocking {
+        // A mid-pagination failure must abort to null (no reconcile), never
+        // silently truncate to what was gathered and trust it for deletes.
+        val fetch = paginateFavorites(pageSize = 50, maxItems = 5000) { offset ->
+            if (offset == 0) FavoritesPage((1..50).toList(), totalCount = 200, rawCount = 50) else null
         }
-        assertEquals(100, fetch.items?.size) // adds still flow
-        assertFalse(fetch.fullyProjected)    // but capped w/o a natural end -> no deletes
+        assertNull(fetch.items)
+        assertFalse(fetch.fullyProjected)
     }
 
     @Test
