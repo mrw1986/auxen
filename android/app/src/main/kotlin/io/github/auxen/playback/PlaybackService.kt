@@ -975,7 +975,9 @@ class PlaybackService : MediaLibraryService() {
                     }
             }
             if (playable.isNotEmpty()) browseQueue.remember(parentId, playable)
-            LibraryResult.ofItemList(ImmutableList.copyOf(children), params)
+            val from = (page.toLong() * pageSize.toLong()).coerceIn(0L, children.size.toLong()).toInt()
+            val pageSlice = children.drop(from).take(pageSize.coerceAtLeast(0))
+            LibraryResult.ofItemList(ImmutableList.copyOf(pageSlice), params)
         }
 
         // Android Auto sends back items carrying only a mediaId. Rebuild each into a

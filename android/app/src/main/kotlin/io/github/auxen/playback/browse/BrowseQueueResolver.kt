@@ -10,6 +10,10 @@ import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
  * from them: [expand] turns a tapped leaf into "its sibling list, starting at it";
  * [resolve] returns the full item for a single id. Not thread-safe on its own;
  * the service confines all access to its session callback thread.
+ *
+ * Sibling-queue expansion is best-effort and last-write-wins: a track served
+ * under multiple browse folders belongs to whichever folder was most recently
+ * [remember]ed, so tapping it plays that folder's siblings.
  */
 class BrowseQueueResolver {
     private val parentToItems = LinkedHashMap<String, List<MediaItem>>()

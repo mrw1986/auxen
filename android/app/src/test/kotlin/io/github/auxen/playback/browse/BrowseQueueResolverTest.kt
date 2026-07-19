@@ -54,4 +54,16 @@ class BrowseQueueResolverTest {
         assertNull(r.expand("TIDAL:2"))
         assertEquals(listOf("TIDAL:9"), r.expand("TIDAL:9")!!.mediaItems.map { it.mediaId })
     }
+
+    @Test fun `a track served under two parents belongs to the most recently remembered`() {
+        val r = BrowseQueueResolver()
+        r.remember("auxen://browse/album/X", listOf(leaf("TIDAL:7"), leaf("TIDAL:8")))
+        r.remember("auxen://browse/favorites", listOf(leaf("TIDAL:1"), leaf("TIDAL:7")))
+        // last remember wins ownership of the shared id
+        val shared = r.expand("TIDAL:7")!!
+        assertEquals(listOf("TIDAL:1", "TIDAL:7"), shared.mediaItems.map { it.mediaId })
+        assertEquals(1, shared.startIndex)
+        // the album-only sibling still resolves under the album's list
+        assertEquals(listOf("TIDAL:7", "TIDAL:8"), r.expand("TIDAL:8")!!.mediaItems.map { it.mediaId })
+    }
 }
