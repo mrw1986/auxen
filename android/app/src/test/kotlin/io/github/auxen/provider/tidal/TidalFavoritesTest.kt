@@ -1,8 +1,10 @@
 package io.github.auxen.provider.tidal
 
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import io.github.auxen.model.Source
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -264,5 +266,89 @@ class TidalFavoritesTest {
         val page = favoriteAlbumsPageOrNull(pageWithOneUnavailable, json)!!
         assertEquals(1, page.items.size) // one wrapper failed to project
         assertEquals(2, page.rawCount) // but BOTH wrappers were on the wire
+    }
+
+    // ---- paginateFavorites: the read loop that drives every favorites pull.
+    // Pure (network injected as `fetchPage`), so the data-loss invariants —
+    // raw-count pagination (C1) and full-collection completeness (F1) — are
+    // pinned here rather than only inside the untested suspend provider reads.
+
+    @Test
+    fun `C1- a full page with an unavailable favorite still pages to completion`() = runBlocking {
+        // Page 0 carries 50 raw wrappers but one is unavailable, so it PROJECTS
+        // to 49; page 1 has the last 10. Pagination MUST advance past page 0 on
+        // its raw count (50), not its projected size (49) — reverting the loop's
+        // break to `items.size` truncates the read at 49 and fails this.
+        val pages = listOf(
+            FavoritesPage((1..49).toList(), totalCount = 60, rawCount = 50),
+            FavoritesPage((50..59).toList(), totalCount = 60, rawCount = 10),
+        )
+        val fetch = paginateFavorites(pageSize = 50, maxItems = 5000) { offset -> pages[offset / 50] }
+        assertEquals(59, fetch.items?.size) // both pages fetched, not truncated at 49
+        assertFalse(fetch.fullyProjected)   // one wrapper never projected -> deletes suppressed
+    }
+
+    @Test
+    fun `F1- a short-but-not-final page below the claimed total is NOT trusted for deletes`() = runBlocking {
+        // The server claims 100 but returns a single short page of 30 (all of
+        // which project). Adds must still flow from what we got, but we fell
+        // short of the total, so deletes must be suppressed — otherwise the 70
+        // un-fetched (oldest) favorites get mirror-deleted.
+        val fetch = paginateFavorites(pageSize = 50, maxItems = 5000) { offset ->
+            if (offset == 0) FavoritesPage((1..30).toList(), totalCount = 100, rawCount = 30) else null
+        }
+        assertEquals(30, fetch.items?.size) // adds proceed
+        assertFalse(fetch.fullyProjected)   // but < total -> no deletes (F1)
+    }
+
+    @Test
+    fun `F1- hitting the max cap on an oversized collection suppresses deletes`() = runBlocking {
+        // 120 favorites but the cap only lets us read 100. The 100 we get all
+        // project, yet we never saw favorites 101-120, so deletes must be
+        // suppressed (fullyProjected == false) rather than deleting that tail.
+        val fetch = paginateFavorites(pageSize = 50, maxItems = 100) { offset ->
+            FavoritesPage((offset + 1..offset + 50).toList(), totalCount = 120, rawCount = 50)
+        }
+        assertEquals(100, fetch.items?.size)
+        assertFalse(fetch.fullyProjected)
+    }
+
+    @Test
+    fun `a complete, fully-projected read is trusted for deletes`() = runBlocking {
+        val fetch = paginateFavorites(pageSize = 50, maxItems = 5000) { offset ->
+            when (offset) {
+                0 -> FavoritesPage((1..50).toList(), totalCount = 80, rawCount = 50)
+                50 -> FavoritesPage((51..80).toList(), totalCount = 80, rawCount = 30)
+                else -> null
+            }
+        }
+        assertEquals(80, fetch.items?.size)
+        assertTrue(fetch.fullyProjected) // saw the whole 80 and every wrapper projected
+    }
+
+    @Test
+    fun `a genuine empty collection is trusted (mirror may delete all)`() = runBlocking {
+        // total 0 == rawSeen 0: a real to-zero, distinct from a failed fetch.
+        val fetch = paginateFavorites<Int>(pageSize = 50, maxItems = 5000) { _ ->
+            FavoritesPage(emptyList(), totalCount = 0, rawCount = 0)
+        }
+        assertEquals(0, fetch.items?.size)
+        assertTrue(fetch.fullyProjected)
+    }
+
+    @Test
+    fun `M1- a drifted empty (total says items exist) is untrusted`() = runBlocking {
+        val fetch = paginateFavorites<Int>(pageSize = 50, maxItems = 5000) { _ ->
+            FavoritesPage(emptyList(), totalCount = 100, rawCount = 0)
+        }
+        assertNull(fetch.items)           // empty but total 100 -> null (no reconcile)
+        assertFalse(fetch.fullyProjected)
+    }
+
+    @Test
+    fun `a first-page fetch failure yields an untrusted null read`() = runBlocking {
+        val fetch = paginateFavorites<Int>(pageSize = 50, maxItems = 5000) { _ -> null }
+        assertNull(fetch.items)
+        assertFalse(fetch.fullyProjected)
     }
 }

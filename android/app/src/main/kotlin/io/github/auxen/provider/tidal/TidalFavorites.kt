@@ -73,15 +73,19 @@ data class FavoritesPage<T>(val items: List<T>, val totalCount: Int, val rawCoun
  * siblings): [items] is `null` on ANY failure (not logged in, a page fetch
  * failed, a page didn't strictly decode, or the M1 cross-check fired) or a
  * complete, possibly-empty list on success. [fullyProjected] is only
- * meaningful when [items] is non-null: `true` when every raw wrapper across
- * every page projected (`rawCount` summed == `items.size`); `false` when at
- * least one wrapper didn't (an unavailable favorite — [FavoritesPage]'s
- * `item == null` case — whose id is UNRECOVERABLE, so it can't be told apart
- * from a genuinely-unfollowed one). The mirror pulls gate deletes on this
- * ([TidalCollectionSync]'s `gatedOnFullProjection`): adds proceed regardless
- * (a resolved remote favorite is always safe to add), but a partial fetch
- * skips ALL deletes that cycle rather than risk deleting an item that's
- * merely temporarily unavailable — closing C1.
+ * meaningful when [items] is non-null and is the flag the mirror gates DELETES
+ * on: `true` only when the read is BOTH COMPLETE (it saw the whole collection —
+ * `rawSeen >= firstPageTotalCount`, so a short/capped read that fell short of
+ * the server's own total can't delete the un-fetched tail — F1) and LOSSLESS
+ * (every raw wrapper projected — `rawSeen == items.size` — C1); `false` when a
+ * wrapper failed to project (an unavailable favorite, [FavoritesPage]'s
+ * `item == null` case, whose id is UNRECOVERABLE) OR the read stopped short of
+ * the total. [paginateFavorites] computes it. The mirror pulls
+ * ([TidalCollectionSync]'s `gatedOnFullProjection`) then let adds proceed
+ * regardless (a resolved remote favorite is always safe to add), but skip ALL
+ * deletes that cycle unless the read is fully trusted — rather than risk
+ * deleting an item that's merely temporarily unavailable or simply not
+ * fetched yet.
  */
 data class FavoritesFetch<T>(val items: List<T>?, val fullyProjected: Boolean)
 
@@ -171,6 +175,58 @@ fun parseIso8601Millis(value: String?): Long? {
  */
 fun <T> List<T>.orNullIfDriftedEmpty(firstPageTotalCount: Int): List<T>? =
     if (isEmpty() && firstPageTotalCount > 0) null else this
+
+/**
+ * The pure favorites read loop (data-loss-critical, so unit-tested independent
+ * of the network). [fetchPage] returns the strictly-decoded [FavoritesPage] for
+ * an offset, or `null` on ANY failure — a page fetch that failed or a body that
+ * didn't strictly decode — which aborts the whole read to an untrusted
+ * [FavoritesFetch] (`items == null`, so the mirror reconciles nothing).
+ *
+ * Pagination keys off [FavoritesPage.rawCount] (C1): a full page whose raw count
+ * equals [pageSize] never ends the loop even if some wrappers failed to project,
+ * so an unavailable favorite on a page boundary can't truncate the read.
+ * [maxItems] caps the total fetched (a runaway guard).
+ *
+ * [FavoritesFetch.fullyProjected] — the flag the mirror gates DELETES on — is
+ * `true` only when the read is BOTH complete and lossless:
+ * - COMPLETE (F1): `rawSeen >= firstPageTotalCount` — we fetched at least as
+ *   many wrappers as the first page's own total claimed. A short-but-not-final
+ *   page (a server hiccup / rate-limited partial) or hitting [maxItems] on an
+ *   oversized collection leaves `rawSeen` below the total, so deletes are
+ *   suppressed rather than deleting the un-fetched DATE-DESC tail. `>=` (not
+ *   `==`) because the collection can GROW under concurrent edits between the
+ *   first and last page. The total only ever LOWERS trust — it never drives
+ *   termination (that is raw-count) — so an understated server total can never
+ *   truncate the read, only refuse a delete it isn't sure of.
+ * - LOSSLESS (C1): `rawSeen == items.size` — every wrapper projected. An
+ *   unavailable favorite (its id unrecoverable) makes this false, suppressing
+ *   deletes so a merely-temporarily-unavailable favorite is never deleted.
+ * Adds always proceed (a resolved remote favorite is safe to add regardless);
+ * only deletes wait for a fully-trusted read.
+ */
+suspend fun <T> paginateFavorites(
+    pageSize: Int,
+    maxItems: Int,
+    fetchPage: suspend (offset: Int) -> FavoritesPage<T>?,
+): FavoritesFetch<T> {
+    val all = mutableListOf<T>()
+    var offset = 0
+    var firstPageTotalCount = 0
+    var rawSeen = 0
+    while (offset < maxItems) {
+        val page = fetchPage(offset) ?: return FavoritesFetch(null, fullyProjected = false)
+        if (offset == 0) firstPageTotalCount = page.totalCount
+        rawSeen += page.rawCount
+        all += page.items
+        if (page.rawCount < pageSize) break
+        offset += pageSize
+    }
+    val trusted = all.orNullIfDriftedEmpty(firstPageTotalCount)
+        ?: return FavoritesFetch(null, fullyProjected = false)
+    val complete = rawSeen >= firstPageTotalCount
+    return FavoritesFetch(trusted, fullyProjected = complete && rawSeen == trusted.size)
+}
 
 /** Pure projection of a decoded albums page — the tested body shared by the lenient and strict parsers. */
 private fun TidalV1FavoriteAlbumsResponse.toFavoriteAlbums(): List<TidalFavoriteAlbum> = items.mapNotNull { wrapper ->

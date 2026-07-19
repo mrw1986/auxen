@@ -433,23 +433,12 @@ class TidalProvider(
     suspend fun favoriteAlbums(): FavoritesFetch<TidalFavoriteAlbum> {
         val token = validToken() ?: return FavoritesFetch(null, fullyProjected = false)
         val uid = userId ?: return FavoritesFetch(null, fullyProjected = false)
-        val all = mutableListOf<TidalFavoriteAlbum>()
-        var offset = 0
-        var firstPageTotalCount = 0
-        var rawSeen = 0
-        while (offset < FAVORITES_MAX) {
+        return paginateFavorites(FAVORITES_PAGE, FAVORITES_MAX) { offset ->
             val url = favoriteAlbumsUrl(API_BASE, uid, countryCode, FAVORITES_PAGE, offset)
             val body = runCatching { get(url.toString(), token) }.getOrNull()
-                ?: return FavoritesFetch(null, fullyProjected = false)
-            val page = favoriteAlbumsPageOrNull(body, json) ?: return FavoritesFetch(null, fullyProjected = false)
-            if (offset == 0) firstPageTotalCount = page.totalCount
-            rawSeen += page.rawCount
-            all += page.items
-            if (page.rawCount < FAVORITES_PAGE) break
-            offset += FAVORITES_PAGE
+                ?: return@paginateFavorites null
+            favoriteAlbumsPageOrNull(body, json)
         }
-        val trusted = all.orNullIfDriftedEmpty(firstPageTotalCount) ?: return FavoritesFetch(null, fullyProjected = false)
-        return FavoritesFetch(trusted, fullyProjected = rawSeen == trusted.size)
     }
 
     /**
@@ -461,23 +450,12 @@ class TidalProvider(
     suspend fun favoriteArtists(): FavoritesFetch<TidalFavoriteArtist> {
         val token = validToken() ?: return FavoritesFetch(null, fullyProjected = false)
         val uid = userId ?: return FavoritesFetch(null, fullyProjected = false)
-        val all = mutableListOf<TidalFavoriteArtist>()
-        var offset = 0
-        var firstPageTotalCount = 0
-        var rawSeen = 0
-        while (offset < FAVORITES_MAX) {
+        return paginateFavorites(FAVORITES_PAGE, FAVORITES_MAX) { offset ->
             val url = favoriteArtistsUrl(API_BASE, uid, countryCode, FAVORITES_PAGE, offset)
             val body = runCatching { get(url.toString(), token) }.getOrNull()
-                ?: return FavoritesFetch(null, fullyProjected = false)
-            val page = favoriteArtistsPageOrNull(body, json) ?: return FavoritesFetch(null, fullyProjected = false)
-            if (offset == 0) firstPageTotalCount = page.totalCount
-            rawSeen += page.rawCount
-            all += page.items
-            if (page.rawCount < FAVORITES_PAGE) break
-            offset += FAVORITES_PAGE
+                ?: return@paginateFavorites null
+            favoriteArtistsPageOrNull(body, json)
         }
-        val trusted = all.orNullIfDriftedEmpty(firstPageTotalCount) ?: return FavoritesFetch(null, fullyProjected = false)
-        return FavoritesFetch(trusted, fullyProjected = rawSeen == trusted.size)
     }
 
     /** Save [albumId] to the user's Tidal collection. Best-effort — false on any failure. */
@@ -525,23 +503,12 @@ class TidalProvider(
     suspend fun favoriteTracks(): FavoritesFetch<TidalFavoriteTrack> {
         val token = validToken() ?: return FavoritesFetch(null, fullyProjected = false)
         val uid = userId ?: return FavoritesFetch(null, fullyProjected = false)
-        val all = mutableListOf<TidalFavoriteTrack>()
-        var offset = 0
-        var firstPageTotalCount = 0
-        var rawSeen = 0
-        while (offset < FAVORITES_MAX) {
+        return paginateFavorites(FAVORITES_PAGE, FAVORITES_MAX) { offset ->
             val url = favoriteTracksUrl(API_BASE, uid, countryCode, FAVORITES_PAGE, offset)
             val body = runCatching { get(url.toString(), token) }.getOrNull()
-                ?: return FavoritesFetch(null, fullyProjected = false)
-            val page = favoriteTracksPageOrNull(body, json) ?: return FavoritesFetch(null, fullyProjected = false)
-            if (offset == 0) firstPageTotalCount = page.totalCount
-            rawSeen += page.rawCount
-            all += page.items
-            if (page.rawCount < FAVORITES_PAGE) break
-            offset += FAVORITES_PAGE
+                ?: return@paginateFavorites null
+            favoriteTracksPageOrNull(body, json)
         }
-        val trusted = all.orNullIfDriftedEmpty(firstPageTotalCount) ?: return FavoritesFetch(null, fullyProjected = false)
-        return FavoritesFetch(trusted, fullyProjected = rawSeen == trusted.size)
     }
 
     /** Save [trackId] to the user's Tidal favorite tracks. Best-effort — false on any failure. */
@@ -685,14 +652,16 @@ class TidalProvider(
         const val ALBUM_ITEMS_PAGE = 100
         const val ALBUM_ITEMS_MAX = 1000
         // favorites paging: 50 matches the desktop page size; MAX bounds a
-        // pathological loop (114 albums / 110 artists are ~3 pages). MUST stay
-        // > 0: the favorites reads' `while (offset < FAVORITES_MAX)` loop runs
-        // at least once only because of that, and their M1/M1-adjacent
-        // null-safety depends on the loop running — a MAX of 0 would skip the
-        // loop entirely, leaving `firstPageTotalCount` at its 0 default and
-        // `all` empty, which `orNullIfDriftedEmpty` would then read as a
-        // TRUSTED genuine-empty (0 > 0 is false) rather than the untested,
-        // untrusted state it actually is.
+        // pathological loop (114 albums / 110 artists are ~3 pages) AND is the
+        // completeness yardstick — a collection larger than MAX reads as
+        // incomplete (rawSeen < total), so deletes are suppressed rather than
+        // wiping the un-fetched tail (F1). MUST stay > 0: `paginateFavorites`'s
+        // `while (offset < maxItems)` loop runs at least once only because of
+        // that; a MAX of 0 would skip the loop, leaving `firstPageTotalCount`
+        // and `rawSeen` at 0 and `all` empty, which reads as a TRUSTED,
+        // fully-projected genuine-empty (0 >= 0 and 0 > 0 is false) — i.e. the
+        // mirror would DELETE EVERY favorite — rather than the untrusted state
+        // an un-run read actually is.
         const val FAVORITES_PAGE = 50
         const val FAVORITES_MAX = 5000
     }
