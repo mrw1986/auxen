@@ -653,15 +653,14 @@ class TidalProvider(
         const val ALBUM_ITEMS_MAX = 1000
         // favorites paging: 50 matches the desktop page size; MAX bounds a
         // pathological loop (114 albums / 110 artists are ~3 pages) AND is the
-        // completeness yardstick — a collection larger than MAX reads as
-        // incomplete (rawSeen < total), so deletes are suppressed rather than
-        // wiping the un-fetched tail (F1). MUST stay > 0: `paginateFavorites`'s
-        // `while (offset < maxItems)` loop runs at least once only because of
-        // that; a MAX of 0 would skip the loop, leaving `firstPageTotalCount`
-        // and `rawSeen` at 0 and `all` empty, which reads as a TRUSTED,
-        // fully-projected genuine-empty (0 >= 0 and 0 > 0 is false) — i.e. the
-        // mirror would DELETE EVERY favorite — rather than the untrusted state
-        // an un-run read actually is.
+        // completeness yardstick — a collection that exits at MAX rather than a
+        // trailing short page reads as incomplete (`paginateFavorites`'s
+        // `reachedNaturalEnd` is false), so deletes are suppressed rather than
+        // wiping the un-fetched tail (F1). MUST stay > 0: that `while (offset <
+        // maxItems)` loop runs at least once only because of it; a MAX of 0
+        // would skip the loop, leaving `firstPageTotalCount`/`rawSeen` at 0,
+        // `reachedNaturalEnd` false and `all` empty — the false read still can't
+        // trust a delete (no natural end), but keep MAX a real page budget.
         const val FAVORITES_PAGE = 50
         const val FAVORITES_MAX = 5000
     }

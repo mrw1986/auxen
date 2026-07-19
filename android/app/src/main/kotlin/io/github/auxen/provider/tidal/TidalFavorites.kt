@@ -167,14 +167,17 @@ fun parseIso8601Millis(value: String?): Long? {
  * should not be; returns the list unchanged otherwise.
  *
  * Provably false-null-safe: a GENUINE empty collection reports
- * `totalNumberOfItems == 0`, so `0 > 0` is false and a trusted `[]` still flows
- * through — the to-zero mirror still works. A legitimate trailing empty page
+ * `totalNumberOfItems == 0`, so `0 != 0` is false and a trusted `[]` still flows
+ * through — the to-zero mirror still works. The check is `!= 0` (not `> 0`) so a
+ * NONSENSICAL total — a negative from a crafted/garbled body — is treated as
+ * drift (untrusted null), never as a genuine empty that would delete-all. A
+ * legitimate trailing empty page
  * (pagination's natural end) only occurs once earlier pages had items, so the
  * accumulated list is already non-empty by then regardless of that page's own
  * total.
  */
 fun <T> List<T>.orNullIfDriftedEmpty(firstPageTotalCount: Int): List<T>? =
-    if (isEmpty() && firstPageTotalCount > 0) null else this
+    if (isEmpty() && firstPageTotalCount != 0) null else this
 
 /**
  * The pure favorites read loop (data-loss-critical, so unit-tested independent
@@ -190,15 +193,18 @@ fun <T> List<T>.orNullIfDriftedEmpty(firstPageTotalCount: Int): List<T>? =
  *
  * [FavoritesFetch.fullyProjected] — the flag the mirror gates DELETES on — is
  * `true` only when the read is BOTH complete and lossless:
- * - COMPLETE (F1): `rawSeen >= firstPageTotalCount` — we fetched at least as
- *   many wrappers as the first page's own total claimed. A short-but-not-final
- *   page (a server hiccup / rate-limited partial) or hitting [maxItems] on an
- *   oversized collection leaves `rawSeen` below the total, so deletes are
- *   suppressed rather than deleting the un-fetched DATE-DESC tail. `>=` (not
- *   `==`) because the collection can GROW under concurrent edits between the
- *   first and last page. The total only ever LOWERS trust — it never drives
- *   termination (that is raw-count) — so an understated server total can never
- *   truncate the read, only refuse a delete it isn't sure of.
+ * - COMPLETE (F1): the SERVER ended the list (a short/empty page fired, so
+ *   `reachedNaturalEnd`) AND `rawSeen >= firstPageTotalCount`. Requiring BOTH
+ *   closes two tail-delete paths: a short-but-not-final page (a server hiccup /
+ *   rate-limited partial) fails the count check; and bailing at [maxItems] on an
+ *   oversized collection fails `reachedNaturalEnd` — so even an UNDERSTATED
+ *   total at the cap (where `rawSeen >= total` would otherwise look complete)
+ *   can't trust the read. `>=` (not `==`) because the collection can GROW under
+ *   concurrent edits between the first and last page. Termination stays
+ *   raw-count driven (C1), never total-driven, so an understated total can only
+ *   refuse a delete, never truncate the read. (A collection sized exactly
+ *   [maxItems] exits at the cap without a trailing short page, so its deletes
+ *   are conservatively suppressed — the safe direction.)
  * - LOSSLESS (C1): `rawSeen == items.size` — every wrapper projected. An
  *   unavailable favorite (its id unrecoverable) makes this false, suppressing
  *   deletes so a merely-temporarily-unavailable favorite is never deleted.
@@ -214,17 +220,23 @@ suspend fun <T> paginateFavorites(
     var offset = 0
     var firstPageTotalCount = 0
     var rawSeen = 0
+    var reachedNaturalEnd = false
     while (offset < maxItems) {
         val page = fetchPage(offset) ?: return FavoritesFetch(null, fullyProjected = false)
         if (offset == 0) firstPageTotalCount = page.totalCount
         rawSeen += page.rawCount
         all += page.items
-        if (page.rawCount < pageSize) break
+        if (page.rawCount < pageSize) { reachedNaturalEnd = true; break }
         offset += pageSize
     }
     val trusted = all.orNullIfDriftedEmpty(firstPageTotalCount)
         ?: return FavoritesFetch(null, fullyProjected = false)
-    val complete = rawSeen >= firstPageTotalCount
+    // COMPLETE only when the SERVER ended the list (a short/empty page fired) AND
+    // we saw at least its claimed total. Requiring the natural end stops an
+    // understated total at the [maxItems] cap from looking complete and deleting
+    // the un-fetched tail (Finding A); an exactly-cap-sized collection exits at
+    // the cap and is conservatively treated as incomplete (deletes suppressed).
+    val complete = reachedNaturalEnd && rawSeen >= firstPageTotalCount
     return FavoritesFetch(trusted, fullyProjected = complete && rawSeen == trusted.size)
 }
 

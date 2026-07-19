@@ -351,4 +351,30 @@ class TidalFavoritesTest {
         assertNull(fetch.items)
         assertFalse(fetch.fullyProjected)
     }
+
+    @Test
+    fun `F1- an UNDERSTATED total at the max cap is NOT trusted for deletes`() = runBlocking {
+        // The cap (100) is reached via two FULL pages, so no short-page break
+        // fires; the server also understates the total to 80 (<= the 100 we
+        // fetched). Keying completeness on `rawSeen >= total` alone would read
+        // 100 >= 80 as complete and delete the un-fetched tail; requiring a
+        // natural end (a short/empty page) suppresses deletes here.
+        val fetch = paginateFavorites(pageSize = 50, maxItems = 100) { offset ->
+            FavoritesPage((offset + 1..offset + 50).toList(), totalCount = 80, rawCount = 50)
+        }
+        assertEquals(100, fetch.items?.size) // adds still flow
+        assertFalse(fetch.fullyProjected)    // but capped w/o a natural end -> no deletes
+    }
+
+    @Test
+    fun `M1- a negative total with empty items is untrusted, not a trusted empty`() = runBlocking {
+        // A crafted/garbled body could report a negative total; an empty items
+        // list with total != 0 must be untrusted (null), never a genuine-empty
+        // that the mirror would act on by deleting every favorite.
+        val fetch = paginateFavorites<Int>(pageSize = 50, maxItems = 5000) { _ ->
+            FavoritesPage(emptyList(), totalCount = -1, rawCount = 0)
+        }
+        assertNull(fetch.items)
+        assertFalse(fetch.fullyProjected)
+    }
 }
