@@ -29,9 +29,13 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
-import androidx.media3.session.MediaSessionService
+import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import io.github.auxen.Graph
@@ -49,6 +53,12 @@ import io.github.auxen.dsp.ReplayGainProcessor
 import io.github.auxen.dsp.ReverbState
 import io.github.auxen.dsp.VirtualizerState
 import io.github.auxen.model.Track
+import io.github.auxen.playback.browse.AuxenBrowseIds
+import io.github.auxen.playback.browse.AuxenBrowseTree
+import io.github.auxen.playback.browse.BrowseFetch
+import io.github.auxen.playback.browse.BrowseQueueResolver
+import io.github.auxen.playback.browse.BrowseTarget
+import io.github.auxen.playback.browse.TidalBrowseFetcher
 import io.github.auxen.provider.StreamInfo
 import io.github.auxen.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
@@ -60,6 +70,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -105,9 +117,12 @@ import kotlinx.coroutines.withContext
  * at the next `onMediaItemTransition` (DSP-b Task 2).
  */
 @UnstableApi
-class PlaybackService : MediaSessionService() {
+class PlaybackService : MediaLibraryService() {
 
-    private var mediaSession: MediaSession? = null
+    private var mediaSession: MediaLibrarySession? = null
+    private val browseTree = AuxenBrowseTree()
+    private val browseQueue = BrowseQueueResolver()
+    private val browseFetcher by lazy { TidalBrowseFetcher(Graph.tidal) }
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainScope = MainScope()
     private var queueSaveJob: Job? = null
@@ -280,9 +295,8 @@ class PlaybackService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
-        mediaSession = MediaSession.Builder(this, player)
+        mediaSession = MediaLibrarySession.Builder(this, player, AuxenSessionCallback())
             .setSessionActivity(sessionActivity)
-            .setCallback(AuxenSessionCallback())
             .build()
 
         setMediaNotificationProvider(
@@ -896,7 +910,7 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    private inner class AuxenSessionCallback : MediaSession.Callback {
+    private inner class AuxenSessionCallback : MediaLibrarySession.Callback {
         override fun onPlaybackResumption(
             mediaSession: MediaSession,
             controller: MediaSession.ControllerInfo,
@@ -918,9 +932,134 @@ class PlaybackService : MediaSessionService() {
             }
             return future
         }
+
+        override fun onGetLibraryRoot(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            params: MediaLibraryService.LibraryParams?,
+        ): ListenableFuture<LibraryResult<MediaItem>> =
+            Futures.immediateFuture(LibraryResult.ofItem(browseTree.root(), params))
+
+        override fun onGetItem(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            mediaId: String,
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            val item = browseTree.item(mediaId) ?: browseQueue.resolve(mediaId)
+            return if (item != null) Futures.immediateFuture(LibraryResult.ofItem(item, null))
+            else Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE))
+        }
+
+        override fun onGetChildren(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            parentId: String,
+            page: Int,
+            pageSize: Int,
+            params: MediaLibraryService.LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = mainScope.future {
+            val children: List<MediaItem> = withContext(Dispatchers.IO) {
+                try {
+                    childrenFor(parentId)
+                } catch (t: Throwable) {
+                    listOf(browseTree.errorNode())
+                }
+            }
+            // Cache the playable leaves of this folder so a tapped item can be
+            // reconstructed and expanded into its sibling queue. Exclude the
+            // "Play all" nodes so they never end up cached as queue tracks.
+            val playable = children.filter {
+                it.mediaMetadata.isPlayable == true &&
+                    AuxenBrowseIds.parse(it.mediaId).let { t ->
+                        t !is BrowseTarget.PlayAllAlbum && t !is BrowseTarget.PlayAllArtist
+                    }
+            }
+            if (playable.isNotEmpty()) browseQueue.remember(parentId, playable)
+            LibraryResult.ofItemList(ImmutableList.copyOf(children), params)
+        }
+
+        // Android Auto sends back items carrying only a mediaId. Rebuild each into a
+        // full playable MediaItem (URI + extras) from the browse-queue cache; drop any
+        // that cannot be resolved.
+        override fun onAddMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: MutableList<MediaItem>,
+        ): ListenableFuture<MutableList<MediaItem>> {
+            val resolved = mediaItems.mapNotNull { item ->
+                if (item.localConfiguration != null) item else browseQueue.resolve(item.mediaId)
+            }.toMutableList()
+            return Futures.immediateFuture(resolved)
+        }
+
+        // When a browse leaf (or "Play all") is chosen, expand to its sibling list so
+        // playback continues from the tapped item to the end of the shown list.
+        override fun onSetMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: MutableList<MediaItem>,
+            startIndex: Int,
+            startPositionMs: Long,
+        ): ListenableFuture<MediaItemsWithStartPosition> {
+            if (mediaItems.size == 1) {
+                val id = mediaItems.single().mediaId
+                // "Play all" -> the parent folder's full list from the top.
+                val playAllExpansion = when (val t = AuxenBrowseIds.parse(id)) {
+                    is BrowseTarget.PlayAllAlbum ->
+                        browseQueue.expandParent(AuxenBrowseIds.album(t.tidalId))
+                    is BrowseTarget.PlayAllArtist ->
+                        browseQueue.expandParent(AuxenBrowseIds.artist(t.tidalId))
+                    else -> null
+                }
+                val expansion = playAllExpansion ?: browseQueue.expand(id)
+                if (expansion != null) return Futures.immediateFuture(expansion)
+            }
+            // Fallback: resolve each id to a full item; keep the requested start.
+            val resolved = mediaItems.mapNotNull { item ->
+                if (item.localConfiguration != null) item else browseQueue.resolve(item.mediaId)
+            }
+            return Futures.immediateFuture(
+                MediaItemsWithStartPosition(
+                    resolved,
+                    startIndex.coerceAtMost(maxOf(0, resolved.size - 1)),
+                    startPositionMs,
+                ),
+            )
+        }
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
+    private suspend fun childrenFor(parentId: String): List<MediaItem> =
+        when (val target = AuxenBrowseIds.parse(parentId)) {
+            BrowseTarget.Root -> browseTree.rootChildren()
+            BrowseTarget.Recent -> browseTree.trackList(Graph.library.recentlyPlayed(limit = 50))
+            BrowseTarget.Favorites -> browseTree.trackList(Graph.library.favorites().first())
+            BrowseTarget.Playlists -> browseTree.playlistCategory(Graph.library.playlists().first())
+            BrowseTarget.Albums -> browseTree.albumCategory(Graph.library.favoriteAlbums().first())
+            BrowseTarget.Artists -> browseTree.artistCategory(Graph.library.favoriteArtists().first())
+            is BrowseTarget.Playlist -> browseTree.trackList(playlistTracksFor(target.id))
+            is BrowseTarget.Album -> when (val f = browseFetcher.albumTracks(target.tidalId)) {
+                is BrowseFetch.Ok -> browseTree.albumDetail(target.tidalId, f.tracks)
+                BrowseFetch.Failed -> listOf(browseTree.errorNode())
+            }
+            is BrowseTarget.Artist -> when (val f = browseFetcher.artistTracks(target.tidalId)) {
+                is BrowseFetch.Ok -> browseTree.artistDetail(target.tidalId, f.tracks)
+                BrowseFetch.Failed -> listOf(browseTree.errorNode())
+            }
+            else -> listOf(browseTree.errorNode())
+        }
+
+    /** Local playlist tracks, importing a Tidal playlist's items on first open
+     *  (mirrors PlayerViewModel.loadPlaylist). */
+    private suspend fun playlistTracksFor(playlistId: Long): List<Track> {
+        val local = runCatching { Graph.library.playlistTracks(playlistId) }.getOrDefault(emptyList())
+        if (local.isNotEmpty()) return local
+        val uuid = Graph.library.playlists().first().firstOrNull { it.id == playlistId }?.tidalPlaylistId
+            ?: return local
+        runCatching { Graph.tidalCollectionSync.importPlaylistTracks(playlistId, uuid) }
+        return runCatching { Graph.library.playlistTracks(playlistId) }.getOrDefault(emptyList())
+    }
+
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = mediaSession
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         val player = mediaSession?.player

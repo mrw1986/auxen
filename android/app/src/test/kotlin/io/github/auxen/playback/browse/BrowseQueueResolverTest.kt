@@ -36,6 +36,15 @@ class BrowseQueueResolverTest {
         assertNull(r.resolve("TIDAL:404"))
     }
 
+    @Test fun `expandParent returns the whole list from the top`() {
+        val r = BrowseQueueResolver()
+        r.remember("auxen://browse/album/111", listOf(leaf("TIDAL:1"), leaf("TIDAL:2")))
+        val out = r.expandParent("auxen://browse/album/111")!!
+        assertEquals(listOf("TIDAL:1", "TIDAL:2"), out.mediaItems.map { it.mediaId })
+        assertEquals(0, out.startIndex)
+        assertNull(r.expandParent("auxen://browse/album/999"))
+    }
+
     @Test fun `re-remembering the same parent replaces its list`() {
         val r = BrowseQueueResolver()
         r.remember("p", listOf(leaf("TIDAL:1"), leaf("TIDAL:2")))

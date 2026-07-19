@@ -40,5 +40,12 @@ class BrowseQueueResolver {
         return MediaItemsWithStartPosition(list, index, 0L)
     }
 
+    /** The full remembered list for a browse folder, from the top; null if unknown. */
+    fun expandParent(parentId: String): MediaItemsWithStartPosition? {
+        val list = parentToItems[parentId] ?: return null
+        if (list.isEmpty()) return null
+        return MediaItemsWithStartPosition(list, 0, 0L)
+    }
+
     fun resolve(mediaId: String): MediaItem? = idToItem[mediaId]
 }
