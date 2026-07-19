@@ -99,10 +99,10 @@ fun CollectionScreen(
     var albumSheet by remember { mutableStateOf<AlbumGroup?>(null) }
     var artistSheet by remember { mutableStateOf<ArtistGroup?>(null) }
 
-    // Auto-pull the user's Tidal saved albums + followed artists on Collection
-    // open. The ViewModel's collectionSynced guard makes it once-per-process and
-    // its isLoggedIn guard makes it a no-op when signed out, so this is not a
-    // launch-time network surprise — it fires only when Collection is entered.
+    // Auto-pull the user's Tidal favorites (albums/artists/tracks/playlists) on
+    // Collection open. The ViewModel throttles it (at most once per THROTTLE_MS,
+    // shared with the app-resume trigger) and its isLoggedIn guard makes it a
+    // no-op when signed out, so this is not a launch-time network surprise.
     LaunchedEffect(Unit) { viewModel.syncFavoritesFromTidal() }
 
     fun matches(track: Track): Boolean = when (filter) {

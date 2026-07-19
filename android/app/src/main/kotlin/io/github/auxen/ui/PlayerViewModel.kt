@@ -2,6 +2,7 @@ package io.github.auxen.ui
 
 import android.app.Application
 import android.content.ComponentName
+import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -149,7 +150,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     val favoriteArtists: StateFlow<List<FavoriteArtistEntity>> = Graph.library.favoriteArtists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private var collectionSynced = false
+    /** elapsedRealtime of the last favorites-sync attempt; the throttle floor. 0 = never synced. */
+    private var lastSyncAtMillis = 0L
     private val _tidalCollectionStatus = MutableStateFlow<String?>(null)
     val tidalCollectionStatus: StateFlow<String?> = _tidalCollectionStatus
 
@@ -621,22 +623,29 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Pull the user's Tidal saved albums + followed artists + favorite tracks
-     * into the local favorite tables, mirroring Tidal (adds new remote
-     * favorites, removes local TIDAL-source favorites gone from Tidal;
-     * playlists stay additive). No-op when not signed in. Guarded to once per
-     * process (the auto-pull-on-Collection-open path passes force = false); the
-     * manual "Sync from Tidal" affordance passes force = true. Idempotent.
+     * Pull the user's Tidal favorites into the local library, MIRRORING Tidal —
+     * additive for new favorites, removing local TIDAL-source favorites the user
+     * un-favorited on Tidal (a failed/untrusted fetch changes nothing; LOCAL-source
+     * favorites are never touched; playlists stay additive). No-op when not signed in.
+     *
+     * Auto-triggered on app resume ([MainActivity.onResume]) and Collection open,
+     * both THROTTLED to at most once per [THROTTLE_MS] so a resume storm never
+     * spams Tidal; the manual "Sync from Tidal" affordance passes [force] = true
+     * to bypass the throttle. The timestamp is stamped on ATTEMPT (not reset on
+     * failure): the time-throttle lets the next trigger retry after [THROTTLE_MS],
+     * and not resetting avoids hammering Tidal during a sustained outage. Runs off
+     * the main thread (viewModelScope).
      */
     fun syncFavoritesFromTidal(force: Boolean = false) {
         if (!Graph.tidal.isLoggedIn) return
-        if (collectionSynced && !force) return
-        collectionSynced = true
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - lastSyncAtMillis < THROTTLE_MS) return
+        lastSyncAtMillis = now
         viewModelScope.launch {
             _tidalCollectionStatus.value = "Syncing favorites from Tidal…"
             _tidalCollectionStatus.value = runCatching { Graph.tidalCollectionSync.pullAll() }.fold(
                 onSuccess = { "Synced +${it.albums} album(s), +${it.artists} artist(s), +${it.tracks} track(s), +${it.playlists} playlist(s), -${it.removed} removed from Tidal." },
-                onFailure = { collectionSynced = false; "Favorites sync failed: ${it.message}" },
+                onFailure = { "Favorites sync failed: ${it.message}" },
             )
         }
     }
@@ -1080,5 +1089,15 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val KEY_MUSIC_FOLDERS = "local_music_folders"
+
+        /**
+         * Minimum spacing between auto favorites-syncs (resume + Collection-open).
+         * 30s: long enough that a resume storm (notification shade, permission
+         * dialog, split-screen focus changes — each fires onResume) doesn't spam
+         * Tidal's paginated favorites endpoints, short enough that a normal
+         * "change in Tidal, back to Auxen" flow reflects immediately. The manual
+         * Sync button (force = true) always bypasses it.
+         */
+        private const val THROTTLE_MS = 30_000L
     }
 }

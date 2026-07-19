@@ -123,6 +123,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Reflect Tidal-side favorite changes when the app returns to the
+        // foreground — the user's chosen trigger over background sync. The pull is
+        // throttled and isLoggedIn-gated inside the VM, so a rapid resume storm is
+        // cheap and a signed-out session is a no-op. This reaches the SAME VM
+        // instance the Compose tree uses (the `viewModel` property above).
+        viewModel.syncFavoritesFromTidal()
+    }
+
     private fun requiredPermissions(): Array<String> = buildList {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             add(Manifest.permission.READ_MEDIA_AUDIO)
