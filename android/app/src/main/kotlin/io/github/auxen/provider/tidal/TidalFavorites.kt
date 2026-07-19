@@ -219,13 +219,14 @@ fun <T> List<T>.orNullIfDriftedEmpty(firstPageTotalCount: Int): List<T>? =
  * Adds always proceed (a resolved remote favorite is safe to add regardless);
  * only deletes wait for a fully-trusted read.
  *
- * Residuals (MINOR): (a) a genuine mid-collection EMPTY page from a server hiccup
- * would look like the end and truncate the read — an empty page is structurally
- * indistinguishable from a true end; the M1 cross-check ([orNullIfDriftedEmpty])
- * still catches the worst case (page 0 empty while the total is non-zero). (b) a
- * favorite that transitions to un-returnable (region-lock) BETWEEN syncs — was
- * fetched+stored before, now dropped from the response — reconciles as removed;
- * inherent to any mirror that can't tell "gone" from "temporarily hidden".
+ * A mid-collection EMPTY page from a server hiccup is rejected as an end by the
+ * `offset >= firstPageTotalCount` gate (a real terminating empty page is always
+ * at an offset past the total), so it suppresses deletes rather than truncating.
+ *
+ * Residual (MINOR): a favorite that transitions to un-returnable (region-lock)
+ * BETWEEN syncs — fetched+stored while available, now dropped from the response —
+ * reconciles as removed; inherent to any mirror that can't tell "gone" from
+ * "temporarily hidden" (and the dropped set isn't enumerable to protect it).
  */
 suspend fun <T> paginateFavorites(
     pageSize: Int,
@@ -242,11 +243,17 @@ suspend fun <T> paginateFavorites(
         if (offset == 0) firstPageTotalCount = page.totalCount
         rawSeen += page.rawCount
         all += page.items
-        // END on an EMPTY page only. A short (< pageSize) page is NORMAL here —
-        // the server drops un-returnable items mid-collection — so breaking on a
-        // short page would truncate the read and (via the delete gate) stop
-        // mirroring removals. The empty page means offset is past the collection.
-        if (page.rawCount == 0) { reachedEnd = true; break }
+        // END on an EMPTY page. A short (< pageSize) page is NORMAL here — the
+        // server drops un-returnable items mid-collection — so breaking on a short
+        // page would truncate the read and (via the delete gate) stop mirroring
+        // removals. Only trust it as the END (`reachedEnd`) when its offset is past
+        // the collection (`offset >= firstPageTotalCount`): a legit terminating
+        // empty page is always at an offset >= total, whereas a mid-collection
+        // HICCUP empty page (a well-formed `{"items":[],...}` at an in-range offset)
+        // is not — trusting it would truncate + delete the un-fetched tail. Keyed
+        // off `offset` (the request window), NOT `rawSeen` (which is < total here
+        // due to drops). An understated total only makes offset exceed it sooner.
+        if (page.rawCount == 0) { reachedEnd = offset >= firstPageTotalCount; break }
         offset += pageSize
     }
     val trusted = all.orNullIfDriftedEmpty(firstPageTotalCount)

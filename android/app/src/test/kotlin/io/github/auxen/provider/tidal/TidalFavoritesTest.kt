@@ -349,6 +349,21 @@ class TidalFavoritesTest {
     }
 
     @Test
+    fun `F-1- a mid-collection empty page (offset below total) is NOT trusted for deletes`() = runBlocking {
+        // A server hiccup returns a well-formed empty page at offset 50 while the
+        // total says 124. Its offset (50) is < total, so it is NOT a real end:
+        // suppress deletes rather than truncate and wipe the un-fetched tail. (A
+        // real terminating empty page always lands at an offset >= total.)
+        val pages = mapOf(
+            0 to FavoritesPage((1..47).toList(), totalCount = 124, rawCount = 47),
+            50 to FavoritesPage(emptyList(), totalCount = 124, rawCount = 0),
+        )
+        val fetch = paginateFavorites(pageSize = 50, maxItems = 5000) { offset -> pages.getValue(offset) }
+        assertEquals(47, fetch.items?.size) // adds still flow from what we got
+        assertFalse(fetch.fullyProjected)   // offset 50 < total 124 -> not a real end -> no deletes
+    }
+
+    @Test
     fun `a genuine empty collection is trusted (mirror may delete all)`() = runBlocking {
         // total 0, page 0 empty: a real to-zero, distinct from a failed fetch.
         val fetch = paginateFavorites<Int>(pageSize = 50, maxItems = 5000) { _ ->
