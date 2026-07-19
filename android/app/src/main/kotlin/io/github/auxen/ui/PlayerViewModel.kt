@@ -32,6 +32,7 @@ import io.github.auxen.model.Source
 import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
 import io.github.auxen.playback.PlaybackService
+import io.github.auxen.playback.isRecoverableDashError
 import io.github.auxen.provider.local.MusicFolder
 import io.github.auxen.provider.local.decodeFolders
 import io.github.auxen.provider.local.encodeFolders
@@ -734,6 +735,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
                 override fun onPlayerError(error: PlaybackException) {
                     Log.e("Auxen", "Playback error", error)
+                    // A Tidal Hi-Res track resolving to a DASH manifest is auto-
+                    // recovered by PlaybackService (swap in the DASH source + re-
+                    // prepare); the track goes on to play, so don't flash a failure
+                    // banner for it. Genuine failures throw a different exception.
+                    if (isRecoverableDashError(error)) return
                     val chain = generateSequence(error as Throwable) { it.cause }
                         .joinToString(" ← ") { t ->
                             t.javaClass.simpleName + (t.message?.let { ": $it" } ?: "")
