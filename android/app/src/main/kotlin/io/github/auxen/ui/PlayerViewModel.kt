@@ -1097,12 +1097,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
         /**
          * Minimum spacing between auto favorites-syncs (resume + Collection-open).
-         * 30s: long enough that a resume storm (notification shade, permission
-         * dialog, split-screen focus changes — each fires onResume) doesn't spam
-         * Tidal's paginated favorites endpoints, short enough that a normal
-         * "change in Tidal, back to Auxen" flow reflects immediately. The manual
-         * Sync button (force = true) always bypasses it.
+         * 3s: just long enough to dedupe the near-simultaneous double-fire (the
+         * Collection-open LaunchedEffect and onResume land within the same frame)
+         * and to absorb a rapid resume flutter (notification shade, permission
+         * dialog), but NOT long enough to swallow the core flow — unfavorite a
+         * track in Tidal, switch back to Auxen (a >3s round trip) — which a longer
+         * window silently threw away. The manual Sync button (force = true) always
+         * bypasses it.
          */
-        private const val THROTTLE_MS = 30_000L
+        private const val THROTTLE_MS = 3_000L
     }
 }
