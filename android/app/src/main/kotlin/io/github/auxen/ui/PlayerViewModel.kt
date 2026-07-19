@@ -150,8 +150,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     val favoriteArtists: StateFlow<List<FavoriteArtistEntity>> = Graph.library.favoriteArtists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /** elapsedRealtime of the last favorites-sync attempt; the throttle floor. 0 = never synced. */
-    private var lastSyncAtMillis = 0L
+    /**
+     * elapsedRealtime of the last favorites-sync attempt; the throttle floor.
+     * Seeded to -THROTTLE_MS (not 0) so the FIRST sync always fires — otherwise a
+     * cold start within THROTTLE_MS of device boot, when elapsedRealtime() is
+     * still < THROTTLE_MS, would throttle the very first auto-sync away.
+     */
+    private var lastSyncAtMillis = -THROTTLE_MS
     private val _tidalCollectionStatus = MutableStateFlow<String?>(null)
     val tidalCollectionStatus: StateFlow<String?> = _tidalCollectionStatus
 
