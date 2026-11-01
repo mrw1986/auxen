@@ -32,17 +32,29 @@ private const val LOCAL_MEDIA_TEMPLATE = "seg_$NUMBER_TOKEN.mp4"
 fun segmentFileName(number: Int): String = LOCAL_MEDIA_TEMPLATE.replace(NUMBER_TOKEN, number.toString())
 
 /** The init URL and every media segment of a DASH track, as (segment number, URL) in play order. */
-data class DashSegmentList(val initUrl: String, val media: List<Pair<Int, String>>)
+data class DashSegmentList(val initUrl: String, val media: List<Pair<Int, String>>) {
+    // The URLs carry tokens, so a logged list shows only its size.
+    override fun toString(): String = "DashSegmentList(media=${media.size} segments)"
+}
 
 /**
- * Decodes Tidal's `data:application/dash+xml;base64,...` stream URI to MPD XML.
+ * Decodes Tidal's `data:application/dash+xml;base64,...` stream URI to MPD XML. Line breaks in
+ * the payload are fine, matching the lenient decoder Media3's streaming path uses.
  *
- * @throws IOException when [uri] isn't a DASH data URI. The message leaves the URI out,
- *   since a progressive stream URI carries a token.
+ * @throws IOException when [uri] isn't a DASH data URI or its payload doesn't decode to
+ *   anything. Messages leave the URI out, since a progressive stream URI carries a token.
  */
 fun decodeDataUriMpd(uri: String): String {
     if (!uri.startsWith(DASH_DATA_URI_PREFIX)) throw IOException("Not a DASH data URI")
-    return String(Base64.getDecoder().decode(uri.substring(DASH_DATA_URI_PREFIX.length)), Charsets.UTF_8)
+    val bytes = try {
+        Base64.getMimeDecoder().decode(uri.substring(DASH_DATA_URI_PREFIX.length))
+    } catch (e: IllegalArgumentException) {
+        // The JDK's messages name the bad character or position, never the input, so chaining is safe.
+        throw IOException("Bad base64 in DASH data URI", e)
+    }
+    // The MIME decoder skips characters outside the alphabet, so garbage can decode to nothing.
+    if (bytes.isEmpty()) throw IOException("Empty DASH data URI")
+    return String(bytes, Charsets.UTF_8)
 }
 
 /**
@@ -54,6 +66,7 @@ fun decodeDataUriMpd(uri: String): String {
 fun parseSegmentList(mpdXml: String): DashSegmentList {
     val template = segmentTemplate(parseMpd(mpdXml))
     val initUrl = template.getAttribute("initialization")
+    require(initUrl.isNotEmpty()) { "The SegmentTemplate has no initialization" }
     require('$' !in initUrl) { "Unsupported identifier in the initialization template" }
     val media = template.getAttribute("media")
     require(NUMBER_TOKEN in media && '$' !in media.replace(NUMBER_TOKEN, "")) {
@@ -69,6 +82,8 @@ fun parseSegmentList(mpdXml: String): DashSegmentList {
  * BaseURL elements go too, or Media3 would resolve the local names against the network.
  */
 fun localizeMpd(mpdXml: String): String {
+    // Same checks as the download path, so an MPD it can't mirror is never rewritten.
+    parseSegmentList(mpdXml)
     val document = parseMpd(mpdXml)
     val template = segmentTemplate(document)
     template.setAttribute("initialization", INIT_FILE)
@@ -144,8 +159,15 @@ private fun parseMpd(xml: String): Document {
         factory.newDocumentBuilder()
             .apply { setErrorHandler(QuietErrorHandler) }
             .parse(InputSource(StringReader(xml)))
+    } catch (e: SAXParseException) {
+        // No cause: Android's KXml puts the current tag's attributes, token URLs included, in the
+        // message, and Xerces echoes entity names. The position is enough to debug.
+        throw IllegalArgumentException("Malformed MPD at ${e.lineNumber}:${e.columnNumber}")
     } catch (e: SAXException) {
-        throw IllegalArgumentException("Malformed MPD", e)
+        throw IllegalArgumentException("Malformed MPD")
+    } catch (e: RuntimeException) {
+        // Android's DocumentBuilderImpl can rethrow a parser RuntimeException unwrapped.
+        throw IllegalArgumentException("Malformed MPD")
     }
 }
 

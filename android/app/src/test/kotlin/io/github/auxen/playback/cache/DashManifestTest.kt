@@ -2,6 +2,7 @@ package io.github.auxen.playback.cache
 
 import java.io.IOException
 import java.util.Base64
+import javax.xml.parsers.DocumentBuilderFactory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -90,6 +91,13 @@ class DashManifestTest {
     }
 
     @Test
+    fun `exactly MAX_SEGMENTS segments are accepted`() {
+        val list = parseSegmentList(mpd(template(timeline = """<S d="1" r="${MAX_SEGMENTS - 1}"/>""")))
+
+        assertEquals(MAX_SEGMENTS, list.media.size)
+    }
+
+    @Test
     fun `empty and oversized timelines are rejected`() {
         assertThrows(IllegalArgumentException::class.java) {
             parseSegmentList(mpd(template(timeline = "")))
@@ -108,7 +116,20 @@ class DashManifestTest {
             parseSegmentList(mpd(template(media = "https://cdn.example/\$RepresentationID\$/\$Number\$.mp4")))
         }
         assertThrows(IllegalArgumentException::class.java) {
+            parseSegmentList(mpd(template(media = "https://cdn.example/\$Bandwidth\$/\$Number\$.mp4")))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            parseSegmentList(mpd(template(media = "https://cdn.example/a/\$Number%05d\$.mp4")))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
             parseSegmentList(mpd(template(initialization = "https://cdn.example/\$RepresentationID\$/0.mp4")))
+        }
+    }
+
+    @Test
+    fun `missing initialization is rejected`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            parseSegmentList(mpd(template(initialization = "")))
         }
     }
 
@@ -130,8 +151,40 @@ class DashManifestTest {
     }
 
     @Test
+    fun `parse errors keep segment URLs out of the exception chain`() {
+        // Android's KXml prints the current tag's attributes into its parse errors, and Xerces
+        // echoes entity names, so a chained cause can carry a token.
+        val truncated = mpd(template(media = "https://cdn.example/a/\$Number\$.mp4?token=SECRET"))
+            .substringBefore("<SegmentTimeline>")
+        val badEntity = mpd(template(media = "https://cdn.example/a/\$Number\$.mp4?p=1&SECRET=x"))
+
+        listOf(truncated, badEntity).forEach { xml ->
+            val error = assertThrows(IllegalArgumentException::class.java) { parseSegmentList(xml) }
+            generateSequence(error as Throwable) { it.cause }.forEach { cause ->
+                assertFalse(cause.toString(), cause.toString().contains("SECRET"))
+            }
+        }
+    }
+
+    @Test
+    fun `segment list toString leaves the URLs out`() {
+        val list = parseSegmentList(tidalFixture)
+
+        assertFalse(list.toString().contains("token="))
+        assertTrue(list.toString().contains("80"))
+    }
+
+    @Test
+    fun `localizing an MPD it can't parse is rejected`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            localizeMpd(mpd(template(media = "https://cdn.example/a/\$Time\$.mp4")))
+        }
+    }
+
+    @Test
     fun `localized MPD points at local file names and keeps the timeline`() {
-        val localized = parseSegmentList(localizeMpd(tidalFixture))
+        val localizedXml = localizeMpd(tidalFixture)
+        val localized = parseSegmentList(localizedXml)
         val spikeProven = parseSegmentList(resource("dash/local_flac/manifest.mpd"))
 
         assertEquals(INIT_FILE, localized.initUrl)
@@ -140,6 +193,13 @@ class DashManifestTest {
         assertTrue(localized.media.all { (number, name) -> name == segmentFileName(number) })
         assertEquals(spikeProven.initUrl, localized.initUrl)
         assertEquals(spikeProven.media.first().second, localized.media.first().second)
+        assertFalse(localizedXml.contains("token="))
+        val root = DocumentBuilderFactory.newInstance()
+            .apply { isNamespaceAware = true }
+            .newDocumentBuilder()
+            .parse(localizedXml.byteInputStream())
+            .documentElement
+        assertEquals("urn:mpeg:dash:schema:mpd:2011", root.namespaceURI)
     }
 
     @Test
@@ -158,10 +218,18 @@ class DashManifestTest {
     @Test
     fun `decodes a base64 data URI`() {
         val xml = "<MPD type=\"static\"/>"
-        val uri = "data:application/dash+xml;base64," +
+        val uri = DATA_URI_PREFIX +
             Base64.getEncoder().encodeToString(xml.toByteArray(Charsets.UTF_8))
 
         assertEquals(xml, decodeDataUriMpd(uri))
+    }
+
+    @Test
+    fun `decodes base64 split across lines`() {
+        val xml = "<MPD type=\"static\"><Period id=\"0\"/></MPD>"
+        val encoded = Base64.getEncoder().encodeToString(xml.toByteArray(Charsets.UTF_8)).chunked(8)
+
+        assertEquals(xml, decodeDataUriMpd(DATA_URI_PREFIX + encoded.joinToString("\n")))
     }
 
     @Test
@@ -169,8 +237,15 @@ class DashManifestTest {
         assertThrows(IOException::class.java) { decodeDataUriMpd("https://x") }
     }
 
+    @Test
+    fun `rejects a data URI whose payload isn't base64`() {
+        assertThrows(IOException::class.java) { decodeDataUriMpd(DATA_URI_PREFIX + "@@@") }
+        assertThrows(IOException::class.java) { decodeDataUriMpd(DATA_URI_PREFIX + "Q") }
+    }
+
     private companion object {
         const val INIT = "https://cdn.example/a/0.mp4?token=x"
         const val MEDIA = "https://cdn.example/a/\$Number\$.mp4?token=x"
+        const val DATA_URI_PREFIX = "data:application/dash+xml;base64,"
     }
 }
