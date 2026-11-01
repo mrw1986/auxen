@@ -8,6 +8,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
@@ -16,11 +17,17 @@ import kotlinx.coroutines.runBlocking
 import okhttp3.Call
 import okhttp3.EventListener
 import okhttp3.Interceptor
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
-import okhttp3.ResponseBody.Companion.toResponseBody
+import okhttp3.ResponseBody
+import okio.Buffer
+import okio.BufferedSource
+import okio.Source
+import okio.Timeout
+import okio.buffer
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -44,13 +51,46 @@ private fun segmentBody(n: Int, token: String) = "segment $n $token ".repeat(n).
 private fun dataUri(mpd: String) =
     "data:application/dash+xml;base64," + Base64.getEncoder().encodeToString(mpd.toByteArray())
 
+/**
+ * A body that reports every read to [onRead] (bytes served so far, and whether this read hit
+ * EOF) and can claim a [contentLength] it doesn't have, as an HTTP/2 stream cut short does.
+ */
+private class FakeBody(
+    private val bytes: ByteArray,
+    private val type: MediaType,
+    private val claimedLength: Long,
+    private val onRead: (served: Long, eof: Boolean) -> Unit,
+) : ResponseBody() {
+    private val source: BufferedSource by lazy {
+        object : Source {
+            private var served = 0
+            override fun read(sink: Buffer, byteCount: Long): Long {
+                val count = minOf(byteCount, (bytes.size - served).toLong()).toInt()
+                if (count == 0) return (-1L).also { onRead(served.toLong(), true) }
+                sink.write(bytes, served, count)
+                served += count
+                onRead(served.toLong(), false)
+                return count.toLong()
+            }
+            override fun timeout(): Timeout = Timeout.NONE
+            override fun close() = Unit
+        }.buffer()
+    }
+
+    override fun contentType(): MediaType = type
+    override fun contentLength(): Long = claimedLength
+    override fun source(): BufferedSource = source
+}
+
 /** Serves canned bodies by URL in place of the network, and records every request in order. */
 private class FakeCdn : Interceptor {
     val requests = CopyOnWriteArrayList<String>()
     var contentType = "application/octet-stream"
     var onRequest: (String) -> Unit = {}
+    var onBodyRead: (url: String, served: Long, eof: Boolean) -> Unit = { _, _, _ -> }
     private val bodies = mutableMapOf<String, ByteArray>()
     private val failures = mutableMapOf<String, MutableList<Int>>()
+    private val claimedLengths = mutableMapOf<String, Long>()
 
     fun serve(url: String, body: ByteArray) {
         bodies[url] = body
@@ -61,19 +101,26 @@ private class FakeCdn : Interceptor {
         failures[url] = codes.toMutableList()
     }
 
+    /** Makes [url]'s body claim [length] bytes, whatever it holds. */
+    fun claimLength(url: String, length: Long) {
+        claimedLengths[url] = length
+    }
+
     override fun intercept(chain: Interceptor.Chain): Response {
         val url = chain.request().url.toString()
         requests += url
         onRequest(url)
         val code = failures[url]?.removeFirstOrNull() ?: if (url in bodies) 200 else 404
-        val body = if (code == 200) bodies.getValue(url) else ByteArray(0)
+        val bytes = if (code == 200) bodies.getValue(url) else ByteArray(0)
+        val length = claimedLengths[url] ?: bytes.size.toLong()
+        val body = FakeBody(bytes, contentType.toMediaType(), length) { served, eof -> onBodyRead(url, served, eof) }
         return Response.Builder()
             .request(chain.request())
             .protocol(Protocol.HTTP_1_1)
             .code(code)
             .message("fake $code")
             .header("Content-Type", contentType)
-            .body(body.toResponseBody(contentType.toMediaType()))
+            .body(body)
             .build()
     }
 }
@@ -81,10 +128,19 @@ private class FakeCdn : Interceptor {
 /** Hands out [first] for a normal resolve and [fresh] for a forced one, recording each call. */
 private class FakeResolver(private val first: StreamInfo, private val fresh: StreamInfo = first) {
     val calls = CopyOnWriteArrayList<Pair<String, Boolean>>()
+    var onResolve: (fresh: Boolean) -> Unit = {}
 
     fun resolve(trackId: String, fresh: Boolean): StreamInfo {
         calls += trackId to fresh
+        onResolve(fresh)
         return if (fresh) this.fresh else first
+    }
+}
+
+/** Records the URL of every call OkHttp reports as cancelled. */
+private fun cancelRecorder(canceled: MutableList<String>) = object : EventListener() {
+    override fun canceled(call: Call) {
+        canceled += call.request().url.toString()
     }
 }
 
@@ -126,6 +182,11 @@ class TrackDownloaderTest {
         val error = runCatching { block() }.exceptionOrNull()
         assertTrue("expected an IOException, got $error", error is IOException)
         return error as IOException
+    }
+
+    private suspend fun assertCancelled(download: Deferred<DownloadResult>) {
+        val outcome = runCatching { download.await() }.exceptionOrNull()
+        assertTrue("expected a plain cancel, got $outcome", outcome is CancellationException)
     }
 
     private suspend fun assertRefreshRejected(fresh: StreamInfo) {
@@ -261,26 +322,147 @@ class TrackDownloaderTest {
         }
         download = async { downloader(FakeResolver(dashInfo()), client(listener)).download(TRACK_ID, into) }
 
-        val outcome = runCatching { download.await() }.exceptionOrNull()
-
-        assertTrue("expected a plain cancel, got $outcome", outcome is CancellationException)
+        assertCancelled(download)
         assertTrue("the in-flight call was not cancelled", sawCallCancel.get())
         assertEquals(listOf(initUrl(), segmentUrl(1), segmentUrl(2)), cdn.requests)
     }
 
     @Test
+    fun `a cancel as a segment finishes makes no further request`() = runBlocking<Unit> {
+        lateinit var download: Deferred<DownloadResult>
+        serveDash("x")
+        cdn.onBodyRead = { url, _, eof -> if (eof && url == segmentUrl(2)) download.cancel() }
+        download = async { downloader(FakeResolver(dashInfo())).download(TRACK_ID, into) }
+
+        assertCancelled(download)
+        assertEquals(listOf(initUrl(), segmentUrl(1), segmentUrl(2)), cdn.requests)
+    }
+
+    @Test
+    fun `a cancel during a re-resolve makes no further request`() = runBlocking<Unit> {
+        lateinit var download: Deferred<DownloadResult>
+        serveDash("x")
+        serveDash("y")
+        cdn.fail(segmentUrl(5), 403)
+        val resolver = FakeResolver(dashInfo(), dashInfo(freshMpd()))
+        // Lands between two parts, outside any call, so only the check before each part catches it.
+        resolver.onResolve = { fresh -> if (fresh) download.cancel() }
+        download = async { downloader(resolver).download(TRACK_ID, into) }
+
+        assertCancelled(download)
+        assertEquals(listOf(initUrl()) + (1..5).map { segmentUrl(it) }, cdn.requests)
+    }
+
+    @Test
+    fun `a cancel mid-file stops reading the body`() = runBlocking<Unit> {
+        lateinit var download: Deferred<DownloadResult>
+        val body = Random(5).nextBytes(1_000_000)
+        val served = AtomicLong()
+        cdn.serve(BTS_URL, body)
+        cdn.onBodyRead = { _, total, _ ->
+            served.set(total)
+            if (total >= 64 * 1024) download.cancel()
+        }
+        download = async { downloader(FakeResolver(StreamInfo(uri = BTS_URL))).download(TRACK_ID, into) }
+
+        assertCancelled(download)
+        assertTrue("read ${served.get()} of ${body.size} bytes", served.get() < body.size)
+    }
+
+    @Test
     fun `a finished download cancels no calls`() = runBlocking<Unit> {
         val canceled = CopyOnWriteArrayList<String>()
-        val listener = object : EventListener() {
-            override fun canceled(call: Call) {
-                canceled += call.request().url.toString()
-            }
-        }
         serveDash("x")
 
-        downloader(FakeResolver(dashInfo()), client(listener)).download(TRACK_ID, into)
+        downloader(FakeResolver(dashInfo()), client(cancelRecorder(canceled))).download(TRACK_ID, into)
 
         assertEquals(emptyList<String>(), canceled)
+    }
+
+    @Test
+    fun `a failed part cancels no calls`() = runBlocking<Unit> {
+        val canceled = CopyOnWriteArrayList<String>()
+        serveDash("x")
+        serveDash("y")
+        cdn.fail(segmentUrl(5), 403)
+        val resolver = FakeResolver(dashInfo(), dashInfo(freshMpd()))
+
+        downloader(resolver, client(cancelRecorder(canceled))).download(TRACK_ID, into)
+
+        assertEquals(emptyList<String>(), canceled)
+    }
+
+    @Test
+    fun `an empty segment fails the download`() = runBlocking<Unit> {
+        serveDash("x")
+        cdn.serve(segmentUrl(5), ByteArray(0))
+
+        val error = expectIoFailure { downloader(FakeResolver(dashInfo())).download(TRACK_ID, into) }
+
+        assertEquals("Empty body for segment 5", error.message)
+        assertEquals(segmentUrl(5), cdn.requests.last())
+    }
+
+    @Test
+    fun `an empty BTS body fails the download`() = runBlocking<Unit> {
+        cdn.serve(BTS_URL, ByteArray(0))
+
+        val error = expectIoFailure { downloader(FakeResolver(StreamInfo(uri = BTS_URL))).download(TRACK_ID, into) }
+
+        assertEquals("Empty body for audio", error.message)
+    }
+
+    @Test
+    fun `a body shorter than its Content-Length fails the download`() = runBlocking<Unit> {
+        serveDash("x")
+        cdn.claimLength(segmentUrl(5), segmentBody(5, "x").size + 100L)
+
+        val error = expectIoFailure { downloader(FakeResolver(dashInfo())).download(TRACK_ID, into) }
+
+        assertEquals("Short body for segment 5", error.message)
+        assertEquals(segmentUrl(5), cdn.requests.last())
+    }
+
+    @Test
+    fun `a 401 mid-DASH re-resolves once and resumes`() = runBlocking<Unit> {
+        serveDash("x")
+        serveDash("y")
+        cdn.fail(segmentUrl(10), 401)
+        val resolver = FakeResolver(dashInfo(), dashInfo(freshMpd()))
+
+        downloader(resolver).download(TRACK_ID, into)
+
+        assertEquals(listOf(TRACK_ID to false, TRACK_ID to true), resolver.calls)
+        val expected = listOf(initUrl()) + (1..10).map { segmentUrl(it) } + (10..SEGMENTS).map { segmentUrl(it, "y") }
+        assertEquals(expected, cdn.requests)
+    }
+
+    @Test
+    fun `a 403 on init re-resolves once and resumes`() = runBlocking<Unit> {
+        serveDash("x")
+        serveDash("y")
+        cdn.fail(initUrl(), 403)
+        val resolver = FakeResolver(dashInfo(), dashInfo(freshMpd()))
+
+        downloader(resolver).download(TRACK_ID, into)
+
+        assertEquals(listOf(TRACK_ID to false, TRACK_ID to true), resolver.calls)
+        assertEquals(listOf(initUrl(), initUrl("y")) + (1..SEGMENTS).map { segmentUrl(it, "y") }, cdn.requests)
+        assertArrayEquals(initBody("y"), File(into, "init.mp4").readBytes())
+    }
+
+    @Test
+    fun `a 410 on a BTS download re-resolves once and retries the file`() = runBlocking<Unit> {
+        val body = Random(4).nextBytes(10_000)
+        cdn.fail(BTS_URL, 410)
+        cdn.serve(FRESH_BTS_URL, body)
+        val resolver = FakeResolver(StreamInfo(uri = BTS_URL), StreamInfo(uri = FRESH_BTS_URL))
+
+        downloader(resolver).download(TRACK_ID, into)
+
+        assertEquals(listOf(TRACK_ID to false, TRACK_ID to true), resolver.calls)
+        assertEquals(listOf(BTS_URL, FRESH_BTS_URL), cdn.requests)
+        assertArrayEquals(body, File(into, "audio").readBytes())
     }
 
     @Test
