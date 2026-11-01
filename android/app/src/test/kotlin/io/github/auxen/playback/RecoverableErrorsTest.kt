@@ -1,10 +1,12 @@
 package io.github.auxen.playback
 
 import androidx.media3.common.PlaybackException
+import androidx.media3.datasource.FileDataSource.FileDataSourceException
 import io.github.auxen.provider.StreamInfo
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.FileNotFoundException
 import java.io.IOException
 
 class RecoverableErrorsTest {
@@ -50,5 +52,29 @@ class RecoverableErrorsTest {
 
     @Test fun `a missing file with no media id is NOT a cache error`() {
         assertFalse(isRecoverableCacheError(PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND, null))
+    }
+
+    private val cacheRoot = "file:///data/no_backup/track_cache/"
+
+    private fun fileNotFound() =
+        FileDataSourceException(FileNotFoundException("gone"), PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND)
+
+    @Test fun `a missing file under the cache root is a missing cache file`() {
+        assertTrue(isMissingCacheFile(fileNotFound(), "${cacheRoot}42/segment-3.mp4", cacheRoot))
+    }
+
+    @Test fun `a missing file nested under a source error is a missing cache file`() {
+        val wrapped = IOException("Source error", fileNotFound())
+        assertTrue(isMissingCacheFile(wrapped, "${cacheRoot}42/manifest.mpd", cacheRoot))
+    }
+
+    @Test fun `a missing local library file is NOT a missing cache file`() {
+        assertFalse(isMissingCacheFile(fileNotFound(), "file:///storage/emulated/0/Music/song.flac", cacheRoot))
+        assertFalse(isMissingCacheFile(fileNotFound(), "auxen://tidal/42", cacheRoot))
+    }
+
+    @Test fun `another error under the cache root is NOT a missing cache file`() {
+        val denied = FileDataSourceException(SecurityException("no"), PlaybackException.ERROR_CODE_IO_NO_PERMISSION)
+        assertFalse(isMissingCacheFile(denied, "${cacheRoot}42/segment-3.mp4", cacheRoot))
     }
 }

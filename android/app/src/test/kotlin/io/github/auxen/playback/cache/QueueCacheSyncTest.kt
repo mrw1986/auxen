@@ -14,6 +14,7 @@ import androidx.media3.test.utils.FakeClock
 import androidx.test.core.app.ApplicationProvider
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -208,6 +209,69 @@ class QueueCacheSyncTest {
         assertEquals(listOf(true, false, false, false), swapsOnly)
         assertEquals(listOf(true, false, false, false, true, true, true), changes)
         assertEquals(listOf("TIDAL:42", "LOCAL:7", "TIDAL:1", "TIDAL:6"), last)
+    }
+
+    @Test
+    fun `swapping the playing item's DASH copy keeps its position`() {
+        player.setMediaItems(listOf(tidal("1"), tidal("42"), tidal("3")), 1, 42_000)
+        player.playWhenReady = true
+
+        assertTrue(swapDashCopies(player, "42", networkDash))
+
+        assertEquals(networkDash, player.uriAt(1))
+        assertEquals(MimeTypes.APPLICATION_MPD, player.getMediaItemAt(1).localConfiguration!!.mimeType)
+        assertEquals("Song 42", player.getMediaItemAt(1).mediaMetadata.title)
+        assertEquals(1, player.currentMediaItemIndex)
+        assertEquals(42_000, player.currentPosition)
+        assertTrue(player.playWhenReady)
+    }
+
+    @Test
+    fun `swapDashCopies only touches unresolved copies of that track`() {
+        val queue = listOf(
+            tidal("42"),
+            tidal("42", networkDash, MimeTypes.APPLICATION_MPD),
+            tidal("1"),
+            tidal("42", dash("42").uri, MimeTypes.APPLICATION_MPD),
+            tidal("420"),
+            local("42"),
+            tidal("42"),
+        )
+        player.setMediaItems(queue, 2, 9_000)
+
+        assertTrue(swapDashCopies(player, "42", networkDash))
+
+        assertEquals(
+            listOf(
+                networkDash,
+                networkDash,
+                "auxen://tidal/1",
+                dash("42").uri,
+                "auxen://tidal/420",
+                "content://media/external/audio/media/42",
+                networkDash,
+            ),
+            player.uris(),
+        )
+        assertEquals(2, player.edits)
+        assertFalse(swapDashCopies(player, "42", networkDash))
+        assertFalse(swapDashCopies(player, "9", networkDash))
+        assertEquals(2, player.edits)
+        assertEquals(2, player.currentMediaItemIndex)
+        assertEquals(9_000, player.currentPosition)
+    }
+
+    @Test
+    fun `a DASH signal is stale once the playing copy has been swapped`() {
+        player.setMediaItems(listOf(tidal("1"), tidal("42"), local("7")), 1, 0)
+        assertFalse(isPlayingResolvedCopy(player, "42"))
+
+        swapDashCopies(player, "42", dash("42").uri)
+
+        assertTrue(isPlayingResolvedCopy(player, "42"))
+        assertFalse(isPlayingResolvedCopy(player, "1"))
+        player.seekTo(2, 0)
+        assertFalse(isPlayingResolvedCopy(player, "7"))
     }
 
     private fun tidal(id: String, uri: String = "auxen://tidal/$id", mimeType: String? = null) =

@@ -12,7 +12,6 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.AuxEffectInfo
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
@@ -26,8 +25,6 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
-import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
@@ -59,10 +56,14 @@ import io.github.auxen.playback.browse.BrowseFetch
 import io.github.auxen.playback.browse.BrowseQueueResolver
 import io.github.auxen.playback.browse.BrowseTarget
 import io.github.auxen.playback.browse.TidalBrowseFetcher
+import io.github.auxen.playback.cache.CacheKind
+import io.github.auxen.playback.cache.CacheRecoveryGate
+import io.github.auxen.playback.cache.isPlayingResolvedCopy
 import io.github.auxen.playback.cache.queueItemUpdate
 import io.github.auxen.playback.cache.queueMediaIds
 import io.github.auxen.playback.cache.reconcileQueueWithCache
 import io.github.auxen.playback.cache.replacePlayingItem
+import io.github.auxen.playback.cache.swapDashCopies
 import io.github.auxen.ui.MainActivity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -152,8 +153,8 @@ class PlaybackService : MediaLibraryService() {
     /** Last expiry-recovery attempt (elapsedRealtime), bounding the 4xx retry path. */
     private var lastExpiryRecoveryAtMillis = 0L
 
-    /** Last missing-cache-file recovery per Tidal id (elapsedRealtime). Main thread only. */
-    private val cacheRecoveryAtMillis = HashMap<String, Long>()
+    /** Bounds missing-cache-file recovery to one attempt per Tidal id per cooldown. Main thread only. */
+    private val cacheRecoveryGate = CacheRecoveryGate(RETRY_COOLDOWN_MILLIS, SystemClock::elapsedRealtime)
 
     /** MediaId awaiting its first actual playback before a play is recorded. */
     private var pendingPlayMediaId: String? = null
@@ -398,7 +399,7 @@ class PlaybackService : MediaLibraryService() {
         return ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(dataSourceFactory)
-                    .setLoadErrorHandlingPolicy(AuxenLoadErrorPolicy()),
+                    .setLoadErrorHandlingPolicy(AuxenLoadErrorPolicy(Graph.trackCache.rootUri)),
             )
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -540,7 +541,9 @@ class PlaybackService : MediaLibraryService() {
                 val dash = findCause<CachedDashStreamException>(error)?.let { it.trackId to it.manifestUri }
                     ?: findCause<TidalDashStreamException>(error)?.let { it.trackId to it.streamInfo.uri }
                 if (dash != null) {
-                    if (!swapDashCopies(currentPlayer, dash.first, dash.second)) return
+                    val swapped = swapDashCopies(currentPlayer, dash.first, dash.second)
+                    // preResolveUpcoming can swap the playing copy between the error and this callback.
+                    if (!swapped && !isPlayingResolvedCopy(currentPlayer, dash.first)) return
                     currentPlayer.prepare()
                     currentPlayer.play()
                     return
@@ -910,10 +913,7 @@ class PlaybackService : MediaLibraryService() {
         val mediaId = player.currentMediaItem?.mediaId
         if (!isRecoverableCacheError(error.errorCode, mediaId) || mediaId == null) return false
         val trackId = mediaId.removePrefix("TIDAL:")
-        val now = SystemClock.elapsedRealtime()
-        val last = cacheRecoveryAtMillis[trackId]
-        if (last != null && now - last < RETRY_COOLDOWN_MILLIS) return false
-        cacheRecoveryAtMillis[trackId] = now
+        if (!cacheRecoveryGate.tryAcquire(trackId)) return false
         mainScope.launch {
             try {
                 Graph.trackCache.evict(listOf(trackId))
@@ -931,30 +931,6 @@ class PlaybackService : MediaLibraryService() {
             p.play()
         }
         return true
-    }
-
-    /**
-     * Swap every still-unresolved (auxen-scheme) copy of the given Tidal track
-     * for its DASH manifest at [mpdUri], a network `data:` manifest or a cached
-     * local one. Returns true if anything was swapped.
-     */
-    private fun swapDashCopies(player: Player, trackId: String, mpdUri: String): Boolean {
-        val targetMediaId = "TIDAL:$trackId"
-        var swapped = false
-        for (i in 0 until player.mediaItemCount) {
-            val queued = player.getMediaItemAt(i)
-            if (queued.mediaId != targetMediaId) continue
-            if (queued.localConfiguration?.uri?.scheme != "auxen") continue
-            player.replaceMediaItem(
-                i,
-                queued.buildUpon()
-                    .setUri(mpdUri)
-                    .setMimeType(MimeTypes.APPLICATION_MPD)
-                    .build(),
-            )
-            swapped = true
-        }
-        return swapped
     }
 
     /**
@@ -977,12 +953,15 @@ class PlaybackService : MediaLibraryService() {
         preResolveJob?.cancel()
         preResolveJob = serviceScope.launch {
             for (id in ids) {
-                // A cached song plays from disk; the cache keeps its queue items up to date.
-                if (Graph.trackCache.cachedPlayback(id) != null) continue
-                val info = runCatching { Graph.resolver.resolve(id) }.getOrNull() ?: continue
-                if (!info.uri.startsWith("data:")) continue
+                // A cached progressive song plays from disk through its auxen URI. A cached DASH
+                // song swaps onto its local manifest here, so it doesn't bounce through onPlayerError.
+                val cached = Graph.trackCache.cachedPlayback(id)
+                if (cached?.kind == CacheKind.PROGRESSIVE) continue
+                val mpdUri = cached?.uri
+                    ?: runCatching { Graph.resolver.resolve(id) }.getOrNull()?.uri?.takeIf { it.startsWith("data:") }
+                    ?: continue
                 withContext(Dispatchers.Main) {
-                    mediaSession?.player?.let { p -> swapDashCopies(p, id, info.uri) }
+                    mediaSession?.player?.let { p -> swapDashCopies(p, id, mpdUri) }
                 }
             }
         }
@@ -1248,16 +1227,6 @@ private inline fun <reified T : Throwable> findCause(error: Throwable): T? {
         cause = cause.cause
     }
     return null
-}
-
-/** Skips load retries for errors that can only be fixed by a media-item swap. */
-@UnstableApi
-private class AuxenLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
-    override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
-        if (findCause<TidalDashStreamException>(loadErrorInfo.exception) != null) return C.TIME_UNSET
-        if (findCause<CachedDashStreamException>(loadErrorInfo.exception) != null) return C.TIME_UNSET
-        return super.getRetryDelayMsFor(loadErrorInfo)
-    }
 }
 
 /**

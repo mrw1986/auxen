@@ -64,6 +64,35 @@ fun replacePlayingItem(player: Player, item: MediaItem) {
 }
 
 /**
+ * Points every unresolved (`auxen`) copy of Tidal [trackId] at the DASH manifest [mpdUri] and
+ * returns whether any changed. Copies already on a manifest are left alone. The playing copy
+ * keeps its position and play state, so a resumed or restored Hi-Res song doesn't restart.
+ */
+fun swapDashCopies(player: Player, trackId: String, mpdUri: String): Boolean {
+    val targetMediaId = TIDAL_PREFIX + trackId
+    var swapped = false
+    for (index in 0 until player.mediaItemCount) {
+        val queued = player.getMediaItemAt(index)
+        if (queued.mediaId != targetMediaId || queued.localConfiguration?.uri?.scheme != "auxen") continue
+        val dash = queued.buildUpon().setUri(mpdUri).setMimeType(MimeTypes.APPLICATION_MPD).build()
+        if (index == player.currentMediaItemIndex) replacePlayingItem(player, dash) else player.replaceMediaItem(index, dash)
+        swapped = true
+    }
+    return swapped
+}
+
+/**
+ * True when the playing item is Tidal [trackId] already on a resolved, non-`auxen` URI. A DASH
+ * signal for it is then stale: [swapDashCopies] ran after the error was raised but before its
+ * callback, so the player only needs preparing again.
+ */
+fun isPlayingResolvedCopy(player: Player, trackId: String): Boolean {
+    val item = player.currentMediaItem ?: return false
+    val scheme = item.localConfiguration?.uri?.scheme ?: return false
+    return item.mediaId == TIDAL_PREFIX + trackId && scheme != "auxen"
+}
+
+/**
  * The queue's media ids in order. Cache swaps keep them, so comparing two of these tells a
  * real queue change from a swap that only fired PLAYLIST_CHANGED.
  */

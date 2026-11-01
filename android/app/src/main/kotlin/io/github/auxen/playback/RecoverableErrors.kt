@@ -1,6 +1,8 @@
 package io.github.auxen.playback
 
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSourceException
 
 /**
  * True when [error]'s cause chain contains a [TidalDashStreamException] — the
@@ -31,3 +33,15 @@ fun isRecoverableDashError(error: Throwable): Boolean =
  */
 fun isRecoverableCacheError(errorCode: Int, mediaId: String?): Boolean =
     errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND && mediaId?.startsWith("TIDAL:") == true
+
+/**
+ * True when a load failed because a file under [cacheRootUri] is gone, like a cached DASH
+ * folder's manifest or segment. Retrying the same file can't help, so the load error policy
+ * skips straight to [PlaybackService]'s missing-file recovery. A cached progressive song loads
+ * through its `auxen` URI, which a retry re-resolves to the network, so it isn't matched here.
+ */
+@UnstableApi
+fun isMissingCacheFile(error: Throwable, uri: String, cacheRootUri: String): Boolean =
+    uri.startsWith(cacheRootUri) &&
+        generateSequence(error as Throwable?) { it.cause }
+            .any { it is DataSourceException && it.reason == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND }
