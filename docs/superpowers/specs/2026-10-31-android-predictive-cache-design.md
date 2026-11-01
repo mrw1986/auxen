@@ -190,3 +190,48 @@ In Android Auto, browse items for cached songs carry the download-status extra, 
 6. Clear cache: the readout goes to zero and the icons disappear.
 7. In airplane mode, play until nothing cached is left. It pauses, then turn airplane mode off within 30 minutes and it resumes on its own. Repeat, waiting more than 30 minutes, and it stays paused.
 8. Do the same over Android Auto (or the DHU) in the car.
+
+## Spike result
+
+Date: 2026-11-01. Decision: **option 1, local DASH.** Media3 1.5.1 prepares and seeks a local DASH folder as is. No upgrade needed.
+
+### The real Tidal Hi-Res MPD
+
+One favorite, fetched with tidalapi 0.8.11, the desktop session and quality `HI_RES_LOSSLESS`.
+
+- Favorites lists report `audio_quality = LOSSLESS` even for Hi-Res tracks. Hi-Res only shows as the `HIRES_LOSSLESS` media tag. The stream call still returns `HI_RES_LOSSLESS`, 24-bit, 96 kHz, as `application/dash+xml`.
+- Static MPD, `isoff-main` profile. One Period, one AdaptationSet, one Representation (`FLAC_HIRES,96000,24`). `mimeType="audio/mp4"`, `codecs="flac"`, `audioSamplingRate="96000"`.
+- `SegmentTemplate`: `timescale="96000"`, `startNumber="1"`, `initialization=".../0.mp4?token=..."`, `media=".../$Number$.mp4?token=..."`. Both are absolute URLs on one CDN host. There's no `BaseURL`.
+- `SegmentTimeline`: two `<S>` elements, `d="380928" r="78"` then `d="150270"`, with no `t`. Count media segments as the sum of `1 + r` per `<S>`: 80 here, 3.968 s each, plus the init. Asking for segment 81 returns 400.
+- Segment URLs carry one query key, `token`. No Policy, Signature, hdnts or exp keys.
+- Init segment: `ftyp` + `moov`, with `mvex/mehd` holding the full duration. Media segments are bare `moof` + `mdat`, with no `styp` or `sidx`. FLAC uses 4096-sample frames. The `fLaC` sample entry's rate field is 0, since 96000 doesn't fit in it. The real rate is in the `dfLa` STREAMINFO.
+- One 5:15 song is about 112 MB.
+
+The scrubbed copy is `android/app/src/test/resources/dash/tidal_hires_manifest.mpd`. Hosts are `cdn.example`, queries are `?token=x`, and the opaque asset id in the path is `ASSET`. Everything else is byte-for-byte.
+
+### Token lifetime
+
+- Right away: the init, first and last segment all returned 200.
+- A full song, downloaded one segment at a time: 81 requests, 112 MB, 37.6 s on this connection. Every request returned 200.
+- The 30-minute re-check is still pending. It writes only status codes and timestamps to `/tmp/claude-1000/-home-mrw1986-Projects-auxen/9f2e2dc1-08c5-469e-a77f-da518bac08ad/scratchpad/dash_recheck_result.txt`. The decision doesn't depend on it, because Task 6 re-resolves on 401/403/410 anyway.
+
+### Playback tests
+
+`LocalDashPlaybackTest` (Robolectric, Media3 1.5.1) runs on `dash/local_flac/`, a synthetic 6 s, 24-bit/96 kHz FLAC fixture built to Tidal's layout: the same MPD elements and attributes, the same box layout, and 4096-sample frames.
+
+1. Local DASH prepares with the full duration: PASS. Duration 5999 ms, seekable.
+2. Local DASH seeks to the middle: PASS. `seekTo(4000)` lands at exactly 4000, and it then plays to the end.
+3. Concatenated fMP4 as progressive: it plays and knows its duration (6000 ms, from `mehd`), but `isCurrentMediaItemSeekable` is false and `seekTo(4000)` lands at 0. With no `sidx`, the extractor has no seek index.
+
+I also ran the same checks once on the real downloaded song, locally and not committed:
+
+- Local DASH: duration 315037 ms, seekable, and `seekTo(310000)` landed at 310000.
+- Concatenated: not seekable, and the seek landed at 0.
+- Pressing play on the real song fails under Robolectric. The pass-through test codec copies the sample entry's 0 Hz into the AudioSink, which rejects it. A real FLAC decoder reads 96 kHz from `dfLa`, and the app already plays these same init segments from the network today. So that's a test harness limit, not a local DASH one. The synthetic fixture keeps ffmpeg's 48000 in that field so the renderer can run.
+
+### What this means for the plan
+
+- Option 1 as planned. Store the init and the numbered segments, and write a local MPD whose `SegmentTemplate` uses relative names (`init.mp4`, `seg_$Number$.mp4`), the way the fixture does.
+- Option 2 is out. Seeking would need a generated `sidx`.
+- Media3 stays on 1.5.1.
+- Real decode of a cached Hi-Res song still needs the on-device check in Validation step 4.

@@ -126,6 +126,10 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    // ExoPlayer test harness (FakeClock, CapturingRenderersFactory, TestPlayerRunHelper)
+    // for the track-cache playback tests.
+    testImplementation(libs.media3.test.utils)
+    testImplementation(libs.media3.test.utils.robolectric)
 
     // Compose UI testing on the JVM (Robolectric). ui-test-junit4 and
     // ui-test-manifest carry no explicit version — the Compose BOM must be
