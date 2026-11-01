@@ -446,6 +446,24 @@ class CacheAheadSchedulerTest {
         assertEquals(1L, index.snapshot.value.entries.getValue("1").lastPlayedAtMillis)
     }
 
+    @Test fun `keeps scheduling after an unexpected error`() = runTest {
+        // evict and commit failures are caught where they happen. A free-space read isn't.
+        var failures = 1
+        val scheduler = CacheAheadScheduler(backgroundScope, index(), downloads::download, settings, network) {
+            if (failures-- > 0) throw IllegalStateException("statfs failed")
+            free
+        }
+        scheduler.update(queue("1", "2"))
+        runCurrent()
+        assertEquals(emptyList<String>(), downloads.calls)
+
+        // That pass was dropped. The next change plans again.
+        network.value = ONLINE_METERED
+        runCurrent()
+
+        assertEquals(listOf("1"), downloads.calls)
+    }
+
     @Test fun `discards the staging when the cache refuses a commit`() = runTest {
         val index = index().apply { refuseCommits = true }
         val scheduler = scheduler(index)

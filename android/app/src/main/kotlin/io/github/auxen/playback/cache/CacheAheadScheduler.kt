@@ -82,7 +82,7 @@ class CacheAheadScheduler(
         // nothing protected, and race load()'s wipe of the staging folders.
         index.awaitLoaded()
         combine(queue, settings, network, index.snapshot, tick) { q, s, n, c, _ -> Inputs(q, s, n, c) }
-            .collect { decide(loopScope, it) }
+            .collect { decideGuarded(loopScope, it) }
     }
 
     fun update(snapshot: CacheQueueSnapshot) {
@@ -92,6 +92,18 @@ class CacheAheadScheduler(
     /** Cancels the in-flight download and every retry. Nothing starts after this. */
     fun stop() {
         loop.cancel()
+    }
+
+    // A pass that throws is logged and dropped. Thrown out of the loop, it would end caching and,
+    // with no handler on the service scope, crash the app. Inputs re-trigger the next pass.
+    private suspend fun decideGuarded(loopScope: CoroutineScope, inputs: Inputs) {
+        try {
+            decide(loopScope, inputs)
+        } catch (e: Exception) {
+            // A real cancel rethrows here. A stray CancellationException while active is a failure.
+            currentCoroutineContext().ensureActive()
+            Log.w(TAG, "A cache-ahead pass failed (${e.javaClass.simpleName})")
+        }
     }
 
     private suspend fun decide(loopScope: CoroutineScope, inputs: Inputs) {
