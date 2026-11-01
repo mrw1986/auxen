@@ -177,16 +177,37 @@ class QueueCacheSyncTest {
     }
 
     @Test
-    fun `cache swaps keep the queue's media ids`() {
-        val stale = tidal("6", dash("6").uri, MimeTypes.APPLICATION_MPD)
-        player.setMediaItems(listOf(tidal("42"), local("7"), tidal("1"), stale, tidal("42")), 2, 0)
-        val before = queueMediaIds(player)
+    fun `only real queue edits change the queue's media ids`() {
+        // Mirrors PlaybackService.lastQueueIds: one entry per PLAYLIST_CHANGED, true when the ids changed.
+        val changes = mutableListOf<Boolean>()
+        var last = emptyList<String>()
+        exo.addListener(object : Player.Listener {
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                if (reason != Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) return
+                val ids = queueMediaIds(exo)
+                changes += ids != last
+                last = ids
+            }
+        })
+        val looper = shadowOf(Looper.getMainLooper())
 
-        reconcileQueueWithCache(player, cache("42" to dash("42")), root)
+        player.setMediaItems(listOf(tidal("42"), local("7"), tidal("1"), tidal("6", dash("6").uri, MimeTypes.APPLICATION_MPD)), 2, 0)
+        looper.idle()
+        reconcileQueueWithCache(player, cache("42" to dash("42")), root) // two swaps: 42 onto the cache, 6 off it
+        looper.idle()
+        replacePlayingItem(player, tidal("1", networkDash, MimeTypes.APPLICATION_MPD)) // a DASH swap of the playing song
+        looper.idle()
+        val swapsOnly = changes.toList()
+        player.addMediaItem(tidal("9"))
+        looper.idle()
+        player.moveMediaItem(4, 0)
+        looper.idle()
+        player.removeMediaItem(0)
+        looper.idle()
 
-        assertEquals(3, player.edits)
-        assertEquals(listOf("TIDAL:42", "LOCAL:7", "TIDAL:1", "TIDAL:6", "TIDAL:42"), before)
-        assertEquals(before, queueMediaIds(player))
+        assertEquals(listOf(true, false, false, false), swapsOnly)
+        assertEquals(listOf(true, false, false, false, true, true, true), changes)
+        assertEquals(listOf("TIDAL:42", "LOCAL:7", "TIDAL:1", "TIDAL:6"), last)
     }
 
     private fun tidal(id: String, uri: String = "auxen://tidal/$id", mimeType: String? = null) =

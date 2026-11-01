@@ -224,7 +224,9 @@ class PlaybackService : MediaLibraryService() {
 
     /**
      * The queue's media ids at the last PLAYLIST_CHANGED. Cache and DASH swaps fire that too but
-     * keep the ids, so only a difference here is a real queue change. Main thread only.
+     * keep the ids, so only a difference here is a real queue change. Every queue set through the
+     * session, the startup restore included, seeds it through that callback; the Bit-Perfect
+     * rebuild seeds it directly. Main thread only.
      */
     private var lastQueueIds: List<String> = emptyList()
 
@@ -681,6 +683,8 @@ class PlaybackService : MediaLibraryService() {
         // thus the notification/controls) survives.
         session.player = newPlayer
         configurePlayer(newPlayer)
+        // setMediaItems ran before the listener was attached, so seed this here.
+        lastQueueIds = queueMediaIds(newPlayer)
 
         // The old player's platform effects were already released inside
         // configurePlayer(newPlayer)'s rebuildSessionEffects (it releases the
