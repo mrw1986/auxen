@@ -81,12 +81,12 @@ class TestApplicationConstants:
         assert APPLICATION_ID == "io.github.auxen.Auxen"
 
     def test_developer_name(self) -> None:
-        assert DEVELOPER_NAME == "mrw1986"
+        assert DEVELOPER_NAME == "Matt Warner"
 
     def test_developers_list(self) -> None:
         assert isinstance(DEVELOPERS, list)
         assert len(DEVELOPERS) >= 2
-        assert "mrw1986" in DEVELOPERS
+        assert "Matt Warner" in DEVELOPERS
 
     def test_artists_is_list(self) -> None:
         assert isinstance(ARTISTS, list)
@@ -95,7 +95,7 @@ class TestApplicationConstants:
         assert "2026" in COPYRIGHT
 
     def test_copyright_contains_author(self) -> None:
-        assert "mrw1986" in COPYRIGHT
+        assert "Matt Warner" in COPYRIGHT
 
     def test_comments_not_empty(self) -> None:
         assert len(COMMENTS) > 0

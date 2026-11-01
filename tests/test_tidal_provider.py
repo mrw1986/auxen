@@ -34,6 +34,7 @@ def _mock_tidal_track(
     track.album = MagicMock()
     track.album.name = album_name
     track.album.cover = "abc-def-123"
+    track.audio_quality = "LOSSLESS"
     track.get_url.return_value = "https://stream.tidal.com/track/123"
     return track
 
