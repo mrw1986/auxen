@@ -4,7 +4,10 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import java.io.IOException
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -62,6 +65,16 @@ class CacheSettingsTest {
     fun `an unknown stored limit falls back to the default`() = runBlocking {
         dataStore.edit { it[CacheSettingsStore.KEY_LIMIT] = 3_000_000_000L }
         assertEquals(DEFAULT_CACHE_LIMIT_BYTES, store.settings.first().limitBytes)
+    }
+
+    @Test
+    fun `a read failure yields the defaults`() = runBlocking {
+        val broken = object : DataStore<Preferences> {
+            override val data: Flow<Preferences> = flow { throw IOException("disk gone") }
+            override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences =
+                throw IOException("disk gone")
+        }
+        assertEquals(CacheSettings(), CacheSettingsStore(broken).settings.first())
     }
 
     @Test

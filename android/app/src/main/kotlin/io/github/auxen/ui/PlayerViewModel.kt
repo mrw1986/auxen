@@ -32,6 +32,9 @@ import io.github.auxen.model.Source
 import io.github.auxen.model.SourcePriority
 import io.github.auxen.model.Track
 import io.github.auxen.playback.PlaybackService
+import io.github.auxen.playback.cache.CacheNetworkMode
+import io.github.auxen.playback.cache.CacheSettings
+import io.github.auxen.playback.cache.formatCacheReadout
 import io.github.auxen.playback.isRecoverableDashError
 import io.github.auxen.provider.local.MusicFolder
 import io.github.auxen.provider.local.decodeFolders
@@ -40,12 +43,14 @@ import io.github.auxen.provider.tidal.ArtistLink
 import io.github.auxen.provider.tidal.TidalAlbumResult
 import io.github.auxen.provider.tidal.TidalSearchResults
 import io.github.auxen.ui.theme.ThemeMode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -250,6 +255,28 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Source-priority tie-break for search-result merging (Settings screen; consumed by [search]). */
     val sourcePriority = MutableStateFlow(SourcePriority.PREFER_QUALITY)
+
+    /** Offline cache network mode and storage limit (Settings screen). */
+    val cacheSettings: StateFlow<CacheSettings> = Graph.cacheSettings.settings
+        .stateIn(viewModelScope, SharingStarted.Eagerly, CacheSettings())
+
+    /** The Settings usage line, e.g. "1.2 GB used · 14 songs". */
+    val cacheReadout: StateFlow<String> = Graph.trackCache.snapshot
+        .map { formatCacheReadout(it.totalBytes, it.count) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, formatCacheReadout(0, 0))
+
+    // runCatching like the other settings writes: a disk or DB error mustn't crash the app.
+    fun setCacheMode(mode: CacheNetworkMode) {
+        viewModelScope.launch { runCatching { Graph.cacheSettings.setMode(mode) } }
+    }
+
+    fun setCacheLimit(bytes: Long) {
+        viewModelScope.launch { runCatching { Graph.cacheSettings.setLimit(bytes) } }
+    }
+
+    fun clearCache() {
+        viewModelScope.launch { runCatching { Graph.trackCache.clear() } }
+    }
 
     // ---- The artist page: ONE internal-v1 read (pages/artist) ----
 
@@ -1089,6 +1116,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         loginJob?.cancel()
         viewModelScope.launch {
             Graph.tidal.logout()
+            // Cached songs belong to the account that's leaving. A disk or DB error here must not block logout.
+            try {
+                Graph.trackCache.clear()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("Auxen", "Couldn't clear the track cache on logout", e)
+            }
             _tidalLogin.value = TidalLoginState.LoggedOut
         }
     }

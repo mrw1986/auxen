@@ -6,6 +6,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
+import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -22,10 +23,15 @@ import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.playback.QueueStateStore
 import io.github.auxen.playback.TrackResolver
+import io.github.auxen.playback.cache.CacheSettingsStore
+import io.github.auxen.playback.cache.ConnectivityNetworkMonitor
+import io.github.auxen.playback.cache.TrackCacheStore
+import io.github.auxen.playback.cache.trackCacheDataStore
 import io.github.auxen.provider.local.LocalProvider
 import io.github.auxen.provider.tidal.TidalAuth
 import io.github.auxen.provider.tidal.TidalCollectionSync
 import io.github.auxen.provider.tidal.TidalProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,6 +40,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -169,6 +176,14 @@ object Graph {
     lateinit var resolver: TrackResolver
         private set
 
+    /** Whole Tidal tracks cached ahead of the queue, for playback without signal. */
+    lateinit var trackCache: TrackCacheStore
+        private set
+    lateinit var cacheSettings: CacheSettingsStore
+        private set
+    lateinit var network: ConnectivityNetworkMonitor
+        private set
+
     fun init(context: Context) {
         httpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
@@ -183,6 +198,20 @@ object Graph {
         queueStore = QueueStateStore(db)
         autoEq = AutoEqRepository(context)
         resolver = TrackResolver(fetch = { id -> tidal.getStreamInfoById(id) })
+        trackCache = TrackCacheStore(File(context.noBackupFilesDir, "track_cache"), db.cachedTrackDao())
+        cacheSettings = CacheSettingsStore(context.trackCacheDataStore)
+        network = ConnectivityNetworkMonitor(context)
+        // Fire-and-forget: the snapshot starts empty and fills once disk and table are reconciled.
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            try {
+                trackCache.load()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The cache is optional; a failed load must not crash startup. Next launch retries.
+                Log.w("Graph", "Couldn't load the track cache", e)
+            }
+        }
     }
 
     /**

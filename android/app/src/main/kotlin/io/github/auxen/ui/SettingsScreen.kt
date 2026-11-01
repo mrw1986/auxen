@@ -45,6 +45,8 @@ import androidx.compose.ui.unit.dp
 import io.github.auxen.BuildConfig
 import io.github.auxen.R
 import io.github.auxen.model.SourcePriority
+import io.github.auxen.playback.cache.CacheNetworkMode
+import io.github.auxen.playback.cache.CacheSettings
 import io.github.auxen.provider.local.MusicFolder
 import io.github.auxen.ui.components.BrandBlock
 import io.github.auxen.ui.theme.ThemeMode
@@ -69,6 +71,8 @@ fun SettingsScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     val bitPerfect by viewModel.bitPerfect.collectAsState()
     val folders by viewModel.musicFolders.collectAsState()
     val selected by viewModel.selectedFolders.collectAsState()
+    val cacheSettings by viewModel.cacheSettings.collectAsState()
+    val cacheReadout by viewModel.cacheReadout.collectAsState()
     var pickerOpen by remember { mutableStateOf(false) }
 
     SettingsContent(
@@ -80,6 +84,11 @@ fun SettingsScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
         onBitPerfectChange = viewModel::setBitPerfect,
         musicFoldersSummary = musicFoldersSummary(selected.size),
         onOpenMusicFolders = { viewModel.loadMusicFolders(); pickerOpen = true },
+        offlineCache = cacheSettings,
+        cacheReadout = cacheReadout,
+        onCacheModeChange = viewModel::setCacheMode,
+        onCacheLimitChange = viewModel::setCacheLimit,
+        onClearCache = viewModel::clearCache,
         modifier = modifier,
     )
 
@@ -104,6 +113,11 @@ internal fun SettingsContent(
     onBitPerfectChange: (Boolean) -> Unit = {},
     musicFoldersSummary: String = "",
     onOpenMusicFolders: () -> Unit = {},
+    offlineCache: CacheSettings = CacheSettings(),
+    cacheReadout: String = "",
+    onCacheModeChange: (CacheNetworkMode) -> Unit = {},
+    onCacheLimitChange: (Long) -> Unit = {},
+    onClearCache: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -160,6 +174,14 @@ internal fun SettingsContent(
                 }
             }
         }
+
+        OfflineCacheSection(
+            settings = offlineCache,
+            readout = cacheReadout,
+            onModeChange = onCacheModeChange,
+            onLimitChange = onCacheLimitChange,
+            onClear = onClearCache,
+        )
 
         SettingsSectionCard(title = stringResource(R.string.settings_about_title)) {
             BrandBlock()
@@ -320,7 +342,7 @@ private fun MusicFoldersDialog(
 
 /** A titled [Card] grouping related settings — the "lighter" sibling of [io.github.auxen.ui.components.FxSectionCard] with no switch/expand affordance, since every group here is always visible. */
 @Composable
-private fun SettingsSectionCard(
+internal fun SettingsSectionCard(
     title: String,
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,

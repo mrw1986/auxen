@@ -2,13 +2,17 @@ package io.github.auxen.playback.cache
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import java.io.IOException
 import java.util.Locale
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
 /** Which networks the track cache may download on. */
@@ -25,12 +29,21 @@ data class CacheSettings(
     val limitBytes: Long = DEFAULT_CACHE_LIMIT_BYTES,
 )
 
-internal val Context.trackCacheDataStore: DataStore<Preferences> by preferencesDataStore(name = "track_cache")
+// A corrupt file resets to defaults rather than failing every read.
+internal val Context.trackCacheDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "track_cache",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
-/** Reads and writes [CacheSettings]. Stored values it doesn't recognize read as the defaults. */
+/**
+ * Reads and writes [CacheSettings]. Stored values it doesn't recognize, and reads that fail
+ * with an IOException, come back as the defaults.
+ */
 class CacheSettingsStore(private val dataStore: DataStore<Preferences>) {
 
-    val settings: Flow<CacheSettings> = dataStore.data.map { prefs ->
+    val settings: Flow<CacheSettings> = dataStore.data.catch {
+        if (it is IOException) emit(emptyPreferences()) else throw it
+    }.map { prefs ->
         val defaults = CacheSettings()
         CacheSettings(
             mode = CacheNetworkMode.entries.firstOrNull { it.name == prefs[KEY_MODE] } ?: defaults.mode,

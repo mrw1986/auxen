@@ -110,6 +110,18 @@
          rather than writing copy that promises unimplemented behavior. -->
     <string name="settings_source_priority_always_ask_desc">Reserved for a future per-track prompt — currently behaves like Prefer local</string>
 
+    <string name="settings_offline_cache_title">Offline cache</string>
+    <string name="settings_cache_over_label">Cache over</string>
+    <string name="settings_cache_mode_wifi_and_mobile">Wi-Fi and mobile data</string>
+    <string name="settings_cache_mode_wifi_only">Wi-Fi only</string>
+    <string name="settings_cache_mode_off">Off</string>
+    <string name="settings_cache_limit_label">Storage limit</string>
+    <string name="settings_cache_clear">Clear cache</string>
+    <string name="settings_cache_clear_confirm_title">Clear cache?</string>
+    <string name="settings_cache_clear_confirm_body">Cached songs will need service to play again.</string>
+    <string name="settings_cache_clear_confirm">Clear</string>
+    <string name="settings_cache_clear_cancel">Cancel</string>
+
     <string name="settings_about_title">About</string>
     <string name="settings_about_version">Version %1$s</string>
     <string name="settings_about_blurb">A premium music player for Tidal streaming and local media.</string>
