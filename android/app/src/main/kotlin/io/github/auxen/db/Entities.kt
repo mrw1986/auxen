@@ -131,3 +131,26 @@ data class SearchHistoryEntity(
     @PrimaryKey val query: String,
     @ColumnInfo(name = "searched_at") val searchedAtMillis: Long,
 )
+
+/**
+ * One row per FULLY cached Tidal track; a row only exists once the files are on
+ * disk, so a partial download is never mistaken for a playable cache.
+ */
+@Entity(tableName = "cached_tracks")
+data class CachedTrackEntity(
+    @PrimaryKey @ColumnInfo(name = "tidal_track_id") val tidalTrackId: String,
+    // CacheKind.name: "PROGRESSIVE" | "DASH"
+    @ColumnInfo(name = "kind") val kind: String,
+    // A .flac/.m4a file, or the local manifest for DASH, inside the track's folder.
+    @ColumnInfo(name = "entry_file") val entryFile: String,
+    @ColumnInfo(name = "size_bytes") val sizeBytes: Long,
+    @ColumnInfo(name = "mime_type") val mimeType: String?,
+    @ColumnInfo(name = "sample_rate_hz") val sampleRateHz: Int?,
+    @ColumnInfo(name = "bit_depth") val bitDepth: Int?,
+    @ColumnInfo(name = "track_gain_db") val trackGainDb: Double?,
+    @ColumnInfo(name = "album_gain_db") val albumGainDb: Double?,
+    @ColumnInfo(name = "cached_at_millis") val cachedAtMillis: Long,
+    @ColumnInfo(name = "last_played_at_millis") val lastPlayedAtMillis: Long?,
+    // Graph.json-encoded Track, so a cached track can be played with no network.
+    @ColumnInfo(name = "track_json") val trackJson: String,
+)

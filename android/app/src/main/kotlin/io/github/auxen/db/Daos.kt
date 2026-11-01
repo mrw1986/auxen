@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -252,4 +253,22 @@ interface SearchHistoryDao {
 
     @Query("DELETE FROM search_history")
     suspend fun clear()
+}
+
+@Dao
+interface CachedTrackDao {
+    @Upsert
+    suspend fun upsert(row: CachedTrackEntity)
+
+    @Query("SELECT * FROM cached_tracks")
+    suspend fun all(): List<CachedTrackEntity>
+
+    @Query("DELETE FROM cached_tracks WHERE tidal_track_id IN (:ids)")
+    suspend fun delete(ids: List<String>)
+
+    @Query("DELETE FROM cached_tracks")
+    suspend fun deleteAll()
+
+    @Query("UPDATE cached_tracks SET last_played_at_millis = :at WHERE tidal_track_id = :id")
+    suspend fun markPlayed(id: String, at: Long)
 }

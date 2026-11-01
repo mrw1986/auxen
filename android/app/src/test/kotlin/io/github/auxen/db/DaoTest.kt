@@ -163,4 +163,53 @@ class DaoTest {
         db.queueDao().replaceAll(listOf(QueueItemEntity(0, "c")))
         assertEquals(listOf("c"), db.queueDao().all().map { it.trackJson })
     }
+
+    // ---------------- cached tracks ----------------
+
+    @Test
+    fun `cached track upsert replaces by id`() = runBlocking {
+        db.cachedTrackDao().upsert(cachedTrack("7", sizeBytes = 100))
+        db.cachedTrackDao().upsert(cachedTrack("7", sizeBytes = 200))
+
+        val row = db.cachedTrackDao().all().single()
+        assertEquals("7", row.tidalTrackId)
+        assertEquals(200L, row.sizeBytes)
+    }
+
+    @Test
+    fun `cached track markPlayed sets last played`() = runBlocking {
+        db.cachedTrackDao().upsert(cachedTrack("7"))
+        assertNull(db.cachedTrackDao().all().single().lastPlayedAtMillis)
+
+        db.cachedTrackDao().markPlayed("7", 123L)
+
+        assertEquals(123L, db.cachedTrackDao().all().single().lastPlayedAtMillis)
+    }
+
+    @Test
+    fun `cached track delete by ids and deleteAll`() = runBlocking {
+        db.cachedTrackDao().upsert(cachedTrack("1"))
+        db.cachedTrackDao().upsert(cachedTrack("2"))
+
+        db.cachedTrackDao().delete(listOf("1"))
+        assertEquals(listOf("2"), db.cachedTrackDao().all().map { it.tidalTrackId })
+
+        db.cachedTrackDao().deleteAll()
+        assertTrue(db.cachedTrackDao().all().isEmpty())
+    }
 }
+
+private fun cachedTrack(id: String, sizeBytes: Long = 1_000) = CachedTrackEntity(
+    tidalTrackId = id,
+    kind = "PROGRESSIVE",
+    entryFile = "track.flac",
+    sizeBytes = sizeBytes,
+    mimeType = "audio/flac",
+    sampleRateHz = 44_100,
+    bitDepth = 16,
+    trackGainDb = -6.5,
+    albumGainDb = null,
+    cachedAtMillis = 1_000,
+    lastPlayedAtMillis = null,
+    trackJson = "{}",
+)

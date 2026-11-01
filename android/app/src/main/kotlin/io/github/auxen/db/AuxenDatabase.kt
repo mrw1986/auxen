@@ -19,8 +19,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SettingEntity::class,
         QueueItemEntity::class,
         SearchHistoryEntity::class,
+        CachedTrackEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AuxenDatabase : RoomDatabase() {
@@ -33,6 +34,7 @@ abstract class AuxenDatabase : RoomDatabase() {
     abstract fun settingsDao(): SettingsDao
     abstract fun queueDao(): QueueDao
     abstract fun searchHistoryDao(): SearchHistoryDao
+    abstract fun cachedTrackDao(): CachedTrackDao
 
     companion object {
         /** On-disk database name — shared with MigrationTest so the two can never drift. */
@@ -88,9 +90,31 @@ abstract class AuxenDatabase : RoomDatabase() {
             }
         }
 
+        /** v3 -> v4: adds the cached_tracks index for the predictive track cache (additive). */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `cached_tracks` (" +
+                        "`tidal_track_id` TEXT NOT NULL, " +
+                        "`kind` TEXT NOT NULL, " +
+                        "`entry_file` TEXT NOT NULL, " +
+                        "`size_bytes` INTEGER NOT NULL, " +
+                        "`mime_type` TEXT, " +
+                        "`sample_rate_hz` INTEGER, " +
+                        "`bit_depth` INTEGER, " +
+                        "`track_gain_db` REAL, " +
+                        "`album_gain_db` REAL, " +
+                        "`cached_at_millis` INTEGER NOT NULL, " +
+                        "`last_played_at_millis` INTEGER, " +
+                        "`track_json` TEXT NOT NULL, " +
+                        "PRIMARY KEY(`tidal_track_id`))",
+                )
+            }
+        }
+
         fun build(context: Context): AuxenDatabase =
             Room.databaseBuilder(context, AuxenDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
     }
 }
