@@ -27,4 +27,16 @@ class ManifestPermissionsTest {
             requested.contains(Manifest.permission.MODIFY_AUDIO_SETTINGS),
         )
     }
+
+    /** The track cache watches the default network; registerDefaultNetworkCallback needs this. */
+    @Test
+    fun `manifest declares ACCESS_NETWORK_STATE`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val info = context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)
+        val requested = info.requestedPermissions?.toList() ?: emptyList()
+        assertTrue(
+            "expected ACCESS_NETWORK_STATE in the manifest, got $requested",
+            requested.contains(Manifest.permission.ACCESS_NETWORK_STATE),
+        )
+    }
 }
