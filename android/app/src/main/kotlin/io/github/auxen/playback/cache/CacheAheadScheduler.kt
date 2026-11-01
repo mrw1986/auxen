@@ -95,8 +95,8 @@ class CacheAheadScheduler(
     }
 
     private suspend fun decide(loopScope: CoroutineScope, inputs: Inputs) {
-        settle(loopScope)
         val queue = inputs.queue
+        settle(loopScope, queue.playingId)
         dropStaleBackoffs(queue)
         val used = inputs.cache.totalBytes
         if (inFlight == null) pool = used + freeDeviceBytes()
@@ -114,15 +114,26 @@ class CacheAheadScheduler(
     }
 
     // Clears a finished download. Success forgets its backoff, failure grows it, cancel leaves it.
-    private suspend fun settle(loopScope: CoroutineScope) {
+    private suspend fun settle(loopScope: CoroutineScope, playingId: String?) {
         val done = inFlight?.takeIf { it.job.isCompleted } ?: return
         inFlight = null
         if (done.job.isCancelled) return
         // Already complete, so this returns at once.
-        if (done.job.await()) {
-            backoffs = backoffs - done.trackId
-        } else {
+        if (!done.job.await()) {
             recordFailure(loopScope, done.trackId)
+            return
+        }
+        backoffs = backoffs - done.trackId
+        // Cached while it played, so it's been heard. Unmarked, it would outlive songs marked played.
+        if (done.trackId == playingId) markPlayedQuietly(done.trackId)
+    }
+
+    private suspend fun markPlayedQuietly(id: String) {
+        try {
+            index.markPlayed(id)
+        } catch (e: Exception) {
+            currentCoroutineContext().ensureActive()
+            Log.w(TAG, "Couldn't mark cached track $id played (${e.javaClass.simpleName})")
         }
     }
 

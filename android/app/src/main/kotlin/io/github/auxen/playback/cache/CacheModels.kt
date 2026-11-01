@@ -63,6 +63,9 @@ interface CacheIndex {
 
     suspend fun evict(trackIds: Collection<String>)
 
+    /** Records that [trackId] played just now, so eviction keeps it longer. No-op if not cached. */
+    suspend fun markPlayed(trackId: String)
+
     /**
      * Returns once the index has been read from disk, or that read failed. Until then
      * [snapshot] is empty, so planning against it would re-fetch songs already cached.

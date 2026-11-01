@@ -75,6 +75,7 @@ private class FakeCacheIndex(
     val commits = mutableListOf<String>()
     val discarded = mutableListOf<File>()
     val evicted = mutableListOf<String>()
+    val played = mutableListOf<String>()
 
     /** Makes commit return false without touching staging, so the scheduler has to clean up. */
     var refuseCommits = false
@@ -98,6 +99,14 @@ private class FakeCacheIndex(
     override suspend fun evict(trackIds: Collection<String>) {
         evicted += trackIds
         state.update { CacheSnapshot(it.entries - trackIds.toSet()) }
+    }
+
+    override suspend fun markPlayed(trackId: String) {
+        played += trackId
+        state.update { snap ->
+            val row = snap.entries[trackId] ?: return@update snap
+            CacheSnapshot(snap.entries + (trackId to row.copy(lastPlayedAtMillis = 1L)))
+        }
     }
 
     override suspend fun awaitLoaded() = loadedSignal.await()
@@ -406,6 +415,22 @@ class CacheAheadSchedulerTest {
         runCurrent()
 
         assertEquals(listOf("2"), downloads.calls)
+    }
+
+    @Test fun `marks the playing song played when its download commits`() = runTest {
+        val index = index()
+        val scheduler = scheduler(index)
+        scheduler.update(queue("1", "2"))
+        runCurrent()
+
+        downloads.finish("1")
+        runCurrent()
+        downloads.finish("2")
+        runCurrent()
+
+        // Song 1 was heard while it downloaded. Song 2 hasn't played yet.
+        assertEquals(listOf("1"), index.played)
+        assertEquals(1L, index.snapshot.value.entries.getValue("1").lastPlayedAtMillis)
     }
 
     @Test fun `discards the staging when the cache refuses a commit`() = runTest {

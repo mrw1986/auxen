@@ -157,7 +157,7 @@ class TrackCacheStore(
         root.listFiles()?.forEach { it.deleteRecursively() }
     }
 
-    suspend fun markPlayed(trackId: String) = locked {
+    override suspend fun markPlayed(trackId: String) = locked {
         if (trackId !in state.value.entries) return@locked
         val at = clock()
         dao.markPlayed(trackId, at)
