@@ -918,6 +918,14 @@ class AuxenApp(Adw.Application):
                     "Failed to record play history", exc_info=True
                 )
 
+        # Tidal tracks from search/explore/mixes have no DB id yet; save
+        # them so play count, history and the now-playing heart work.
+        if self.db is not None and track is not None and track.id is None:
+            try:
+                self.db.ensure_track_id(track)
+            except Exception:
+                logger.warning("Failed to persist played track", exc_info=True)
+
         # Record play in database (updates play_count / last_played_at)
         if self.db is not None and track is not None and track.id is not None:
             try:
