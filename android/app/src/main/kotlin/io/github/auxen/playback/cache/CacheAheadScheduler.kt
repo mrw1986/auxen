@@ -105,12 +105,29 @@ class CacheAheadScheduler(
         val allowed = mayCache(inputs.settings.mode, inputs.network)
         inFlight?.takeIf { !allowed || it.trackId !in window.trackIds }?.job?.cancel()
 
+        val protectedIds = window.trackIds.toSet() + listOfNotNull(queue.playingId)
         val next = window.toDownload
             .firstOrNull { isReady(it.trackId) }
             ?.takeIf { inFlight == null && allowed && queue.active }
+            ?.takeIf { fitsOnceEvicted(inputs.cache, protectedIds, it, capacity) }
         val bytesToFree = used + (next?.estimatedBytes ?: 0L) - capacity
-        val usedAfter = evictForRoom(inputs.cache, window, queue.playingId, bytesToFree)
+        val usedAfter = evictForRoom(inputs.cache, protectedIds, bytesToFree)
         if (next != null && usedAfter + next.estimatedBytes <= capacity) start(loopScope, next)
+    }
+
+    /**
+     * Whether [next] fits beside the songs that can't be evicted. When it doesn't, evicting the
+     * rest would empty the cache and still not make room. That only happens when the playing
+     * song is cached but outside the window, since the window itself always fits.
+     */
+    private fun fitsOnceEvicted(
+        cache: CacheSnapshot,
+        protectedIds: Set<String>,
+        next: CacheCandidate,
+        capacity: Long,
+    ): Boolean {
+        val kept = cache.entries.values.sumOf { if (it.tidalTrackId in protectedIds) it.sizeBytes else 0L }
+        return kept + next.estimatedBytes <= capacity
     }
 
     // Clears a finished download. Success forgets its backoff, failure grows it, cancel leaves it.
@@ -157,18 +174,12 @@ class CacheAheadScheduler(
     private fun isReady(trackId: String): Boolean = backoffs[trackId]?.timer?.isCompleted ?: true
 
     /**
-     * Deletes cached songs outside the window, never the playing one, until [bytesToFree] is
-     * freed or nothing else may go. Returns the bytes still cached afterwards.
+     * Deletes cached songs outside [protectedIds] (the window and the playing song) until
+     * [bytesToFree] is freed or nothing else may go. Returns the bytes still cached afterwards.
      */
-    private suspend fun evictForRoom(
-        cache: CacheSnapshot,
-        window: CacheWindow,
-        playingId: String?,
-        bytesToFree: Long,
-    ): Long {
+    private suspend fun evictForRoom(cache: CacheSnapshot, protectedIds: Set<String>, bytesToFree: Long): Long {
         val used = cache.totalBytes
         if (bytesToFree <= 0L) return used
-        val protectedIds = window.trackIds.toSet() + listOfNotNull(playingId)
         val victims = pickEvictions(cache.entries.values, protectedIds, bytesToFree)
         if (victims.isEmpty()) return used
         try {

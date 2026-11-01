@@ -323,6 +323,19 @@ class CacheAheadSchedulerTest {
         assertEquals(emptyList<String>(), downloads.calls)
     }
 
+    @Test fun `does not evict anything for a song that still would not fit`() = runTest {
+        // The playing song isn't a candidate (its Track didn't decode), but it stays protected.
+        val index = index(row("playing", 600), row("old", 300, lastPlayedAtMillis = 10))
+        val scheduler = scheduler(index)
+
+        // 900 cached + 500 for song 2 is 400 over the limit, and only "old" (300) may go.
+        scheduler.update(queue("2", estimate = 500).copy(playingId = "playing"))
+        runCurrent()
+
+        assertEquals(emptyList<String>(), index.evicted)
+        assertEquals(emptyList<String>(), downloads.calls)
+    }
+
     @Test fun `a failed song backs off 30 s while later songs continue`() = runTest {
         val index = index()
         val scheduler = scheduler(index)
