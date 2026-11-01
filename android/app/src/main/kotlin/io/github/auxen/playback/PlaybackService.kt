@@ -56,9 +56,14 @@ import io.github.auxen.playback.browse.BrowseFetch
 import io.github.auxen.playback.browse.BrowseQueueResolver
 import io.github.auxen.playback.browse.BrowseTarget
 import io.github.auxen.playback.browse.TidalBrowseFetcher
+import io.github.auxen.playback.cache.CacheAheadScheduler
 import io.github.auxen.playback.cache.CacheKind
+import io.github.auxen.playback.cache.CacheQueueSnapshot
 import io.github.auxen.playback.cache.CacheRecoveryGate
+import io.github.auxen.playback.cache.TrackDownloader
+import io.github.auxen.playback.cache.cacheCandidates
 import io.github.auxen.playback.cache.isPlayingResolvedCopy
+import io.github.auxen.playback.cache.playOrder
 import io.github.auxen.playback.cache.queueItemUpdate
 import io.github.auxen.playback.cache.queueMediaIds
 import io.github.auxen.playback.cache.reconcileQueueWithCache
@@ -231,6 +236,16 @@ class PlaybackService : MediaLibraryService() {
      */
     private var lastQueueIds: List<String> = emptyList()
 
+    /** Downloads the songs coming up so they play from disk. Built in [onCreate]. */
+    private var cacheAhead: CacheAheadScheduler? = null
+
+    /**
+     * Queue tracks decoded on the last cache-window walk, by mediaId, so the replans every
+     * player event sets off skip the JSON decode. Rebuilt on each walk, so it never outgrows
+     * the queue. Main thread only.
+     */
+    private var cacheTrackMemo: Map<String, Track> = emptyMap()
+
     override fun onCreate() {
         super.onCreate()
 
@@ -299,6 +314,22 @@ class PlaybackService : MediaLibraryService() {
                 }
             }
         }
+
+        // Built before the listener below so its first event has somewhere to go. The
+        // downloader reuses the app's plain OkHttp client, which logs nothing, so stream
+        // URLs and tokens stay out of logcat.
+        val downloader = TrackDownloader(Graph.httpClient) { id, fresh ->
+            if (fresh) Graph.resolver.invalidate(id)
+            Graph.resolver.resolve(id)
+        }
+        cacheAhead = CacheAheadScheduler(
+            scope = serviceScope,
+            index = Graph.trackCache,
+            download = downloader::download,
+            settings = Graph.cacheSettings.settings,
+            network = Graph.network.state,
+            freeDeviceBytes = Graph.trackCache::freeDeviceBytes,
+        )
 
         // Attach the platform effects, the main Player.Listener, and the
         // audio-session-id kick -- all re-runnable per player, so a Bit-Perfect
@@ -457,6 +488,8 @@ class PlaybackService : MediaLibraryService() {
                 // relying solely on the session-id-change path (platform
                 // effects fix, user-confirmed device report, 2026-07-13).
                 reapplySessionEffects(player)
+                markCachedPlay(mediaItem)
+                updateCacheWindow(player)
             }
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
@@ -464,6 +497,8 @@ class PlaybackService : MediaLibraryService() {
                     scheduleQueueSave(player)
                     // Songs added to the queue later pick up their cached copies.
                     syncQueueWithCache(player)
+                    // Built from mediaIds, so a cache swap leaves it unchanged.
+                    updateCacheWindow(player)
                     val queueIds = queueMediaIds(player)
                     val queueChanged = queueIds != lastQueueIds
                     lastQueueIds = queueIds
@@ -498,6 +533,8 @@ class PlaybackService : MediaLibraryService() {
                     pendingSleepTimerPause = false
                     SleepTimerController.cancel()
                 }
+                // Buffering toward play counts as active for caching.
+                updateCacheWindow(player)
             }
 
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
@@ -523,6 +560,7 @@ class PlaybackService : MediaLibraryService() {
                 } else {
                     scheduleQueueSave(player)
                 }
+                updateCacheWindow(player)
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -530,6 +568,15 @@ class PlaybackService : MediaLibraryService() {
                     preResolveUpcoming(player)
                     router?.route(player.currentMediaItem?.mediaId, playWhenReady)
                 }
+                updateCacheWindow(player)
+            }
+
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                updateCacheWindow(player)
+            }
+
+            override fun onRepeatModeChanged(repeatMode: Int) {
+                updateCacheWindow(player)
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -688,6 +735,7 @@ class PlaybackService : MediaLibraryService() {
         configurePlayer(newPlayer)
         // setMediaItems ran before the listener was attached, so seed this here.
         lastQueueIds = queueMediaIds(newPlayer)
+        updateCacheWindow(newPlayer)
 
         // The old player's platform effects were already released inside
         // configurePlayer(newPlayer)'s rebuildSessionEffects (it releases the
@@ -696,6 +744,46 @@ class PlaybackService : MediaLibraryService() {
         runCatching { old.clearAuxEffectInfo() }
         old.release()
     }
+
+    /**
+     * Tells the cache-ahead scheduler what plays next, in the order the player will reach it
+     * (shuffle and repeat-all included). An empty queue still sends a snapshot, so a download
+     * for a song no longer queued gets cancelled.
+     */
+    private fun updateCacheWindow(player: Player) {
+        val scheduler = cacheAhead ?: return
+        val timeline = player.currentTimeline
+        if (timeline.isEmpty) {
+            cacheTrackMemo = emptyMap()
+            scheduler.update(CacheQueueSnapshot(emptyList(), playingId = null, active = false))
+            return
+        }
+        // Repeat-one counts as off, as in Player.getNextMediaItemIndex, so the walk gets past the looping song.
+        val repeatMode = if (player.repeatMode == Player.REPEAT_MODE_ONE) Player.REPEAT_MODE_OFF else player.repeatMode
+        val shuffle = player.shuffleModeEnabled
+        val order = playOrder(player.currentMediaItemIndex) { i -> timeline.getNextWindowIndex(i, repeatMode, shuffle) }
+        val memo = HashMap<String, Track>()
+        val candidates = cacheCandidates(order, { player.getMediaItemAt(it).mediaId }) { i ->
+            val item = player.getMediaItemAt(i)
+            (memo[item.mediaId] ?: cacheTrackMemo[item.mediaId] ?: Graph.trackFor(item))
+                ?.also { memo[item.mediaId] = it }
+        }
+        cacheTrackMemo = memo
+        val active = player.isPlaying || (player.playWhenReady && player.playbackState == Player.STATE_BUFFERING)
+        scheduler.update(CacheQueueSnapshot(candidates, tidalIdOf(player.currentMediaItem), active))
+    }
+
+    /** A cached song starting to play ranks as recently played, so eviction keeps it longer. */
+    private fun markCachedPlay(mediaItem: MediaItem?) {
+        val id = tidalIdOf(mediaItem) ?: return
+        // cachedPlayback stats the file, so it runs off the main thread too.
+        serviceScope.launch {
+            if (Graph.trackCache.cachedPlayback(id) != null) Graph.trackCache.markPlayed(id)
+        }
+    }
+
+    private fun tidalIdOf(mediaItem: MediaItem?): String? =
+        mediaItem?.mediaId?.takeIf { it.startsWith("TIDAL:") }?.removePrefix("TIDAL:")
 
     /** Snapshot the queue's Tracks from each item's metadata extras. */
     private fun currentTracks(player: Player): List<Track> = Graph.tracksFrom(player)
@@ -1128,6 +1216,8 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        // Before any teardown, so no download starts while the player and scopes go away.
+        cacheAhead?.stop()
         // Flush a final save while the player is still alive (main thread),
         // then tear the main scope down before releasing the player.
         mediaSession?.player?.let { p ->

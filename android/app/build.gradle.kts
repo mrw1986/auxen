@@ -126,6 +126,8 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    // runTest and virtual time for the cache-ahead scheduler's tests.
+    testImplementation(libs.kotlinx.coroutines.test)
     // ExoPlayer test harness (FakeClock, CapturingRenderersFactory, TestPlayerRunHelper)
     // for the track-cache playback tests.
     testImplementation(libs.media3.test.utils)

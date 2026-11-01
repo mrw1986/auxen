@@ -1,0 +1,217 @@
+package io.github.auxen.playback.cache
+
+import android.util.Log
+import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private const val TAG = "CacheAhead"
+
+/** How long a failed song waits before its next try, by attempt. The last value repeats. */
+val RETRY_DELAYS_MILLIS = listOf(30_000L, 120_000L, 600_000L)
+
+/**
+ * The queue as the scheduler sees it: [candidates] in play order from the current song, the
+ * song playing now, and whether playback is running (or buffering toward it).
+ */
+data class CacheQueueSnapshot(
+    val candidates: List<CacheCandidate>,
+    val playingId: String?,
+    val active: Boolean,
+)
+
+private data class Inputs(
+    val queue: CacheQueueSnapshot,
+    val settings: CacheSettings,
+    val network: NetworkState,
+    val cache: CacheSnapshot,
+)
+
+private class InFlight(val trackId: String, val job: Deferred<Boolean>)
+
+private class Backoff(val attempts: Int, val timer: Job)
+
+/**
+ * Downloads the songs coming up in the queue, one at a time and nearest first, so they play
+ * from disk.
+ *
+ * Every decision runs in one coroutine. [update] only posts the queue, and a single collector
+ * re-plans whenever the queue, settings, network or cache index changes, or a download or retry
+ * timer ends. The download is a child of that loop rather than a `collectLatest` body, so a
+ * pause or an unrelated change never cancels it. Only its song leaving the window, losing
+ * permission to cache, or [stop] does.
+ */
+class CacheAheadScheduler(
+    scope: CoroutineScope,
+    private val index: CacheIndex,
+    private val download: suspend (trackId: String, staging: File) -> DownloadResult,
+    settings: Flow<CacheSettings>,
+    network: StateFlow<NetworkState>,
+    private val freeDeviceBytes: () -> Long,
+) {
+    private val queue = MutableStateFlow(CacheQueueSnapshot(emptyList(), playingId = null, active = false))
+
+    // Bumped when a download or a retry timer ends, so the loop looks again.
+    private val tick = MutableStateFlow(0L)
+
+    // Loop-only state. Nothing outside the loop coroutine reads or writes these.
+    private var inFlight: InFlight? = null
+    private var backoffs: Map<String, Backoff> = emptyMap()
+
+    // Cached bytes plus free device bytes, sampled only while nothing downloads. The download's
+    // own staging eats free space as it goes, so sampling mid-download would shrink capacity
+    // until that same download no longer fit and got cancelled, over and over.
+    private var pool = 0L
+
+    private val loop: Job = scope.launch {
+        val loopScope = this
+        combine(queue, settings, network, index.snapshot, tick) { q, s, n, c, _ -> Inputs(q, s, n, c) }
+            .collect { decide(loopScope, it) }
+    }
+
+    fun update(snapshot: CacheQueueSnapshot) {
+        queue.value = snapshot
+    }
+
+    /** Cancels the in-flight download and every retry. Nothing starts after this. */
+    fun stop() {
+        loop.cancel()
+    }
+
+    private suspend fun decide(loopScope: CoroutineScope, inputs: Inputs) {
+        settle(loopScope)
+        val queue = inputs.queue
+        dropStaleBackoffs(queue)
+        val used = inputs.cache.totalBytes
+        if (inFlight == null) pool = used + freeDeviceBytes()
+        val capacity = capacityBytes(inputs.settings.limitBytes, used, (pool - used).coerceAtLeast(0L))
+        val window = planWindow(queue.candidates, inputs.cache.entries, capacity)
+        val allowed = mayCache(inputs.settings.mode, inputs.network)
+        inFlight?.takeIf { !allowed || it.trackId !in window.trackIds }?.job?.cancel()
+
+        val next = window.toDownload
+            .firstOrNull { isReady(it.trackId) }
+            ?.takeIf { inFlight == null && allowed && queue.active }
+        val bytesToFree = used + (next?.estimatedBytes ?: 0L) - capacity
+        val usedAfter = evictForRoom(inputs.cache, window, queue.playingId, bytesToFree)
+        if (next != null && usedAfter + next.estimatedBytes <= capacity) start(loopScope, next)
+    }
+
+    // Clears a finished download. Success forgets its backoff, failure grows it, cancel leaves it.
+    private suspend fun settle(loopScope: CoroutineScope) {
+        val done = inFlight?.takeIf { it.job.isCompleted } ?: return
+        inFlight = null
+        if (done.job.isCancelled) return
+        // Already complete, so this returns at once.
+        if (done.job.await()) {
+            backoffs = backoffs - done.trackId
+        } else {
+            recordFailure(loopScope, done.trackId)
+        }
+    }
+
+    private fun recordFailure(loopScope: CoroutineScope, trackId: String) {
+        val attempts = (backoffs[trackId]?.attempts ?: 0) + 1
+        val wait = RETRY_DELAYS_MILLIS[minOf(attempts, RETRY_DELAYS_MILLIS.size) - 1]
+        val timer = loopScope.launch { delay(wait) }
+        timer.invokeOnCompletion { bump() }
+        backoffs = backoffs + (trackId to Backoff(attempts, timer))
+    }
+
+    // A song that left the queue starts fresh if it comes back, and the map stays queue-sized.
+    private fun dropStaleBackoffs(queue: CacheQueueSnapshot) {
+        val queued = queue.candidates.mapTo(HashSet()) { it.trackId }
+        val stale = backoffs.filterKeys { it !in queued }
+        if (stale.isEmpty()) return
+        stale.values.forEach { it.timer.cancel() }
+        backoffs = backoffs - stale.keys
+    }
+
+    private fun isReady(trackId: String): Boolean = backoffs[trackId]?.timer?.isCompleted ?: true
+
+    /**
+     * Deletes cached songs outside the window, never the playing one, until [bytesToFree] is
+     * freed or nothing else may go. Returns the bytes still cached afterwards.
+     */
+    private suspend fun evictForRoom(
+        cache: CacheSnapshot,
+        window: CacheWindow,
+        playingId: String?,
+        bytesToFree: Long,
+    ): Long {
+        val used = cache.totalBytes
+        if (bytesToFree <= 0L) return used
+        val protectedIds = window.trackIds.toSet() + listOfNotNull(playingId)
+        val victims = pickEvictions(cache.entries.values, protectedIds, bytesToFree)
+        if (victims.isEmpty()) return used
+        try {
+            index.evict(victims)
+        } catch (e: Exception) {
+            currentCoroutineContext().ensureActive()
+            Log.w(TAG, "Couldn't evict ${victims.size} cached tracks (${e.javaClass.simpleName})")
+            return used
+        }
+        return used - victims.sumOf { cache.entries.getValue(it).sizeBytes }
+    }
+
+    private fun start(loopScope: CoroutineScope, candidate: CacheCandidate) {
+        val job = loopScope.async { fetch(candidate) }
+        job.invokeOnCompletion { bump() }
+        inFlight = InFlight(candidate.trackId, job)
+    }
+
+    /**
+     * Downloads and commits one song. True once it's committed. Anything else, a cancel
+     * included, discards the staging folder. Failures are logged by track id and exception
+     * class only, since a message could carry a signed URL.
+     */
+    private suspend fun fetch(candidate: CacheCandidate): Boolean {
+        val id = candidate.trackId
+        // Runs on the scope's dispatcher (IO in the service), since it creates folders.
+        val staging = try {
+            index.staging(id)
+        } catch (e: Exception) {
+            logFailure(id, e)
+            return false
+        }
+        var committed = false
+        try {
+            val result = download(id, staging)
+            committed = index.commit(id, staging, result, candidate.track)
+        } catch (e: Exception) {
+            // A real cancel rethrows here. A stray CancellationException while active is a failure.
+            currentCoroutineContext().ensureActive()
+            logFailure(id, e)
+        } finally {
+            if (!committed) withContext(NonCancellable) { discardQuietly(id, staging) }
+        }
+        return committed
+    }
+
+    private suspend fun discardQuietly(id: String, staging: File) {
+        try {
+            index.discard(staging)
+        } catch (e: Exception) {
+            Log.w(TAG, "Couldn't discard the staging folder for track $id (${e.javaClass.simpleName})")
+        }
+    }
+
+    private fun logFailure(id: String, e: Exception) {
+        Log.w(TAG, "Couldn't cache track $id (${e.javaClass.simpleName})")
+    }
+
+    private fun bump() = tick.update { it + 1 }
+}
