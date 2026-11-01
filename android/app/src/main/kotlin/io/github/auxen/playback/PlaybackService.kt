@@ -59,8 +59,12 @@ import io.github.auxen.playback.browse.BrowseFetch
 import io.github.auxen.playback.browse.BrowseQueueResolver
 import io.github.auxen.playback.browse.BrowseTarget
 import io.github.auxen.playback.browse.TidalBrowseFetcher
-import io.github.auxen.provider.StreamInfo
+import io.github.auxen.playback.cache.queueItemUpdate
+import io.github.auxen.playback.cache.queueMediaIds
+import io.github.auxen.playback.cache.reconcileQueueWithCache
+import io.github.auxen.playback.cache.replacePlayingItem
 import io.github.auxen.ui.MainActivity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -70,6 +74,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.isActive
@@ -147,6 +152,9 @@ class PlaybackService : MediaLibraryService() {
     /** Last expiry-recovery attempt (elapsedRealtime), bounding the 4xx retry path. */
     private var lastExpiryRecoveryAtMillis = 0L
 
+    /** Last missing-cache-file recovery per Tidal id (elapsedRealtime). Main thread only. */
+    private val cacheRecoveryAtMillis = HashMap<String, Long>()
+
     /** MediaId awaiting its first actual playback before a play is recorded. */
     private var pendingPlayMediaId: String? = null
 
@@ -213,6 +221,12 @@ class PlaybackService : MediaLibraryService() {
      */
     @Volatile
     private var pendingSleepTimerPause = false
+
+    /**
+     * The queue's media ids at the last PLAYLIST_CHANGED. Cache and DASH swaps fire that too but
+     * keep the ids, so only a difference here is a real queue change. Main thread only.
+     */
+    private var lastQueueIds: List<String> = emptyList()
 
     override fun onCreate() {
         super.onCreate()
@@ -310,6 +324,12 @@ class PlaybackService : MediaLibraryService() {
         // than what the initial build used above).
         observeBitPerfect()
 
+        // Commits, evictions, clear and logout all change the snapshot. The first value needs no
+        // pass: whatever queue is set gets one from its own PLAYLIST_CHANGED.
+        mainScope.launch {
+            Graph.trackCache.snapshot.drop(1).collect { mediaSession?.player?.let(::syncQueueWithCache) }
+        }
+
         // Restore the persisted queue paused: the user decides when to hit
         // play, and no Tidal stream resolution happens until they do.
         mainScope.launch {
@@ -360,7 +380,7 @@ class PlaybackService : MediaLibraryService() {
 
         val dataSourceFactory = ResolvingDataSource.Factory(
             DefaultDataSource.Factory(this),
-            TidalUriResolver(Graph.resolver),
+            TidalUriResolver(Graph.resolver, Graph.trackCache::cachedPlayback),
         )
 
         val renderersFactory = EqRenderersFactory(
@@ -423,7 +443,9 @@ class PlaybackService : MediaLibraryService() {
                 scheduleQueueSave(player)
                 preResolveUpcoming(player)
                 router?.route(mediaItem?.mediaId, player.playWhenReady)
-                checkSleepTimerPause(player)
+                // A swap of the playing item isn't the next track starting. A real queue change
+                // already disarmed the pause in onTimelineChanged, which fires first.
+                if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) checkSleepTimerPause(player)
                 // Belt-and-suspenders: the AudioTrack (and therefore the
                 // platform effects attached to its session) can be recreated
                 // between tracks or on a route change without necessarily
@@ -437,11 +459,16 @@ class PlaybackService : MediaLibraryService() {
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) {
                     scheduleQueueSave(player)
+                    // Songs added to the queue later pick up their cached copies.
+                    syncQueueWithCache(player)
+                    val queueIds = queueMediaIds(player)
+                    val queueChanged = queueIds != lastQueueIds
+                    lastQueueIds = queueIds
                     // Belt-and-suspenders against pendingSleepTimerPause
                     // surviving into an unrelated new queue -- see that
                     // field's KDoc (fix round, review of commit 60c7699,
-                    // finding 1).
-                    if (pendingSleepTimerPause) {
+                    // finding 1). A cache swap isn't a new queue.
+                    if (queueChanged && pendingSleepTimerPause) {
                         pendingSleepTimerPause = false
                         // The queue this pause was waiting on is gone --
                         // also disarm the controller so the sheet doesn't
@@ -505,9 +532,13 @@ class PlaybackService : MediaLibraryService() {
             override fun onPlayerError(error: PlaybackException) {
                 val currentPlayer = mediaSession?.player ?: return
 
-                val dash = findCause<TidalDashStreamException>(error)
+                if (recoverMissingCacheFile(currentPlayer, error)) return
+
+                // A song cached as a DASH folder, or one Tidal serves as a DASH manifest.
+                val dash = findCause<CachedDashStreamException>(error)?.let { it.trackId to it.manifestUri }
+                    ?: findCause<TidalDashStreamException>(error)?.let { it.trackId to it.streamInfo.uri }
                 if (dash != null) {
-                    if (!swapDashCopies(currentPlayer, dash.trackId, dash.streamInfo)) return
+                    if (!swapDashCopies(currentPlayer, dash.first, dash.second)) return
                     currentPlayer.prepare()
                     currentPlayer.play()
                     return
@@ -531,6 +562,8 @@ class PlaybackService : MediaLibraryService() {
                         val queued = currentPlayer.getMediaItemAt(i)
                         if (!queued.mediaId.startsWith("TIDAL:")) continue
                         if (queued.localConfiguration?.uri?.scheme == "auxen") continue
+                        // A cached song's local URI never expires.
+                        if (queued.localConfiguration?.uri?.toString()?.startsWith(Graph.trackCache.rootUri) == true) continue
                         val restored = queued.buildUpon()
                             .setUri("auxen://tidal/${queued.mediaId.substringAfter(':')}")
                             .setMimeType(null)
@@ -858,11 +891,50 @@ class PlaybackService : MediaLibraryService() {
         Log.i("AuxenFx", message)
     }
 
+    /** Points [player]'s queued Tidal items at their cached copies, or back at the network. */
+    private fun syncQueueWithCache(player: Player) {
+        reconcileQueueWithCache(player, Graph.trackCache::cachedPlayback, Graph.trackCache.rootUri)
+    }
+
+    /**
+     * Handles a cached file that vanished between resolve and open, or a DASH folder missing a
+     * segment: drops the entry, points the item back at the network and plays on from the same
+     * spot. Once per track per cooldown, so a file that keeps failing can't loop. False when it
+     * didn't take the error.
+     */
+    private fun recoverMissingCacheFile(player: Player, error: PlaybackException): Boolean {
+        val mediaId = player.currentMediaItem?.mediaId
+        if (!isRecoverableCacheError(error.errorCode, mediaId) || mediaId == null) return false
+        val trackId = mediaId.removePrefix("TIDAL:")
+        val now = SystemClock.elapsedRealtime()
+        val last = cacheRecoveryAtMillis[trackId]
+        if (last != null && now - last < RETRY_COOLDOWN_MILLIS) return false
+        cacheRecoveryAtMillis[trackId] = now
+        mainScope.launch {
+            try {
+                Graph.trackCache.evict(listOf(trackId))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("PlaybackService", "Couldn't evict cached track $trackId after a missing file", e)
+            }
+            val p = mediaSession?.player ?: return@launch
+            val current = p.currentMediaItem ?: return@launch
+            // The user may have moved on while the evict ran.
+            if (current.mediaId != mediaId) return@launch
+            queueItemUpdate(current, null, Graph.trackCache.rootUri)?.let { replacePlayingItem(p, it) }
+            p.prepare()
+            p.play()
+        }
+        return true
+    }
+
     /**
      * Swap every still-unresolved (auxen-scheme) copy of the given Tidal track
-     * for its resolved DASH manifest. Returns true if anything was swapped.
+     * for its DASH manifest at [mpdUri], a network `data:` manifest or a cached
+     * local one. Returns true if anything was swapped.
      */
-    private fun swapDashCopies(player: Player, trackId: String, streamInfo: StreamInfo): Boolean {
+    private fun swapDashCopies(player: Player, trackId: String, mpdUri: String): Boolean {
         val targetMediaId = "TIDAL:$trackId"
         var swapped = false
         for (i in 0 until player.mediaItemCount) {
@@ -872,7 +944,7 @@ class PlaybackService : MediaLibraryService() {
             player.replaceMediaItem(
                 i,
                 queued.buildUpon()
-                    .setUri(streamInfo.uri)
+                    .setUri(mpdUri)
                     .setMimeType(MimeTypes.APPLICATION_MPD)
                     .build(),
             )
@@ -901,10 +973,12 @@ class PlaybackService : MediaLibraryService() {
         preResolveJob?.cancel()
         preResolveJob = serviceScope.launch {
             for (id in ids) {
+                // A cached song plays from disk; the cache keeps its queue items up to date.
+                if (Graph.trackCache.cachedPlayback(id) != null) continue
                 val info = runCatching { Graph.resolver.resolve(id) }.getOrNull() ?: continue
                 if (!info.uri.startsWith("data:")) continue
                 withContext(Dispatchers.Main) {
-                    mediaSession?.player?.let { p -> swapDashCopies(p, id, info) }
+                    mediaSession?.player?.let { p -> swapDashCopies(p, id, info.uri) }
                 }
             }
         }
@@ -1177,6 +1251,7 @@ private inline fun <reified T : Throwable> findCause(error: Throwable): T? {
 private class AuxenLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
     override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
         if (findCause<TidalDashStreamException>(loadErrorInfo.exception) != null) return C.TIME_UNSET
+        if (findCause<CachedDashStreamException>(loadErrorInfo.exception) != null) return C.TIME_UNSET
         return super.getRetryDelayMsFor(loadErrorInfo)
     }
 }

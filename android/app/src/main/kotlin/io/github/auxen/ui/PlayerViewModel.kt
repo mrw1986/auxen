@@ -35,6 +35,7 @@ import io.github.auxen.playback.PlaybackService
 import io.github.auxen.playback.cache.CacheNetworkMode
 import io.github.auxen.playback.cache.CacheSettings
 import io.github.auxen.playback.cache.formatCacheReadout
+import io.github.auxen.playback.isRecoverableCacheError
 import io.github.auxen.playback.isRecoverableDashError
 import io.github.auxen.provider.local.MusicFolder
 import io.github.auxen.provider.local.decodeFolders
@@ -767,6 +768,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     // prepare); the track goes on to play, so don't flash a failure
                     // banner for it. Genuine failures throw a different exception.
                     if (isRecoverableDashError(error)) return
+                    // A cached file that went missing: PlaybackService drops it and streams the song instead.
+                    if (isRecoverableCacheError(error.errorCode, c.currentMediaItem?.mediaId)) return
                     val chain = generateSequence(error as Throwable) { it.cause }
                         .joinToString(" ← ") { t ->
                             t.javaClass.simpleName + (t.message?.let { ": $it" } ?: "")

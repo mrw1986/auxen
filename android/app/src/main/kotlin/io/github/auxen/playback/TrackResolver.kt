@@ -7,11 +7,15 @@ import java.util.concurrent.ConcurrentHashMap
  * Resolves Tidal track ids to fresh [StreamInfo] with a short TTL cache.
  * Tidal stream URLs are short-lived, so nothing here is persisted; the
  * cache only avoids duplicate API calls during one listening session.
+ *
+ * [cachedInfo] is checked first: a song on disk needs no network. Its answer
+ * is never kept in the TTL map, so a song dropped from disk fetches again.
  */
 class TrackResolver(
     private val fetch: suspend (tidalTrackId: String) -> StreamInfo,
     private val clock: () -> Long = System::currentTimeMillis,
     private val ttlMillis: Long = DEFAULT_TTL_MILLIS,
+    private val cachedInfo: (tidalTrackId: String) -> StreamInfo? = { null },
 ) {
 
     private data class Entry(val info: StreamInfo, val resolvedAtMillis: Long)
@@ -19,6 +23,7 @@ class TrackResolver(
     private val cache = ConcurrentHashMap<String, Entry>()
 
     suspend fun resolve(tidalTrackId: String): StreamInfo {
+        cachedInfo(tidalTrackId)?.let { return it }
         cache[tidalTrackId]?.let { entry ->
             if (clock() - entry.resolvedAtMillis < ttlMillis) return entry.info
         }

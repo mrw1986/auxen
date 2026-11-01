@@ -9,14 +9,11 @@ class TrackResolverTest {
 
     private var now = 0L
     private var fetchCount = 0
-    private val resolver = TrackResolver(
-        fetch = { id ->
-            fetchCount++
-            StreamInfo(uri = "https://cdn.example/$id?n=$fetchCount")
-        },
-        clock = { now },
-        ttlMillis = 1000,
-    )
+    private val fetch: suspend (String) -> StreamInfo = { id ->
+        fetchCount++
+        StreamInfo(uri = "https://cdn.example/$id?n=$fetchCount")
+    }
+    private val resolver = TrackResolver(fetch = fetch, clock = { now }, ttlMillis = 1000)
 
     @Test
     fun cachesWithinTtl() = runBlocking {
@@ -59,5 +56,27 @@ class TrackResolverTest {
         resolver.resolve("1")
         resolver.resolve("2")
         assertEquals(4, fetchCount)
+    }
+
+    @Test
+    fun `cached info is returned without fetching`() = runBlocking {
+        val local = StreamInfo(uri = "file:///cache/42/audio", trackGainDb = -6.5)
+        val cached = TrackResolver(fetch, { now }, 1000, cachedInfo = { id -> local.takeIf { id == "42" } })
+
+        assertEquals(local, cached.resolve("42"))
+        assertEquals(0, fetchCount)
+    }
+
+    @Test
+    fun `cached info is not kept after the cache drops it`() = runBlocking {
+        var local: StreamInfo? = StreamInfo(uri = "file:///cache/42/audio")
+        val cached = TrackResolver(fetch, { now }, 1000, cachedInfo = { local })
+        cached.resolve("42")
+
+        local = null
+        val after = cached.resolve("42")
+
+        assertEquals("https://cdn.example/42?n=1", after.uri)
+        assertEquals(1, fetchCount)
     }
 }

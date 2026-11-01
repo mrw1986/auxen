@@ -197,14 +197,20 @@ object Graph {
         tidalCollectionSync = TidalCollectionSync(tidal = tidal, library = library)
         queueStore = QueueStateStore(db)
         autoEq = AutoEqRepository(context)
-        resolver = TrackResolver(fetch = { id -> tidal.getStreamInfoById(id) })
-        trackCache = TrackCacheStore(File(context.noBackupFilesDir, "track_cache"), db.cachedTrackDao())
+        // Before the resolver, which reads cached songs from it.
+        val store = TrackCacheStore(File(context.noBackupFilesDir, "track_cache"), db.cachedTrackDao())
+        trackCache = store
+        resolver = TrackResolver(
+            fetch = { id -> tidal.getStreamInfoById(id) },
+            cachedInfo = { id -> store.streamInfoFor(id) },
+        )
         cacheSettings = CacheSettingsStore(context.trackCacheDataStore)
         network = ConnectivityNetworkMonitor(context)
         // Fire-and-forget: the snapshot starts empty and fills once disk and table are reconciled.
+        // Loads the local, so a late coroutine can't load a store a later init() replaced.
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                trackCache.load()
+                store.load()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
