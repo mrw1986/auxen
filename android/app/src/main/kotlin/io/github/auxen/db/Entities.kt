@@ -141,7 +141,7 @@ data class CachedTrackEntity(
     @PrimaryKey @ColumnInfo(name = "tidal_track_id") val tidalTrackId: String,
     // CacheKind.name: "PROGRESSIVE" | "DASH"
     @ColumnInfo(name = "kind") val kind: String,
-    // A .flac/.m4a file, or the local manifest for DASH, inside the track's folder.
+    // "audio" for PROGRESSIVE or "manifest.mpd" for DASH, inside the track's folder.
     @ColumnInfo(name = "entry_file") val entryFile: String,
     @ColumnInfo(name = "size_bytes") val sizeBytes: Long,
     @ColumnInfo(name = "mime_type") val mimeType: String?,
