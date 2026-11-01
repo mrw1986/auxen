@@ -62,4 +62,10 @@ interface CacheIndex {
     suspend fun discard(staging: File)
 
     suspend fun evict(trackIds: Collection<String>)
+
+    /**
+     * Returns once the index has been read from disk, or that read failed. Until then
+     * [snapshot] is empty, so planning against it would re-fetch songs already cached.
+     */
+    suspend fun awaitLoaded()
 }

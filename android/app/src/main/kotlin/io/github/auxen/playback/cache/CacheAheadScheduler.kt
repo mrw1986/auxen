@@ -78,6 +78,9 @@ class CacheAheadScheduler(
 
     private val loop: Job = scope.launch {
         val loopScope = this
+        // The index starts empty. Planning against that would re-fetch cached songs, trim with
+        // nothing protected, and race load()'s wipe of the staging folders.
+        index.awaitLoaded()
         combine(queue, settings, network, index.snapshot, tick) { q, s, n, c, _ -> Inputs(q, s, n, c) }
             .collect { decide(loopScope, it) }
     }

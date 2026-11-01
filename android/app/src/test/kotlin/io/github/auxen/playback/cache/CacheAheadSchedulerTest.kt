@@ -58,10 +58,18 @@ private fun queue(vararg ids: String, active: Boolean = true, estimate: Long = E
     active = active,
 )
 
-/** An in-memory cache index that records what the scheduler asks of it. */
-private class FakeCacheIndex(private val root: File, cached: List<CachedTrackEntity>) : CacheIndex {
+/**
+ * An in-memory cache index that records what the scheduler asks of it. Built with
+ * `loaded = false` it stays unloaded, like TrackCacheStore before load(), until [finishLoading].
+ */
+private class FakeCacheIndex(
+    private val root: File,
+    cached: List<CachedTrackEntity>,
+    loaded: Boolean = true,
+) : CacheIndex {
     private val state = MutableStateFlow(CacheSnapshot(cached.associateBy { it.tidalTrackId }))
     override val snapshot: StateFlow<CacheSnapshot> = state
+    private val loadedSignal = CompletableDeferred<Unit>().apply { if (loaded) complete(Unit) }
 
     val stagings = mutableListOf<File>()
     val commits = mutableListOf<String>()
@@ -90,6 +98,14 @@ private class FakeCacheIndex(private val root: File, cached: List<CachedTrackEnt
     override suspend fun evict(trackIds: Collection<String>) {
         evicted += trackIds
         state.update { CacheSnapshot(it.entries - trackIds.toSet()) }
+    }
+
+    override suspend fun awaitLoaded() = loadedSignal.await()
+
+    /** Fills the snapshot the way TrackCacheStore.load() does, then lets waiters through. */
+    fun finishLoading(vararg rows: CachedTrackEntity) {
+        state.value = CacheSnapshot(rows.associateBy { it.tidalTrackId })
+        loadedSignal.complete(Unit)
     }
 }
 
@@ -376,6 +392,20 @@ class CacheAheadSchedulerTest {
         runCurrent()
         assertEquals(listOf("1"), index.commits)
         assertEquals(emptyList<String>(), index.evicted)
+    }
+
+    @Test fun `waits for the cache index to load before planning`() = runTest {
+        // Like TrackCacheStore before load(): the snapshot is empty though song 1 is on disk.
+        val index = FakeCacheIndex(stagingRoot, emptyList(), loaded = false)
+        val scheduler = scheduler(index)
+        scheduler.update(queue("1", "2"))
+        runCurrent()
+        assertEquals(emptyList<String>(), downloads.calls)
+
+        index.finishLoading(row("1"))
+        runCurrent()
+
+        assertEquals(listOf("2"), downloads.calls)
     }
 
     @Test fun `discards the staging when the cache refuses a commit`() = runTest {

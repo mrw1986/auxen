@@ -10,6 +10,7 @@ import java.io.File
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -60,18 +61,29 @@ class TrackCacheStore(
     // nanoTime can repeat on a coarse clock; bumping past the last stamp keeps folders apart.
     private val lastStamp = AtomicLong(Long.MIN_VALUE)
 
+    // Completed when load() ends, even by throwing, so a failed load can't stall caching for good.
+    private val loaded = CompletableDeferred<Unit>()
+
     val rootUri: String = "file://${root.absolutePath}/"
 
     /** Reconciles disk with the table, then fills [snapshot]. Call once at startup. */
-    suspend fun load() = locked {
-        root.mkdirs()
-        tmpRoot.deleteRecursively()
-        val (kept, dropped) = dao.all().partition(::isPlayable)
-        deleteRows(dropped.map { it.tidalTrackId })
-        val keptIds = kept.mapTo(HashSet()) { it.tidalTrackId }
-        root.listFiles()?.filter { it.name !in keptIds }?.forEach { it.deleteRecursively() }
-        state.value = CacheSnapshot(kept.associateBy { it.tidalTrackId })
+    suspend fun load() {
+        try {
+            locked {
+                root.mkdirs()
+                tmpRoot.deleteRecursively()
+                val (kept, dropped) = dao.all().partition(::isPlayable)
+                deleteRows(dropped.map { it.tidalTrackId })
+                val keptIds = kept.mapTo(HashSet()) { it.tidalTrackId }
+                root.listFiles()?.filter { it.name !in keptIds }?.forEach { it.deleteRecursively() }
+                state.value = CacheSnapshot(kept.associateBy { it.tidalTrackId })
+            }
+        } finally {
+            loaded.complete(Unit)
+        }
     }
+
+    override suspend fun awaitLoaded() = loaded.await()
 
     override fun staging(trackId: String): File {
         requireValidId(trackId)

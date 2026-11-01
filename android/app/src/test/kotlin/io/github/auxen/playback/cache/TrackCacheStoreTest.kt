@@ -12,11 +12,13 @@ import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.provider.StreamInfo
 import java.io.File
+import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -34,11 +36,18 @@ import org.robolectric.annotation.Config
 /**
  * Records each delete batch so a test can prove none exceeds SQLite's bind-variable cap, and
  * runs a hook before each row delete so a test can see what was still on disk at that moment.
+ * [beforeAll] lets a test make the startup read fail.
  */
 private class RecordingDao(private val inner: CachedTrackDao) : CachedTrackDao by inner {
     val deleteBatchSizes = mutableListOf<Int>()
     var beforeDelete: (List<String>) -> Unit = {}
     var beforeDeleteAll: () -> Unit = {}
+    var beforeAll: () -> Unit = {}
+
+    override suspend fun all(): List<CachedTrackEntity> {
+        beforeAll()
+        return inner.all()
+    }
 
     override suspend fun delete(ids: List<String>) {
         deleteBatchSizes += ids.size
@@ -338,6 +347,25 @@ class TrackCacheStoreTest {
         assertEquals(CacheSnapshot(), store.snapshot.value)
         // Before SQLite 3.32 (API 30 and below) a statement can bind at most 999 variables.
         assertTrue(dao.deleteBatchSizes.max() <= 999)
+    }
+
+    @Test
+    fun `awaitLoaded returns once load finishes`() = runBlocking {
+        assertNull(withTimeoutOrNull(50) { store.awaitLoaded() })
+
+        store.load()
+
+        withTimeout(5_000) { store.awaitLoaded() }
+    }
+
+    @Test
+    fun `awaitLoaded returns even when load fails`() = runBlocking {
+        dao.beforeAll = { throw IOException("disk read failed") }
+
+        assertThrows(IOException::class.java) { runBlocking { store.load() } }
+
+        // The scheduler then plans against the empty snapshot rather than waiting forever.
+        withTimeout(5_000) { store.awaitLoaded() }
     }
 
     @Test
