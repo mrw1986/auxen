@@ -4,7 +4,6 @@ import io.github.auxen.db.CachedTrackEntity
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CacheWindowPlannerTest {
@@ -78,6 +77,17 @@ class CacheWindowPlannerTest {
         assertEquals(120_960_000L, estimateBytes(track("1")))
     }
 
+    @Test fun `estimate treats zero or negative values as missing`() {
+        val t = track("1", durationSeconds = 0.0, sampleRateHz = 0, bitDepth = -1)
+        assertEquals(120_960_000L, estimateBytes(t))
+    }
+
+    @Test fun `estimate treats an infinite duration as missing`() {
+        // 300 s fallback at the track's own 16/44.1 quality.
+        val t = track("1", durationSeconds = Double.POSITIVE_INFINITY, sampleRateHz = 44_100, bitDepth = 16)
+        assertEquals(37_044_000L, estimateBytes(t))
+    }
+
     // cacheCandidates
 
     @Test fun `candidates keep Tidal items in play order`() {
@@ -110,6 +120,26 @@ class CacheWindowPlannerTest {
         assertEquals(listOf("1", "3"), result.map { it.trackId })
     }
 
+    @Test fun `candidates follow the play order, not queue position`() {
+        val ids = listOf("TIDAL:a", "TIDAL:b", "TIDAL:c")
+        val result = cacheCandidates(
+            order = listOf(2, 0, 1),
+            mediaIdAt = { ids[it] },
+            trackAt = { track(ids[it].substringAfter(':')) },
+        )
+        assertEquals(listOf("c", "a", "b"), result.map { it.trackId })
+    }
+
+    @Test fun `candidates keep a later copy when the first has no track`() {
+        val ids = listOf("TIDAL:1", "TIDAL:2", "TIDAL:1")
+        val result = cacheCandidates(
+            order = listOf(0, 1, 2),
+            mediaIdAt = { ids[it] },
+            trackAt = { if (it == 0) null else track(ids[it].substringAfter(':')) },
+        )
+        assertEquals(listOf("2", "1"), result.map { it.trackId })
+    }
+
     @Test fun `candidates carry the track's size estimate`() {
         val t = track("1", durationSeconds = 240.0, sampleRateHz = 44_100, bitDepth = 16)
         val result = cacheCandidates(listOf(0), { "TIDAL:1" }, { t })
@@ -130,6 +160,10 @@ class CacheWindowPlannerTest {
         assertEquals(300_000_000L, capacityBytes(2_000_000_000L, 300_000_000L, 500_000_000L))
     }
 
+    @Test fun `capacity is the limit when the limit is below what is cached`() {
+        assertEquals(500_000_000L, capacityBytes(500_000_000L, 800_000_000L, 10_000_000_000L))
+    }
+
     // planWindow
 
     @Test fun `window fills in order until the next song does not fit`() {
@@ -146,6 +180,15 @@ class CacheWindowPlannerTest {
     @Test fun `window stops at the first song that does not fit even if a later one would`() {
         val candidates = listOf(candidate("a", 100), candidate("b", 300), candidate("c", 10))
         assertEquals(listOf("a"), planWindow(candidates, emptyMap(), 150L).trackIds)
+    }
+
+    @Test fun `window stops at a song whose size saturates instead of wrapping`() {
+        val candidates = listOf(
+            candidate("a", 100),
+            candidate("b", Long.MAX_VALUE),
+            candidate("c", 10),
+        )
+        assertEquals(listOf("a"), planWindow(candidates, emptyMap(), 1_000L).trackIds)
     }
 
     @Test fun `window is empty when the current song alone is too big`() {
@@ -171,7 +214,6 @@ class CacheWindowPlannerTest {
         )
         val evicted = pickEvictions(cached, protectedIds = setOf("keep"), bytesToFree = 1_000L)
         assertEquals(listOf("drop"), evicted)
-        assertTrue("keep" !in evicted)
     }
 
     @Test fun `evictions take oldest played first and never-played last`() {
@@ -195,6 +237,25 @@ class CacheWindowPlannerTest {
     @Test fun `no evictions when nothing needs freeing`() {
         val cached = listOf(row("a", lastPlayedAtMillis = 1))
         assertEquals(emptyList<String>(), pickEvictions(cached, emptySet(), 0L))
+    }
+
+    @Test fun `evictions order never-played rows oldest cached first`() {
+        // Ids sort differently from cachedAt, so an id-only sort would fail.
+        val cached = listOf(
+            row("y", cachedAtMillis = 3),
+            row("w", cachedAtMillis = 2),
+            row("x", cachedAtMillis = 1),
+        )
+        assertEquals(listOf("x", "w", "y"), pickEvictions(cached, emptySet(), 1_000L))
+    }
+
+    @Test fun `evictions stop once enough is freed even when the sum would overflow`() {
+        val cached = listOf(
+            row("a", sizeBytes = Long.MAX_VALUE - 10, lastPlayedAtMillis = 1),
+            row("b", sizeBytes = 100, lastPlayedAtMillis = 2),
+            row("c", sizeBytes = 100, lastPlayedAtMillis = 3),
+        )
+        assertEquals(listOf("a", "b"), pickEvictions(cached, emptySet(), Long.MAX_VALUE))
     }
 
     @Test fun `evictions return every evictable row when that is not enough`() {

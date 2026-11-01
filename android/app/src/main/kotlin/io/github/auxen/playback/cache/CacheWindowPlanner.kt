@@ -36,7 +36,7 @@ fun playOrder(start: Int, next: (Int) -> Int): List<Int> {
 
 /** Rough on-disk size of a Tidal stream: raw PCM bits shrunk by a typical FLAC ratio. */
 fun estimateBytes(track: Track): Long {
-    val seconds = track.durationSeconds?.takeIf { it > 0 } ?: FALLBACK_DURATION_SECONDS
+    val seconds = track.durationSeconds?.takeIf { it > 0 && it.isFinite() } ?: FALLBACK_DURATION_SECONDS
     val bitDepth = track.bitDepth?.takeIf { it > 0 } ?: FALLBACK_BIT_DEPTH
     val sampleRate = track.sampleRateHz?.takeIf { it > 0 } ?: FALLBACK_SAMPLE_RATE_HZ
     // Rounded, not truncated: 0.7 isn't exact in binary and would shave a byte off.
@@ -76,6 +76,11 @@ fun capacityBytes(
     headroomBytes: Long = DEVICE_HEADROOM_BYTES,
 ): Long = minOf(limitBytes, usedBytes + (freeDeviceBytes - headroomBytes).coerceAtLeast(0L))
 
+// Clamps instead of wrapping, so one absurd size can't turn a running total
+// negative and make the rest of the queue look like it fits.
+private fun satAdd(a: Long, b: Long): Long =
+    if (b > 0 && a > Long.MAX_VALUE - b) Long.MAX_VALUE else a + b
+
 /** The songs to keep cached, in play order, and the subset still to fetch. */
 data class CacheWindow(val trackIds: List<String>, val toDownload: List<CacheCandidate>)
 
@@ -90,7 +95,7 @@ fun planWindow(
     capacityBytes: Long,
 ): CacheWindow {
     val runningTotals = candidates
-        .runningFold(0L) { total, c -> total + (cached[c.trackId]?.sizeBytes ?: c.estimatedBytes) }
+        .runningFold(0L) { total, c -> satAdd(total, cached[c.trackId]?.sizeBytes ?: c.estimatedBytes) }
         .drop(1)
     val fitCount = runningTotals.takeWhile { it <= capacityBytes }.size
     val window = candidates.take(fitCount)
@@ -120,7 +125,7 @@ fun pickEvictions(
     val ordered = cached
         .filter { it.tidalTrackId !in protectedIds }
         .sortedWith(EVICTION_ORDER)
-    val freedBefore = ordered.runningFold(0L) { total, row -> total + row.sizeBytes }
+    val freedBefore = ordered.runningFold(0L) { total, row -> satAdd(total, row.sizeBytes) }
     val evictCount = freedBefore.take(ordered.size).takeWhile { it < bytesToFree }.size
     return ordered.take(evictCount).map { it.tidalTrackId }
 }
