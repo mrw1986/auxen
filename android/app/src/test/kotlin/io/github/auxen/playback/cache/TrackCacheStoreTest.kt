@@ -31,13 +31,24 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** Records each delete batch so a test can prove none exceeds SQLite's bind-variable cap. */
+/**
+ * Records each delete batch so a test can prove none exceeds SQLite's bind-variable cap, and
+ * runs a hook before each row delete so a test can see what was still on disk at that moment.
+ */
 private class RecordingDao(private val inner: CachedTrackDao) : CachedTrackDao by inner {
     val deleteBatchSizes = mutableListOf<Int>()
+    var beforeDelete: (List<String>) -> Unit = {}
+    var beforeDeleteAll: () -> Unit = {}
 
     override suspend fun delete(ids: List<String>) {
         deleteBatchSizes += ids.size
+        beforeDelete(ids)
         inner.delete(ids)
+    }
+
+    override suspend fun deleteAll() {
+        beforeDeleteAll()
+        inner.deleteAll()
     }
 }
 
@@ -226,6 +237,32 @@ class TrackCacheStoreTest {
         assertNull(store.cachedPlayback("7"))
     }
 
+    // deleteRecursively's order is unspecified, so a crash mid-delete can leave manifest.mpd without
+    // some segments. With the row already gone that's just an orphan folder load() removes.
+    @Test
+    fun `evict deletes rows before their folders`() = runBlocking {
+        cache("7")
+        val onDiskAtRowDelete = mutableListOf<Boolean>()
+        dao.beforeDelete = { ids -> if ("7" in ids) onDiskAtRowDelete += File(root, "7/audio").isFile }
+
+        store.evict(listOf("7"))
+
+        assertEquals(listOf(true), onDiskAtRowDelete)
+        assertFalse(File(root, "7").exists())
+    }
+
+    @Test
+    fun `clear deletes rows before folders`() = runBlocking {
+        cache("7")
+        var onDiskAtRowDelete: Boolean? = null
+        dao.beforeDeleteAll = { onDiskAtRowDelete = File(root, "7/audio").isFile }
+
+        store.clear()
+
+        assertEquals(true, onDiskAtRowDelete)
+        assertFalse(File(root, "7").exists())
+    }
+
     @Test
     fun `clear deletes everything and empties the snapshot`() = runBlocking {
         cache("7")
@@ -322,9 +359,14 @@ class TrackCacheStoreTest {
         assertThrows(IllegalArgumentException::class.java) {
             runBlocking { store.commit("../x", File(root, ".tmp/x"), result(), track("x")) }
         }
+        cache("7")
         assertThrows(IllegalArgumentException::class.java) {
             runBlocking { store.evict(listOf("7", "../x")) }
         }
+        // Every id is checked before anything changes, so the valid one is still cached.
+        assertEquals(setOf("7"), ids())
+        assertEquals(setOf("7"), rowIds())
+        assertTrue(File(root, "7/audio").isFile)
         assertFalse(File(tmp.root, "x").exists())
     }
 

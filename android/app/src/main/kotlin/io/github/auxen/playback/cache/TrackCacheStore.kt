@@ -97,6 +97,7 @@ class TrackCacheStore(
             removeLocked(listOf(trackId))
             val target = File(root, trackId)
             if (!staging.renameTo(target)) {
+                // The older copy is already gone. For a cache that's fine; the next window re-downloads it.
                 deleteStaging(staging)
                 return@locked false
             }
@@ -139,8 +140,9 @@ class TrackCacheStore(
     suspend fun clear() = locked {
         generation++
         state.value = CacheSnapshot()
-        root.listFiles()?.forEach { it.deleteRecursively() }
+        // Rows before folders: see removeLocked.
         dao.deleteAll()
+        root.listFiles()?.forEach { it.deleteRecursively() }
     }
 
     suspend fun markPlayed(trackId: String) = locked {
@@ -187,8 +189,8 @@ class TrackCacheStore(
             try {
                 mutex.withLock {
                     if (trackId in state.value.entries) return@withLock
-                    File(root, trackId).deleteRecursively()
                     dao.delete(listOf(trackId))
+                    File(root, trackId).deleteRecursively()
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -199,10 +201,12 @@ class TrackCacheStore(
         }
     }
 
+    // Rows before folders. deleteRecursively's order is unspecified, so a crash mid-delete can leave
+    // manifest.mpd without some segments; with no row left, load() treats that as an orphan folder.
     private suspend fun removeLocked(ids: List<String>) {
         state.update { CacheSnapshot(it.entries - ids.toSet()) }
-        ids.forEach { File(root, it).deleteRecursively() }
         deleteRows(ids)
+        ids.forEach { File(root, it).deleteRecursively() }
     }
 
     private suspend fun deleteRows(ids: List<String>) = ids.chunked(DELETE_BATCH).forEach { dao.delete(it) }
