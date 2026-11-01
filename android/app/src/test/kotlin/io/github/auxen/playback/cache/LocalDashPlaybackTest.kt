@@ -1,5 +1,6 @@
 package io.github.auxen.playback.cache
 
+import android.app.Application
 import android.content.Context
 import android.net.Uri
 import androidx.media3.common.MediaItem
@@ -9,10 +10,11 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.test.utils.CapturingRenderersFactory
 import androidx.media3.test.utils.FakeClock
 import androidx.media3.test.utils.robolectric.ShadowMediaCodecConfig
-import androidx.media3.test.utils.robolectric.TestPlayerRunHelper.run
+import androidx.media3.test.utils.robolectric.TestPlayerRunHelper
 import androidx.test.core.app.ApplicationProvider
 import java.io.File
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -21,6 +23,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * Spike for the predictive track cache (Task 1): can a cached Hi-Res song be
@@ -38,6 +41,9 @@ import org.robolectric.RobolectricTestRunner
  * A real FLAC decoder reads 96 kHz from the dfLa STREAMINFO, which both carry.
  */
 @RunWith(RobolectricTestRunner::class)
+// A plain Application: the player needs only a Context, and AuxenApp would open
+// the Room database at startup and leak it.
+@Config(application = Application::class)
 class LocalDashPlaybackTest {
 
     @get:Rule val tmp = TemporaryFolder()
@@ -53,6 +59,9 @@ class LocalDashPlaybackTest {
     fun setUp() {
         dir = copyFixture()
         val context = ApplicationProvider.getApplicationContext<Context>()
+        // build() logs a harmless media_metrics ServiceNotFoundException: Media3
+        // 1.5.1 looks the service up on API 31+ even with platform diagnostics
+        // off, and Robolectric 4.14.1 doesn't provide it.
         player = ExoPlayer.Builder(context, CapturingRenderersFactory(context))
             .setClock(FakeClock(/* isAutoAdvancing= */ true))
             .build()
@@ -65,7 +74,7 @@ class LocalDashPlaybackTest {
     fun `local DASH folder prepares with the full duration`() {
         player.setMediaItem(localDashItem())
         player.prepare()
-        run(player).untilState(Player.STATE_READY)
+        TestPlayerRunHelper.run(player).untilState(Player.STATE_READY)
 
         assertTrue("duration ${player.duration}", player.duration in 5_800L..6_200L)
         assertTrue(player.isCurrentMediaItemSeekable)
@@ -75,33 +84,41 @@ class LocalDashPlaybackTest {
     fun `local DASH folder seeks to the middle`() {
         player.setMediaItem(localDashItem())
         player.prepare()
-        run(player).untilState(Player.STATE_READY)
+        TestPlayerRunHelper.run(player).untilState(Player.STATE_READY)
 
         player.seekTo(4_000)
-        run(player).untilPendingCommandsAreFullyHandled()
-        run(player).untilState(Player.STATE_READY)
+        TestPlayerRunHelper.run(player).untilPendingCommandsAreFullyHandled()
+        TestPlayerRunHelper.run(player).untilState(Player.STATE_READY)
         assertTrue("position ${player.currentPosition}", player.currentPosition in 4_000L..4_300L)
 
         // Plays the rest of the song through the audio renderer.
         player.play()
-        run(player).untilState(Player.STATE_ENDED)
+        TestPlayerRunHelper.run(player).untilState(Player.STATE_ENDED)
     }
 
     @Test
-    fun `concatenated fMP4 reports whether it is seekable`() {
+    fun `concatenated fMP4 plays but can't seek`() {
         val joined = File(tmp.root, "audio.mp4")
         joined.outputStream().use { out ->
             (listOf("init.mp4") + SEGMENTS).forEach { name -> File(dir, name).inputStream().use { it.copyTo(out) } }
         }
         player.setMediaItem(MediaItem.fromUri(Uri.fromFile(joined)))
         player.prepare()
-        run(player).untilState(Player.STATE_READY)
+        TestPlayerRunHelper.run(player).untilState(Player.STATE_READY)
 
-        // Option 2 record: it prepares and knows its duration (from mehd), but
-        // can't seek, because Tidal's segments carry no sidx for the extractor
-        // to index.
+        // Option 2 record: it knows its duration (from mehd), but can't seek,
+        // because Tidal's segments carry no sidx for the extractor to index.
         assertTrue("duration ${player.duration}", player.duration in 5_800L..6_200L)
         assertFalse(player.isCurrentMediaItemSeekable)
+
+        player.seekTo(4_000)
+        TestPlayerRunHelper.run(player).untilPendingCommandsAreFullyHandled()
+        TestPlayerRunHelper.run(player).untilState(Player.STATE_READY)
+        assertEquals(0L, player.currentPosition)
+
+        // It still plays from the start to the end.
+        player.play()
+        TestPlayerRunHelper.run(player).untilState(Player.STATE_ENDED)
     }
 
     private fun localDashItem(): MediaItem = MediaItem.Builder()
