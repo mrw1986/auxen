@@ -213,7 +213,7 @@ The scrubbed copy is `android/app/src/test/resources/dash/tidal_hires_manifest.m
 
 - Right away: the init, first and last segment all returned 200.
 - A full song, downloaded one segment at a time: 81 requests, 112 MB, 37.6 s on this connection. Every request returned 200.
-- 30-minute re-check: pending, a later task records the result. The decision doesn't depend on it, because Task 6 re-resolves on 401/403/410 anyway.
+- 30-minute re-check: segment URLs still returned 200 about 32 minutes after the manifest was fetched (init, first and last segment). The decision doesn't depend on it, because Task 6 re-resolves on 401/403/410 anyway.
 
 ### Playback tests
 
