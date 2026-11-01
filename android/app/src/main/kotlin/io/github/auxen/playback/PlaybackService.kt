@@ -69,6 +69,7 @@ import io.github.auxen.playback.cache.queueMediaIds
 import io.github.auxen.playback.cache.reconcileQueueWithCache
 import io.github.auxen.playback.cache.replacePlayingItem
 import io.github.auxen.playback.cache.swapDashCopies
+import io.github.auxen.playback.cache.tidalTrackIdOf
 import io.github.auxen.ui.MainActivity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -770,20 +771,17 @@ class PlaybackService : MediaLibraryService() {
         }
         cacheTrackMemo = memo
         val active = player.isPlaying || (player.playWhenReady && player.playbackState == Player.STATE_BUFFERING)
-        scheduler.update(CacheQueueSnapshot(candidates, tidalIdOf(player.currentMediaItem), active))
+        scheduler.update(CacheQueueSnapshot(candidates, player.currentMediaItem?.mediaId?.let(::tidalTrackIdOf), active))
     }
 
     /** A cached song starting to play ranks as recently played, so eviction keeps it longer. */
     private fun markCachedPlay(mediaItem: MediaItem?) {
-        val id = tidalIdOf(mediaItem) ?: return
+        val id = mediaItem?.mediaId?.let(::tidalTrackIdOf) ?: return
         // cachedPlayback stats the file, so it runs off the main thread too.
         serviceScope.launch {
             if (Graph.trackCache.cachedPlayback(id) != null) Graph.trackCache.markPlayed(id)
         }
     }
-
-    private fun tidalIdOf(mediaItem: MediaItem?): String? =
-        mediaItem?.mediaId?.takeIf { it.startsWith("TIDAL:") }?.removePrefix("TIDAL:")
 
     /** Snapshot the queue's Tracks from each item's metadata extras. */
     private fun currentTracks(player: Player): List<Track> = Graph.tracksFrom(player)

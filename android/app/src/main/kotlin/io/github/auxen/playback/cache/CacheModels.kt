@@ -1,10 +1,20 @@
 package io.github.auxen.playback.cache
 
 import io.github.auxen.db.CachedTrackEntity
+import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.provider.StreamInfo
 import java.io.File
 import kotlinx.coroutines.flow.StateFlow
+
+/** How a queued Tidal track's media id starts: `TIDAL:<id>`. */
+internal val TIDAL_MEDIA_ID_PREFIX = "${Source.TIDAL.name}:"
+
+/** The bare Tidal track id in a `TIDAL:<id>` media id, or null for anything else. */
+internal fun tidalTrackIdOf(mediaId: String): String? =
+    mediaId.takeIf { it.startsWith(TIDAL_MEDIA_ID_PREFIX) }
+        ?.removePrefix(TIDAL_MEDIA_ID_PREFIX)
+        ?.takeIf { it.isNotEmpty() }
 
 /** How a cached Tidal track is stored on disk. */
 enum class CacheKind { PROGRESSIVE, DASH }

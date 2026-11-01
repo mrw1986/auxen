@@ -1,7 +1,6 @@
 package io.github.auxen.playback.cache
 
 import io.github.auxen.db.CachedTrackEntity
-import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import kotlin.math.roundToLong
 
@@ -17,8 +16,6 @@ private const val FALLBACK_BIT_DEPTH = 24
 private const val FALLBACK_SAMPLE_RATE_HZ = 96_000
 private const val CHANNELS = 2
 private const val FLAC_COMPRESSION_RATIO = 0.7
-
-private val TIDAL_MEDIA_ID_PREFIX = "${Source.TIDAL.name}:"
 
 /**
  * Queue indexes in the order the player will reach them, starting at [start].
@@ -53,16 +50,11 @@ fun cacheCandidates(
     trackAt: (Int) -> Track?,
 ): List<CacheCandidate> = order
     .mapNotNull { index ->
-        val trackId = mediaIdAt(index).tidalTrackIdOrNull() ?: return@mapNotNull null
+        val trackId = tidalTrackIdOf(mediaIdAt(index)) ?: return@mapNotNull null
         val track = trackAt(index) ?: return@mapNotNull null
         CacheCandidate(trackId, track, estimateBytes(track))
     }
     .distinctBy { it.trackId }
-
-private fun String.tidalTrackIdOrNull(): String? =
-    takeIf { it.startsWith(TIDAL_MEDIA_ID_PREFIX) }
-        ?.removePrefix(TIDAL_MEDIA_ID_PREFIX)
-        ?.takeIf { it.isNotEmpty() }
 
 /**
  * Bytes the cache may hold: the user's limit, cut down so the device keeps

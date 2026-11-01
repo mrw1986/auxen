@@ -4,8 +4,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 
-private const val TIDAL_PREFIX = "TIDAL:"
-
 /**
  * How a queued Tidal [item] should change now that the cache holds [playback] for it, or
  * nothing. Null means leave it as it is, which covers everything that isn't a Tidal item.
@@ -16,7 +14,7 @@ private const val TIDAL_PREFIX = "TIDAL:"
  * item still pointing into [cacheRootUri] once its entry is gone goes back to the stable URI.
  */
 fun queueItemUpdate(item: MediaItem, playback: CachedPlayback?, cacheRootUri: String): MediaItem? {
-    val trackId = tidalTrackId(item) ?: return null
+    val trackId = tidalTrackIdOf(item.mediaId) ?: return null
     val uri = item.localConfiguration?.uri ?: return null
     if (playback == null) {
         return if (uri.toString().startsWith(cacheRootUri)) stableItem(item, trackId) else null
@@ -44,7 +42,7 @@ fun reconcileQueueWithCache(player: Player, lookup: (String) -> CachedPlayback?,
     for (index in 0 until player.mediaItemCount) {
         if (index == playing) continue
         val item = player.getMediaItemAt(index)
-        val trackId = tidalTrackId(item) ?: continue
+        val trackId = tidalTrackIdOf(item.mediaId) ?: continue
         queueItemUpdate(item, lookup(trackId), cacheRootUri)?.let { player.replaceMediaItem(index, it) }
     }
     restorePlayingItem(player, lookup, cacheRootUri)
@@ -69,7 +67,7 @@ fun replacePlayingItem(player: Player, item: MediaItem) {
  * keeps its position and play state, so a resumed or restored Hi-Res song doesn't restart.
  */
 fun swapDashCopies(player: Player, trackId: String, mpdUri: String): Boolean {
-    val targetMediaId = TIDAL_PREFIX + trackId
+    val targetMediaId = TIDAL_MEDIA_ID_PREFIX + trackId
     var swapped = false
     for (index in 0 until player.mediaItemCount) {
         val queued = player.getMediaItemAt(index)
@@ -89,7 +87,7 @@ fun swapDashCopies(player: Player, trackId: String, mpdUri: String): Boolean {
 fun isPlayingResolvedCopy(player: Player, trackId: String): Boolean {
     val item = player.currentMediaItem ?: return false
     val scheme = item.localConfiguration?.uri?.scheme ?: return false
-    return item.mediaId == TIDAL_PREFIX + trackId && scheme != "auxen"
+    return item.mediaId == TIDAL_MEDIA_ID_PREFIX + trackId && scheme != "auxen"
 }
 
 /**
@@ -102,14 +100,11 @@ private fun restorePlayingItem(player: Player, lookup: (String) -> CachedPlaybac
     val index = player.currentMediaItemIndex
     if (index !in 0 until player.mediaItemCount) return
     val item = player.getMediaItemAt(index)
-    val trackId = tidalTrackId(item) ?: return
+    val trackId = tidalTrackIdOf(item.mediaId) ?: return
     if (lookup(trackId) != null) return
     val restored = queueItemUpdate(item, null, cacheRootUri) ?: return
     replacePlayingItem(player, restored)
 }
-
-private fun tidalTrackId(item: MediaItem): String? =
-    item.mediaId.takeIf { it.startsWith(TIDAL_PREFIX) }?.removePrefix(TIDAL_PREFIX)?.takeIf { it.isNotEmpty() }
 
 private fun stableItem(item: MediaItem, trackId: String): MediaItem =
     item.buildUpon().setUri("auxen://tidal/$trackId").setMimeType(null).build()
