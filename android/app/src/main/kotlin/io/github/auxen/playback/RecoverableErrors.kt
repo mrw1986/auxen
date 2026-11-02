@@ -77,9 +77,13 @@ fun isNetworkFailure(error: Throwable): Boolean {
  */
 fun isOfflineFailure(error: Throwable, online: Boolean): Boolean = !online && isNetworkFailure(error)
 
+/** Media3's IO error codes, the 2000 range. They survive the trip to a controller's listener. */
+fun isIoErrorCode(errorCode: Int): Boolean = errorCode in 2000..2999
+
 /**
  * True when the UI shouldn't show [error]: [PlaybackService] is already swapping in a DASH copy,
- * or it just handled an offline failure by resuming from cache, skipping or pausing.
+ * or it just handled an offline failure by resuming from cache, skipping or pausing. Only an IO
+ * error can be that failure, so a decode or other error right after a skip still shows.
  */
-fun shouldSuppressPlaybackBanner(error: Throwable, offlineHandledRecently: Boolean): Boolean =
-    isRecoverableDashError(error) || offlineHandledRecently
+fun shouldSuppressPlaybackBanner(error: PlaybackException, offlineHandledRecently: Boolean): Boolean =
+    isRecoverableDashError(error) || (offlineHandledRecently && isIoErrorCode(error.errorCode))

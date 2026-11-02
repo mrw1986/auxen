@@ -142,10 +142,26 @@ class RecoverableErrorsTest {
         assertFalse(isOfflineFailure(sourceError(forbidden()), online = false))
     }
 
-    @Test fun `banner is suppressed for DASH swaps and recent offline handling`() {
-        val plain = sourceError(IOException("Response code: 500"))
-        assertTrue(shouldSuppressPlaybackBanner(IOException("Source error", dash()), offlineHandledRecently = false))
-        assertTrue(shouldSuppressPlaybackBanner(plain, offlineHandledRecently = true))
-        assertFalse(shouldSuppressPlaybackBanner(plain, offlineHandledRecently = false))
+    @Test fun `banner is suppressed for DASH swaps and an IO error right after offline handling`() {
+        val io = sourceError(IOException("Response code: 500"))
+        // A DASH swap is hidden whatever its code.
+        val dashSwap = sourceError(dash(), PlaybackException.ERROR_CODE_UNSPECIFIED)
+        assertTrue(shouldSuppressPlaybackBanner(dashSwap, offlineHandledRecently = false))
+        assertTrue(shouldSuppressPlaybackBanner(io, offlineHandledRecently = true))
+        assertFalse(shouldSuppressPlaybackBanner(io, offlineHandledRecently = false))
+    }
+
+    @Test fun `IO error codes are the 2000 range`() {
+        assertFalse(isIoErrorCode(1999))
+        assertTrue(isIoErrorCode(PlaybackException.ERROR_CODE_IO_UNSPECIFIED))
+        assertTrue(isIoErrorCode(2999))
+        assertFalse(isIoErrorCode(3000))
+    }
+
+    @Test fun `a non-network error right after offline handling still shows`() {
+        val decode = sourceError(IllegalStateException("decoder"), PlaybackException.ERROR_CODE_DECODING_FAILED)
+        val parse = sourceError(IOException("bad box"), PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED)
+        assertFalse(shouldSuppressPlaybackBanner(decode, offlineHandledRecently = true))
+        assertFalse(shouldSuppressPlaybackBanner(parse, offlineHandledRecently = true))
     }
 }
