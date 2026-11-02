@@ -115,6 +115,10 @@ class AutoResumeController(
     val isWaiting: Boolean
         get() = (state as? AutoResumeState.Waiting)?.inWindowAt(clock()) ?: false
 
+    /**
+     * Feeds one event. The service feeds pauses and the network through [onOfflineAction],
+     * [onUserPlay] and [onNetwork], which stamp them on [clock], not as stamped events here.
+     */
     fun on(event: AutoResumeEvent) {
         val waiting = state as? AutoResumeState.Waiting
         val step = reduceAutoResume(state, event)
