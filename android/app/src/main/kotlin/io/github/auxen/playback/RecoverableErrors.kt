@@ -27,8 +27,7 @@ import java.net.UnknownHostException
  * surface — only the recoverable resolve-time signal is filtered here.
  */
 fun isRecoverableDashError(error: Throwable): Boolean =
-    generateSequence(error as Throwable?) { it.cause }
-        .any { it is TidalDashStreamException || it is CachedDashStreamException }
+    causeChain(error).any { it is TidalDashStreamException || it is CachedDashStreamException }
 
 /**
  * True when a Tidal item failed because a cached file is gone: it vanished between
@@ -48,8 +47,7 @@ fun isRecoverableCacheError(errorCode: Int, mediaId: String?): Boolean =
 @UnstableApi
 fun isMissingCacheFile(error: Throwable, uri: String, cacheRootUri: String): Boolean =
     uri.startsWith(cacheRootUri) &&
-        generateSequence(error as Throwable?) { it.cause }
-            .any { it is DataSourceException && it.reason == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND }
+        causeChain(error).any { it is DataSourceException && it.reason == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND }
 
 private val NETWORK_ERROR_CODES = setOf(
     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
@@ -62,7 +60,7 @@ private val NETWORK_ERROR_CODES = setOf(
  * status anywhere in the chain means the server did answer, so that's never a network failure.
  */
 fun isNetworkFailure(error: Throwable): Boolean {
-    val chain = generateSequence(error as Throwable?) { it.cause }.toList()
+    val chain = causeChain(error).toList()
     if (chain.any { it is HttpDataSource.InvalidResponseCodeException }) return false
     return chain.any {
         it is UnknownHostException || it is ConnectException ||
@@ -87,3 +85,5 @@ fun isIoErrorCode(errorCode: Int): Boolean = errorCode in 2000..2999
  */
 fun shouldSuppressPlaybackBanner(error: PlaybackException, offlineHandledRecently: Boolean): Boolean =
     isRecoverableDashError(error) || (offlineHandledRecently && isIoErrorCode(error.errorCode))
+
+private fun causeChain(error: Throwable): Sequence<Throwable> = generateSequence(error) { it.cause }
