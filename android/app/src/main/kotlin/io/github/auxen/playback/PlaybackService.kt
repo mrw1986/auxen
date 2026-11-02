@@ -669,9 +669,10 @@ class PlaybackService : MediaLibraryService() {
                 val dash = findCause<CachedDashStreamException>(error)?.let { it.trackId to it.manifestUri }
                     ?: findCause<TidalDashStreamException>(error)?.let { it.trackId to it.streamInfo.uri }
                 if (dash != null) {
-                    val swapped = swapDashCopies(currentPlayer, dash.first, dash.second)
+                    val (trackId, mpdUri) = dash
+                    val swapped = swapDashCopies(currentPlayer, trackId, mpdUri)
                     // preResolveUpcoming can swap the playing copy between the error and this callback.
-                    if (!swapped && !isPlayingResolvedCopy(currentPlayer, dash.first)) return
+                    if (!swapped && !isPlayingResolvedCopy(currentPlayer, trackId)) return
                     currentPlayer.prepare()
                     currentPlayer.play()
                     return
