@@ -63,7 +63,7 @@ class AutoResumeTest {
         assertEquals(AutoResumeStep(Idle), reduceAutoResume(Idle, OutputLost))
     }
 
-    @Test fun `headphones, Bluetooth, USB, HDMI and line outputs are external`() {
+    @Test fun `headphones, Bluetooth, USB, HDMI, line, hearing aid and dock outputs are external`() {
         val external = listOf(
             AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
             AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
@@ -78,6 +78,9 @@ class AutoResumeTest {
             AudioDeviceInfo.TYPE_HDMI,
             AudioDeviceInfo.TYPE_LINE_ANALOG,
             AudioDeviceInfo.TYPE_LINE_DIGITAL,
+            AudioDeviceInfo.TYPE_HEARING_AID,
+            AudioDeviceInfo.TYPE_DOCK,
+            AudioDeviceInfo.TYPE_DOCK_ANALOG,
         )
         assertEquals(emptyList<Int>(), external.filterNot(::isExternalOutput))
     }

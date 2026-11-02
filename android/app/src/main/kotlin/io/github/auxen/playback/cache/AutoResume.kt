@@ -46,8 +46,9 @@ sealed interface AutoResumeEvent {
 data class AutoResumeStep(val state: AutoResumeState, val resumeIndex: Int? = null)
 
 /**
- * Whether an [AudioDeviceInfo] type is an output outside the phone: Bluetooth, USB, wired, HDMI
- * or line out. The constants inline at compile time, so the API 31 ones are safe on older phones.
+ * Whether an [AudioDeviceInfo] type is an output outside the phone: Bluetooth, USB, wired, HDMI,
+ * line out, a hearing aid or a dock. The constants inline at compile time, so the newer ones are
+ * safe on older phones.
  */
 @SuppressLint("InlinedApi")
 fun isExternalOutput(type: Int): Boolean = type in EXTERNAL_OUTPUT_TYPES
@@ -67,6 +68,9 @@ private val EXTERNAL_OUTPUT_TYPES = setOf(
     AudioDeviceInfo.TYPE_HDMI,
     AudioDeviceInfo.TYPE_LINE_ANALOG,
     AudioDeviceInfo.TYPE_LINE_DIGITAL,
+    AudioDeviceInfo.TYPE_HEARING_AID,
+    AudioDeviceInfo.TYPE_DOCK,
+    AudioDeviceInfo.TYPE_DOCK_ANALOG,
 )
 
 /**
