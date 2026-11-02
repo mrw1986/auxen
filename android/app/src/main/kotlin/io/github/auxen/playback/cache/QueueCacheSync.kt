@@ -22,7 +22,7 @@ fun queueItemUpdate(item: MediaItem, playback: CachedPlayback?, cacheRootUri: St
         return if (uri.toString().startsWith(cacheRootUri)) stableItem(item, trackId) else null
     }
     return when (playback.kind) {
-        CacheKind.PROGRESSIVE -> if (uri.scheme == "auxen") null else stableItem(item, trackId)
+        CacheKind.PROGRESSIVE -> if (uri.scheme == STABLE_URI_SCHEME) null else stableItem(item, trackId)
         CacheKind.DASH -> if (uri.toString() == playback.uri) {
             null
         } else {
@@ -84,7 +84,7 @@ fun swapDashCopies(player: Player, trackId: String, mpdUri: String): Boolean {
     var swapped = false
     for (index in 0 until player.mediaItemCount) {
         val queued = player.getMediaItemAt(index)
-        if (queued.mediaId != targetMediaId || queued.localConfiguration?.uri?.scheme != "auxen") continue
+        if (queued.mediaId != targetMediaId || queued.localConfiguration?.uri?.scheme != STABLE_URI_SCHEME) continue
         val dash = queued.buildUpon().setUri(mpdUri).setMimeType(MimeTypes.APPLICATION_MPD).build()
         if (index == player.currentMediaItemIndex) replacePlayingItem(player, dash) else player.replaceMediaItem(index, dash)
         swapped = true
@@ -100,7 +100,7 @@ fun swapDashCopies(player: Player, trackId: String, mpdUri: String): Boolean {
 fun isPlayingResolvedCopy(player: Player, trackId: String): Boolean {
     val item = player.currentMediaItem ?: return false
     val scheme = item.localConfiguration?.uri?.scheme ?: return false
-    return item.mediaId == TIDAL_MEDIA_ID_PREFIX + trackId && scheme != "auxen"
+    return item.mediaId == TIDAL_MEDIA_ID_PREFIX + trackId && scheme != STABLE_URI_SCHEME
 }
 
 /**
@@ -127,4 +127,4 @@ private fun restorePlayingItem(player: Player, lookup: (String) -> CachedPlaybac
 }
 
 private fun stableItem(item: MediaItem, trackId: String): MediaItem =
-    item.buildUpon().setUri("auxen://tidal/$trackId").setMimeType(null).build()
+    item.buildUpon().setUri(stableTidalUri(trackId)).setMimeType(null).build()

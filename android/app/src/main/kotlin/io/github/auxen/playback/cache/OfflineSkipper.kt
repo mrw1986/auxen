@@ -194,6 +194,3 @@ class OfflineSkipper(
         return action
     }
 }
-
-// A cached progressive song plays through this URI, which TidalUriResolver maps to the file.
-private fun stableTidalUri(trackId: String) = "auxen://tidal/$trackId"

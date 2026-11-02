@@ -17,6 +17,12 @@ internal fun tidalTrackIdOf(mediaId: String): String? =
         ?.removePrefix(TIDAL_MEDIA_ID_PREFIX)
         ?.takeIf { it.isNotEmpty() }
 
+/** The scheme of a queued Tidal item still on its stable, unresolved URI. */
+internal const val STABLE_URI_SCHEME = "auxen"
+
+/** A Tidal track's stable URI. TidalUriResolver maps it to a cached file or a fresh stream URL. */
+internal fun stableTidalUri(trackId: String) = "$STABLE_URI_SCHEME://tidal/$trackId"
+
 /** How a cached Tidal track is stored on disk. */
 enum class CacheKind { PROGRESSIVE, DASH }
 
