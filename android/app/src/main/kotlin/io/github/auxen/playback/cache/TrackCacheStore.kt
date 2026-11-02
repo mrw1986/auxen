@@ -180,15 +180,21 @@ class TrackCacheStore(
     private fun playable(trackId: String): Playable? {
         if (!TRACK_ID.matches(trackId)) return null
         val row = state.value.entries[trackId] ?: return null
-        val kind = kindOf(row)
-        val entry = entryOf(row)
-        if (kind != null && entry.isFile) return Playable(row, kind, entry)
-        forgetMissing(trackId, row)
-        return null
+        return playableOf(row) ?: run {
+            forgetMissing(trackId, row)
+            null
+        }
     }
 
     private fun isPlayable(row: CachedTrackEntity): Boolean =
-        TRACK_ID.matches(row.tidalTrackId) && kindOf(row) != null && entryOf(row).isFile
+        TRACK_ID.matches(row.tidalTrackId) && playableOf(row) != null
+
+    // The one rule for both the readers and load(): the kind parses and the entry file exists.
+    private fun playableOf(row: CachedTrackEntity): Playable? {
+        val kind = kindOf(row) ?: return null
+        val entry = entryOf(row)
+        return if (entry.isFile) Playable(row, kind, entry) else null
+    }
 
     private fun kindOf(row: CachedTrackEntity): CacheKind? = CacheKind.entries.firstOrNull { it.name == row.kind }
 

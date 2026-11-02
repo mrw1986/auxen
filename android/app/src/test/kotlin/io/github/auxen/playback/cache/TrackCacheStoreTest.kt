@@ -348,6 +348,25 @@ class TrackCacheStoreTest {
     }
 
     @Test
+    fun `a row with an unknown kind is dropped on load and never served`() = runBlocking {
+        // The file is there, so only the kind keeps it from playing.
+        File(root, "7").mkdirs()
+        File(root, "7/audio").writeText("audio")
+        dao.upsert(row("7").copy(kind = "OPUS"))
+        cache("8")
+
+        val restarted = newStore()
+        restarted.load()
+
+        // Checked before any read, since a read would also drop the row.
+        assertEquals(setOf("8"), restarted.snapshot.value.ids)
+        assertEquals(setOf("8"), rowIds())
+        assertFalse(File(root, "7").exists())
+        assertNull(restarted.cachedPlayback("7"))
+        assertNull(restarted.streamInfoFor("7"))
+    }
+
+    @Test
     fun `load drops more than 999 rows with missing files`() = runBlocking {
         // An Auto Backup restore brings back auxen.db rows without their noBackupFilesDir folders.
         repeat(1_200) { dao.upsert(row("$it")) }
