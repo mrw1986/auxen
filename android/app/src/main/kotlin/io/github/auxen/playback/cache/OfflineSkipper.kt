@@ -129,13 +129,13 @@ class OfflineSkipper(
 
     private fun handleError(error: PlaybackException, online: Boolean): OfflineAction {
         if (!isOfflineFailure(error, online)) return OfflineAction.None
+        // Media3 can report a song's error in the same batch as the move onto it. If a skip
+        // already moved on, the error belongs to the song skipped past, not the current one.
+        if (queue.playerError !== error) return quietBanner()
         val current = queue.currentIndex
         if (current < 0) return OfflineAction.None
-        if (!queue.playWhenReady) {
-            // Nothing to restart, but the UI shouldn't flag an error the next play deals with.
-            status.markHandled()
-            return OfflineAction.None
-        }
+        // Nothing to restart, but the UI shouldn't flag an error the next play deals with.
+        if (!queue.playWhenReady) return quietBanner()
         val trackId = tidalTrackIdOf(queue.mediaIdAt(current))
         val playback = trackId?.let(cached)
         val action = if (trackId != null && playback != null) {
@@ -173,6 +173,11 @@ class OfflineSkipper(
     }
 
     private fun isPlayable(index: Int): Boolean = isPlayableOffline(queue.mediaIdAt(index), cached)
+
+    private fun quietBanner(): OfflineAction {
+        status.markHandled()
+        return OfflineAction.None
+    }
 
     private fun handled(action: OfflineAction): OfflineAction {
         if (action != OfflineAction.None) status.markHandled()

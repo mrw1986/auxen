@@ -52,6 +52,9 @@ class OfflineSkipperTest {
         return PlaybackException("Source error", http, PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS)
     }
 
+    // The player holds the error it reports, so a fresh error is also the queue's playerError.
+    private fun FakePlayerQueue.fail(error: PlaybackException = networkError()) = error.also { playerError = it }
+
     // ---- item start ----
 
     @Test fun `online does nothing on item start`() {
@@ -137,7 +140,7 @@ class OfflineSkipperTest {
         val queue = FakePlayerQueue("TIDAL:1", "TIDAL:2", position = 41_000)
         cacheProgressive("1")
 
-        assertEquals(OfflineAction.ResumedFromCache(41_000), skipper(queue).onError(networkError()))
+        assertEquals(OfflineAction.ResumedFromCache(41_000), skipper(queue).onError(queue.fail()))
         assertEquals(listOf("seekTo(0, 41000)", "prepareAndPlay"), queue.calls)
     }
 
@@ -145,7 +148,7 @@ class OfflineSkipperTest {
         val queue = FakePlayerQueue("TIDAL:1", "TIDAL:2", position = 41_000).apply { uris[0] = networkDash }
         val manifest = cacheDash("1")
 
-        assertEquals(OfflineAction.ResumedFromCache(41_000), skipper(queue).onError(networkError()))
+        assertEquals(OfflineAction.ResumedFromCache(41_000), skipper(queue).onError(queue.fail()))
         assertEquals(
             listOf("replaceUri(0, $manifest, ${MimeTypes.APPLICATION_MPD})", "seekTo(0, 41000)", "prepareAndPlay"),
             queue.calls,
@@ -156,7 +159,7 @@ class OfflineSkipperTest {
         val queue = FakePlayerQueue("TIDAL:1", position = 41_000)
         queue.uris[0] = cacheDash("1")
 
-        skipper(queue).onError(networkError())
+        skipper(queue).onError(queue.fail())
 
         assertEquals(listOf("seekTo(0, 41000)", "prepareAndPlay"), queue.calls)
     }
@@ -166,7 +169,7 @@ class OfflineSkipperTest {
         val queue = FakePlayerQueue("TIDAL:1", position = 41_000).apply { uris[0] = networkDash }
         cacheProgressive("1")
 
-        skipper(queue).onError(networkError())
+        skipper(queue).onError(queue.fail())
 
         assertEquals(listOf("replaceUri(0, auxen://tidal/1, null)", "seekTo(0, 41000)", "prepareAndPlay"), queue.calls)
     }
@@ -175,14 +178,14 @@ class OfflineSkipperTest {
         val queue = FakePlayerQueue("TIDAL:1", "TIDAL:2", "TIDAL:3", position = 41_000)
         cacheProgressive("3")
 
-        assertEquals(OfflineAction.Skipped(2), skipper(queue).onError(networkError()))
+        assertEquals(OfflineAction.Skipped(2), skipper(queue).onError(queue.fail()))
         assertEquals(listOf("seekTo(2, 0)", "prepareAndPlay"), queue.calls)
     }
 
     @Test fun `a network failure with nothing cached ahead pauses and shows the message`() {
         val queue = FakePlayerQueue("TIDAL:1", "TIDAL:2")
 
-        assertEquals(OfflineAction.PausedNothingAhead(0, "TIDAL:1"), skipper(queue).onError(networkError()))
+        assertEquals(OfflineAction.PausedNothingAhead(0, "TIDAL:1"), skipper(queue).onError(queue.fail()))
         assertEquals(listOf("pause"), queue.calls)
         assertTrue(status.nothingCachedAhead.value)
     }
@@ -192,7 +195,7 @@ class OfflineSkipperTest {
         val queue = FakePlayerQueue("TIDAL:1", "TIDAL:2")
         cacheProgressive("1")
 
-        assertEquals(OfflineAction.None, skipper(queue).onError(networkError()))
+        assertEquals(OfflineAction.None, skipper(queue).onError(queue.fail()))
         assertTrue(queue.calls.isEmpty())
         assertFalse(status.handledRecently())
     }
@@ -201,7 +204,7 @@ class OfflineSkipperTest {
         val queue = FakePlayerQueue("TIDAL:1", "TIDAL:2")
         cacheProgressive("2")
 
-        assertEquals(OfflineAction.None, skipper(queue).onError(forbidden()))
+        assertEquals(OfflineAction.None, skipper(queue).onError(queue.fail(forbidden())))
         assertTrue(queue.calls.isEmpty())
     }
 
@@ -209,8 +212,24 @@ class OfflineSkipperTest {
         val queue = FakePlayerQueue("TIDAL:1", "TIDAL:2").apply { playWhenReady = false }
         cacheProgressive("2")
 
-        assertEquals(OfflineAction.None, skipper(queue).onError(networkError()))
+        assertEquals(OfflineAction.None, skipper(queue).onError(queue.fail()))
         assertTrue(queue.calls.isEmpty())
+        assertTrue(status.handledRecently())
+    }
+
+    @Test fun `a stale error after a skip leaves the song it landed on alone`() {
+        // Media3 reports the move onto a song that already failed and that song's error in one
+        // batch. The skip runs first, so the error that follows belongs to the song skipped past.
+        val queue = FakePlayerQueue("TIDAL:1", "LOCAL:2", "TIDAL:3")
+        val staleError = queue.fail()
+        val skipper = skipper(queue)
+
+        assertEquals(OfflineAction.Skipped(1), skipper.onItemStarting())
+        now += 10_000 // past the skip's own mark, so only the stale error can set it again
+
+        assertEquals(OfflineAction.None, skipper.onError(staleError))
+        assertEquals(listOf("seekTo(1, 0)", "prepareAndPlay"), queue.calls)
+        assertFalse(status.nothingCachedAhead.value)
         assertTrue(status.handledRecently())
     }
 
@@ -262,7 +281,7 @@ class OfflineSkipperTest {
 
         now += 10_000
         assertFalse(status.handledRecently())
-        skipper.onError(networkError())
+        skipper.onError(queue.fail())
         assertTrue(status.handledRecently())
     }
 
