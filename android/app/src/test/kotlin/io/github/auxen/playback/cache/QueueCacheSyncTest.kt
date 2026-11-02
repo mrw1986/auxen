@@ -2,6 +2,7 @@ package io.github.auxen.playback.cache
 
 import android.app.Application
 import android.content.Context
+import android.os.Bundle
 import android.os.Looper
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
@@ -12,6 +13,7 @@ import androidx.media3.common.Timeline
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.test.utils.FakeClock
 import androidx.test.core.app.ApplicationProvider
+import io.github.auxen.Graph
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -185,7 +187,7 @@ class QueueCacheSyncTest {
         exo.addListener(object : Player.Listener {
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 if (reason != Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) return
-                changes += queueChanges.changed(queueMediaIds(exo))
+                changes += queueChanges.changed(queueEntryKeys(exo))
             }
         })
         val looper = shadowOf(Looper.getMainLooper())
@@ -206,7 +208,50 @@ class QueueCacheSyncTest {
 
         assertEquals(listOf(true, false, false, false), swapsOnly)
         assertEquals(listOf(true, false, false, false, true, true, true), changes)
-        assertEquals(listOf("TIDAL:42", "LOCAL:7", "TIDAL:1", "TIDAL:6"), queueChanges.lastIds)
+        assertEquals(listOf("TIDAL:42", "LOCAL:7", "TIDAL:1", "TIDAL:6"), queueChanges.lastKeys)
+    }
+
+    @Test
+    fun `a fresh queue of the same songs is a queue change`() {
+        val changes = trackQueueChanges()
+        val looper = shadowOf(Looper.getMainLooper())
+
+        player.setMediaItems(listOf(tidal("1").withUid("a"), tidal("2").withUid("b")))
+        looper.idle()
+        // Play All on the same album again: the same media ids, but new queue entries.
+        player.setMediaItems(listOf(tidal("1").withUid("c"), tidal("2").withUid("d")))
+        looper.idle()
+
+        assertEquals(listOf(true, true), changes)
+    }
+
+    @Test
+    fun `cache and DASH swaps keep each entry's uid`() {
+        val changes = trackQueueChanges()
+        val looper = shadowOf(Looper.getMainLooper())
+        val queue = listOf(
+            tidal("42").withUid("a"),
+            tidal("6", dash("6").uri, MimeTypes.APPLICATION_MPD).withUid("b"),
+            tidal("1").withUid("c"),
+        )
+
+        player.setMediaItems(queue, 2, 0)
+        looper.idle()
+        reconcileQueueWithCache(player, cache("42" to dash("42")), root) // 42 onto its cache, 6 off it
+        looper.idle()
+        assertTrue(swapDashCopies(player, "1", networkDash)) // the playing song onto a network manifest
+        looper.idle()
+
+        assertEquals(listOf(dash("42").uri, "auxen://tidal/6", networkDash), player.uris())
+        assertEquals(listOf(true, false, false, false), changes)
+        assertEquals(listOf("a", "b", "c"), queueEntryKeys(player))
+    }
+
+    @Test
+    fun `an entry with no uid is keyed by its media id`() {
+        player.setMediaItems(listOf(tidal("1"), local("7").withUid("x")))
+
+        assertEquals(listOf("TIDAL:1", "x"), queueEntryKeys(player))
     }
 
     @Test
@@ -290,6 +335,23 @@ class QueueCacheSyncTest {
     private fun cache(vararg entries: Pair<String, CachedPlayback>): (String) -> CachedPlayback? = entries.toMap()::get
 
     private fun MediaItem.uriString() = localConfiguration!!.uri.toString()
+
+    /** Stamps a per-occurrence uid the way Graph.mediaItemFor does. */
+    private fun MediaItem.withUid(uid: String) = buildUpon()
+        .setMediaMetadata(mediaMetadata.buildUpon().setExtras(Bundle().apply { putString(Graph.QUEUE_UID_KEY, uid) }).build())
+        .build()
+
+    /** Feeds a tracker the way PlaybackService does: one entry per PLAYLIST_CHANGED, true for a real change. */
+    private fun trackQueueChanges(): List<Boolean> {
+        val changes = mutableListOf<Boolean>()
+        val tracker = QueueChangeTracker()
+        exo.addListener(object : Player.Listener {
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) changes += tracker.changed(queueEntryKeys(exo))
+            }
+        })
+        return changes
+    }
 
     private fun Player.uriAt(index: Int) = getMediaItemAt(index).uriString()
 

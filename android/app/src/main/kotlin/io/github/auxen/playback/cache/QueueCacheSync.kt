@@ -3,6 +3,7 @@ package io.github.auxen.playback.cache
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
+import io.github.auxen.Graph
 
 /**
  * How a queued Tidal [item] should change now that the cache holds [playback] for it, or
@@ -91,10 +92,15 @@ fun isPlayingResolvedCopy(player: Player, trackId: String): Boolean {
 }
 
 /**
- * The queue's media ids in order. Cache swaps keep them, so comparing two of these tells a
- * real queue change from a swap that only fired PLAYLIST_CHANGED.
+ * One key per queue entry, in order: its per-occurrence [Graph.QUEUE_UID_KEY], else its media id.
+ * Swaps rebuild items with `buildUpon`, which keeps the uid, so comparing two of these tells a
+ * real queue change from a swap that only fired PLAYLIST_CHANGED. A new Play All of the same
+ * album has the same media ids but fresh uids, so it counts as a change.
  */
-fun queueMediaIds(player: Player): List<String> = List(player.mediaItemCount) { player.getMediaItemAt(it).mediaId }
+fun queueEntryKeys(player: Player): List<String> = List(player.mediaItemCount) { queueEntryKey(player.getMediaItemAt(it)) }
+
+private fun queueEntryKey(item: MediaItem): String =
+    item.mediaMetadata.extras?.getString(Graph.QUEUE_UID_KEY) ?: item.mediaId
 
 private fun restorePlayingItem(player: Player, lookup: (String) -> CachedPlayback?, cacheRootUri: String) {
     val index = player.currentMediaItemIndex

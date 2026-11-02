@@ -22,7 +22,7 @@ class QueueChangeTrackerTest {
         assertTrue(tracker.changed(listOf("TIDAL:1", "TIDAL:2", "LOCAL:3")))
         assertTrue(tracker.changed(listOf("LOCAL:3", "TIDAL:1", "TIDAL:2")))
         assertTrue(tracker.changed(listOf("TIDAL:1", "TIDAL:2")))
-        assertEquals(listOf("TIDAL:1", "TIDAL:2"), tracker.lastIds)
+        assertEquals(listOf("TIDAL:1", "TIDAL:2"), tracker.lastKeys)
     }
 
     @Test fun `an empty queue at the start is not a change`() {
@@ -32,7 +32,7 @@ class QueueChangeTrackerTest {
     @Test fun `seeding sets the ids without counting a change`() {
         tracker.seed(listOf("TIDAL:7"))
 
-        assertEquals(listOf("TIDAL:7"), tracker.lastIds)
+        assertEquals(listOf("TIDAL:7"), tracker.lastKeys)
         assertFalse(tracker.changed(listOf("TIDAL:7")))
     }
 }

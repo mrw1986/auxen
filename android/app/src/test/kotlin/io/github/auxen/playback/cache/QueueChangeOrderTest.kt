@@ -81,7 +81,7 @@ class QueueChangeOrderTest {
         exo.addListener(object : Player.Listener {
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 if (reason != Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) return
-                if (queueChanges.changed(queueMediaIds(exo))) status.clear()
+                if (queueChanges.changed(queueEntryKeys(exo))) status.clear()
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {

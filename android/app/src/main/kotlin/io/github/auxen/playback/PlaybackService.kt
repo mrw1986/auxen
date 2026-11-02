@@ -78,7 +78,7 @@ import io.github.auxen.playback.cache.isPlayingResolvedCopy
 import io.github.auxen.playback.cache.nextIndexForCache
 import io.github.auxen.playback.cache.playOrder
 import io.github.auxen.playback.cache.queueItemUpdate
-import io.github.auxen.playback.cache.queueMediaIds
+import io.github.auxen.playback.cache.queueEntryKeys
 import io.github.auxen.playback.cache.reconcileQueueWithCache
 import io.github.auxen.playback.cache.replacePlayingItem
 import io.github.auxen.playback.cache.resumeOfflinePause
@@ -566,7 +566,7 @@ class PlaybackService : MediaLibraryService() {
                     syncQueueWithCache(player)
                     // Built from mediaIds, so a cache swap leaves it unchanged.
                     updateCacheWindow(player)
-                    val queueChanged = queueChanges.changed(queueMediaIds(player))
+                    val queueChanged = queueChanges.changed(queueEntryKeys(player))
                     // A new queue may have cached songs, so the offline message is stale, and
                     // the song an offline pause was waiting on may be gone.
                     if (queueChanged) {
@@ -821,7 +821,7 @@ class PlaybackService : MediaLibraryService() {
         session.player = newPlayer
         configurePlayer(newPlayer)
         // setMediaItems ran before the listener was attached, so seed this here.
-        queueChanges.seed(queueMediaIds(newPlayer))
+        queueChanges.seed(queueEntryKeys(newPlayer))
         updateCacheWindow(newPlayer)
 
         // The old player's platform effects were already released inside
