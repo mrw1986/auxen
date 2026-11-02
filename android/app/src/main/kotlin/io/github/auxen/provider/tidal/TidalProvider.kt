@@ -6,6 +6,9 @@ import io.github.auxen.model.Track
 import io.github.auxen.provider.MusicProvider
 import io.github.auxen.provider.StreamInfo
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -34,10 +37,13 @@ class TidalProvider(
     private val json = Json { ignoreUnknownKeys = true }
     private val sessionMutex = Mutex()
     private var countryCode: String = "US"
-    private var bootstrapped = false
+    private val bootstrapped = MutableStateFlow(false)
     private var userId: String? = null
 
-    val isLoggedIn: Boolean get() = bootstrapped
+    /** Whether a session is bootstrapped. Observable, so caching stops the moment the user logs out. */
+    val loggedIn: StateFlow<Boolean> = bootstrapped.asStateFlow()
+
+    val isLoggedIn: Boolean get() = bootstrapped.value
 
     /** The signed-in user's Tidal id (the favorites collection owner), or null before a successful [restoreSession]. */
     val currentUserId: String? get() = userId
@@ -101,13 +107,13 @@ class TidalProvider(
             val api = json.decodeFromString<ApiSession>(body)
             countryCode = api.countryCode
             userId = api.userId?.toString()
-            bootstrapped = true
+            bootstrapped.value = true
         }.isSuccess
     }
 
     suspend fun logout() = sessionMutex.withLock {
         auth.logout()
-        bootstrapped = false
+        bootstrapped.value = false
         userId = null
     }
 

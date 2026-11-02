@@ -23,8 +23,14 @@ enum class CacheKind { PROGRESSIVE, DASH }
 /** An upcoming Tidal track that could be cached, with its size guessed up front. */
 data class CacheCandidate(val trackId: String, val track: Track, val estimatedBytes: Long)
 
-/** The cache index at one moment, keyed by Tidal track id. */
-data class CacheSnapshot(val entries: Map<String, CachedTrackEntity> = emptyMap()) {
+/**
+ * The cache index at one moment, keyed by Tidal track id. [generation] goes up on every clear,
+ * so a reader can tell a clear from songs being evicted.
+ */
+data class CacheSnapshot(
+    val entries: Map<String, CachedTrackEntity> = emptyMap(),
+    val generation: Long = 0L,
+) {
     val ids: Set<String> get() = entries.keys
     val totalBytes: Long get() = entries.values.sumOf { it.sizeBytes }
     val count: Int get() = entries.size

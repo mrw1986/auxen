@@ -89,15 +89,28 @@ private class FakeCacheIndex(
     /** Makes commit return false without touching staging, so the scheduler has to clean up. */
     var refuseCommits = false
 
+    // The clear generation each staging folder was made in. Like TrackCacheStore, a commit from
+    // before the last clear is refused.
+    private val stagedIn = mutableMapOf<File, Long>()
+
     override fun staging(trackId: String): File =
-        File(root, "$trackId-${stagings.size}").also { it.mkdirs(); stagings += it }
+        File(root, "$trackId-${stagings.size}").also {
+            it.mkdirs()
+            stagings += it
+            stagedIn[it] = state.value.generation
+        }
 
     override suspend fun commit(trackId: String, staging: File, result: DownloadResult, track: Track): Boolean {
-        if (refuseCommits) return false
+        if (refuseCommits || stagedIn[staging] != state.value.generation) return false
         commits += trackId
         staging.deleteRecursively()
-        state.update { CacheSnapshot(it.entries + (trackId to row(trackId, result.sizeBytes))) }
+        state.update { it.copy(entries = it.entries + (trackId to row(trackId, result.sizeBytes))) }
         return true
+    }
+
+    /** Empties the index and bumps its generation, the way TrackCacheStore.clear() does. */
+    fun clear() {
+        state.update { CacheSnapshot(generation = it.generation + 1) }
     }
 
     override suspend fun discard(staging: File) {
@@ -107,14 +120,14 @@ private class FakeCacheIndex(
 
     override suspend fun evict(trackIds: Collection<String>) {
         evicted += trackIds
-        state.update { CacheSnapshot(it.entries - trackIds.toSet()) }
+        state.update { it.copy(entries = it.entries - trackIds.toSet()) }
     }
 
     override suspend fun markPlayed(trackId: String) {
         played += trackId
         state.update { snap ->
             val row = snap.entries[trackId] ?: return@update snap
-            CacheSnapshot(snap.entries + (trackId to row.copy(lastPlayedAtMillis = 1L)))
+            snap.copy(entries = snap.entries + (trackId to row.copy(lastPlayedAtMillis = 1L)))
         }
     }
 
@@ -173,6 +186,7 @@ class CacheAheadSchedulerTest {
 
     private val settings = MutableStateFlow(CacheSettings(CacheNetworkMode.WIFI_AND_MOBILE, LIMIT))
     private val network = MutableStateFlow(ONLINE_WIFI)
+    private val loggedIn = MutableStateFlow(true)
     private val downloads = FakeDownloads()
     private var free = PLENTY_FREE
     private lateinit var stagingRoot: File
@@ -183,7 +197,7 @@ class CacheAheadSchedulerTest {
     }
 
     private fun TestScope.scheduler(index: FakeCacheIndex) =
-        CacheAheadScheduler(backgroundScope, index, downloads::download, settings, network) { free }
+        CacheAheadScheduler(backgroundScope, index, downloads::download, settings, network, loggedIn) { free }
 
     private fun index(vararg cached: CachedTrackEntity) = FakeCacheIndex(stagingRoot, cached.toList())
 
@@ -239,6 +253,85 @@ class CacheAheadSchedulerTest {
         runCurrent()
         assertEquals(listOf("2"), index.commits)
         assertEquals(listOf("2", "3"), downloads.calls)
+    }
+
+    @Test fun `logging out cancels the download and starts nothing new`() = runTest {
+        val index = index()
+        val scheduler = scheduler(index)
+        scheduler.update(queue("1", "2"))
+        runCurrent()
+
+        loggedIn.value = false
+        runCurrent()
+        assertEquals(listOf("1"), downloads.cancelled)
+
+        // A new queue while logged out still starts nothing.
+        scheduler.update(queue("3", "4"))
+        runCurrent()
+        assertEquals(listOf("1"), downloads.calls)
+        assertEquals(emptyList<String>(), index.commits)
+    }
+
+    @Test fun `logging back in resumes caching`() = runTest {
+        val index = index()
+        val scheduler = scheduler(index)
+        loggedIn.value = false
+        scheduler.update(queue("1", "2"))
+        runCurrent()
+        assertEquals(emptyList<String>(), downloads.calls)
+
+        loggedIn.value = true
+        runCurrent()
+
+        assertEquals(listOf("1"), downloads.calls)
+    }
+
+    @Test fun `a clear cancels the download without a backoff`() = runTest {
+        val index = index()
+        val scheduler = scheduler(index)
+        scheduler.update(queue("1", "2"))
+        runCurrent()
+
+        index.clear()
+        runCurrent()
+
+        assertEquals(listOf("1"), downloads.cancelled)
+        assertEquals(1, index.discarded.size)
+        // No failure was recorded, so the same song may start again at once.
+        assertEquals(listOf("1", "1"), downloads.calls)
+    }
+
+    @Test fun `a download refused because of a clear isn't counted as a failure`() = runTest {
+        val index = index()
+        val scheduler = scheduler(index)
+        scheduler.update(queue("1", "2"))
+        runCurrent()
+
+        // Finishes before the scheduler sees the clear, so its commit is refused.
+        index.clear()
+        downloads.finish("1")
+        runCurrent()
+
+        assertEquals(emptyList<String>(), index.commits)
+        assertEquals(listOf("1", "1"), downloads.calls)
+    }
+
+    @Test fun `a clear drops every backoff`() = runTest {
+        val index = index()
+        val scheduler = scheduler(index)
+        scheduler.update(queue("1", "2"))
+        runCurrent()
+        downloads.fail("1")
+        runCurrent()
+        assertEquals(listOf("1", "2"), downloads.calls)
+        downloads.finish("2")
+        runCurrent()
+
+        index.clear()
+        runCurrent()
+
+        // Song 1 waited 30 s before the clear. Now it starts again right away.
+        assertEquals(listOf("1", "2", "1"), downloads.calls)
     }
 
     @Test fun `skips songs already cached`() = runTest {
@@ -608,7 +701,7 @@ class CacheAheadSchedulerTest {
     @Test fun `keeps scheduling after an unexpected error`() = runTest {
         // evict and commit failures are caught where they happen. A free-space read isn't.
         var failures = 1
-        val scheduler = CacheAheadScheduler(backgroundScope, index(), downloads::download, settings, network) {
+        val scheduler = CacheAheadScheduler(backgroundScope, index(), downloads::download, settings, network, loggedIn) {
             if (failures-- > 0) throw IllegalStateException("statfs failed")
             free
         }

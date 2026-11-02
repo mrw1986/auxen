@@ -282,7 +282,18 @@ class TrackCacheStoreTest {
 
         assertTrue(root.list()!!.isEmpty())
         assertTrue(dao.all().isEmpty())
-        assertEquals(CacheSnapshot(), store.snapshot.value)
+        assertEquals(CacheSnapshot(generation = 1L), store.snapshot.value)
+    }
+
+    @Test
+    fun `the clear generation survives later writes`() = runBlocking {
+        store.clear()
+
+        cache("7")
+        store.markPlayed("7")
+        store.evict(listOf("7"))
+
+        assertEquals(CacheSnapshot(generation = 1L), store.snapshot.value)
     }
 
     @Test

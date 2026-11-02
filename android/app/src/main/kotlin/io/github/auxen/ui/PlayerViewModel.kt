@@ -1152,6 +1152,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         loginJob?.cancel()
         viewModelScope.launch {
             Graph.tidal.logout()
+            // Signed stream URLs belong to the account too. Dropped first, so nothing reuses them.
+            Graph.resolver.invalidateAll()
             // Cached songs belong to the account that's leaving. A disk or DB error here must not block logout.
             try {
                 Graph.trackCache.clear()

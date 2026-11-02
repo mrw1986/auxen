@@ -76,7 +76,7 @@ class TrackCacheStore(
                 deleteRows(dropped.map { it.tidalTrackId })
                 val keptIds = kept.mapTo(HashSet()) { it.tidalTrackId }
                 root.listFiles()?.filter { it.name !in keptIds }?.forEach { it.deleteRecursively() }
-                state.value = CacheSnapshot(kept.associateBy { it.tidalTrackId })
+                state.update { it.copy(entries = kept.associateBy { row -> row.tidalTrackId }) }
             }
         } finally {
             loaded.complete(Unit)
@@ -120,7 +120,7 @@ class TrackCacheStore(
                 target.deleteRecursively()
                 throw e
             }
-            state.update { CacheSnapshot(it.entries + (trackId to row)) }
+            state.update { it.copy(entries = it.entries + (trackId to row)) }
             true
         }
     }
@@ -151,7 +151,8 @@ class TrackCacheStore(
 
     suspend fun clear() = locked {
         generation++
-        state.value = CacheSnapshot()
+        // Published, so the scheduler drops its download and backoffs for the old cache.
+        state.value = CacheSnapshot(generation = generation)
         // Rows before folders: see removeLocked.
         dao.deleteAll()
         root.listFiles()?.forEach { it.deleteRecursively() }
@@ -163,7 +164,7 @@ class TrackCacheStore(
         dao.markPlayed(trackId, at)
         state.update { snap ->
             val row = snap.entries[trackId] ?: return@update snap
-            CacheSnapshot(snap.entries + (trackId to row.copy(lastPlayedAtMillis = at)))
+            snap.copy(entries = snap.entries + (trackId to row.copy(lastPlayedAtMillis = at)))
         }
     }
 
@@ -196,7 +197,7 @@ class TrackCacheStore(
     // The reader can't wait for the lock, so the snapshot drops the entry now and the disk catches up.
     private fun forgetMissing(trackId: String, row: CachedTrackEntity) {
         // Identity, not equality: a commit that replaced the row meanwhile must survive.
-        state.update { if (it.entries[trackId] === row) CacheSnapshot(it.entries - trackId) else it }
+        state.update { if (it.entries[trackId] === row) it.copy(entries = it.entries - trackId) else it }
         scope.launch {
             try {
                 mutex.withLock {
@@ -216,7 +217,7 @@ class TrackCacheStore(
     // Rows before folders. deleteRecursively's order is unspecified, so a crash mid-delete can leave
     // manifest.mpd without some segments; with no row left, load() treats that as an orphan folder.
     private suspend fun removeLocked(ids: List<String>) {
-        state.update { CacheSnapshot(it.entries - ids.toSet()) }
+        state.update { it.copy(entries = it.entries - ids.toSet()) }
         deleteRows(ids)
         ids.forEach { File(root, it).deleteRecursively() }
     }

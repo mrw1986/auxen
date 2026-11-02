@@ -36,6 +36,7 @@ data class CacheQueueSnapshot(
 private data class Inputs(
     val queue: CacheQueueSnapshot,
     val settings: CacheSettings,
+    val loggedIn: Boolean,
     val network: NetworkState,
     val cache: CacheSnapshot,
 )
@@ -59,10 +60,10 @@ private class Backoff(val attempts: Int, val timer: Job)
  * from disk. The song playing now, if it isn't cached yet, goes after the songs ahead of it.
  *
  * Every decision runs in one coroutine. [update] only posts the queue, and a single collector
- * re-plans whenever the queue, settings, network or cache index changes, or a download or retry
- * timer ends. The download is a child of that loop rather than a `collectLatest` body, so a
+ * re-plans whenever the queue, settings, login, network or cache index changes, or a download or
+ * retry timer ends. The download is a child of that loop rather than a `collectLatest` body, so a
  * pause or an unrelated change never cancels it. Only its song leaving the window, losing
- * permission to cache, or [stop] does.
+ * permission to cache (logging out included), a cache clear, or [stop] does.
  */
 class CacheAheadScheduler(
     scope: CoroutineScope,
@@ -75,6 +76,7 @@ class CacheAheadScheduler(
     ) -> DownloadResult,
     settings: Flow<CacheSettings>,
     network: StateFlow<NetworkState>,
+    loggedIn: StateFlow<Boolean>,
     private val freeDeviceBytes: () -> Long,
 ) {
     private val queue = MutableStateFlow(CacheQueueSnapshot(emptyList(), playingId = null, active = false))
@@ -85,6 +87,9 @@ class CacheAheadScheduler(
     // Loop-only state. Nothing outside the loop coroutine reads or writes these.
     private var inFlight: InFlight? = null
     private var backoffs: Map<String, Backoff> = emptyMap()
+
+    // The index's clear generation as of the last pass.
+    private var cacheGeneration = 0L
 
     // Real sizes of queued songs, from a finished or too-large download, so a song that came in
     // over its estimate isn't fetched again only to be evicted. A song's size doesn't depend on the
@@ -101,7 +106,9 @@ class CacheAheadScheduler(
         // The index starts empty. Planning against that would re-fetch cached songs, trim with
         // nothing protected, and race load()'s wipe of the staging folders.
         index.awaitLoaded()
-        combine(queue, settings, network, index.snapshot, tick) { q, s, n, c, _ -> Inputs(q, s, n, c) }
+        // combine takes five typed flows at most, so settings and login ride together.
+        val account = combine(settings, loggedIn) { s, l -> s to l }
+        combine(queue, account, network, index.snapshot, tick) { q, (s, l), n, c, _ -> Inputs(q, s, l, n, c) }
             .collect { decideGuarded(loopScope, it) }
     }
 
@@ -128,13 +135,15 @@ class CacheAheadScheduler(
 
     private suspend fun decide(loopScope: CoroutineScope, inputs: Inputs) {
         val queue = inputs.queue
+        // Before settle, so a download the clear made pointless isn't counted as a failure.
+        noticeClear(inputs.cache)
         settle(loopScope, queue.playingId)
         dropUnqueued(queue)
         val used = inputs.cache.totalBytes
         if (inFlight == null) pool = used + freeDeviceBytes()
         val capacity = capacityBytes(inputs.settings.limitBytes, used, (pool - used).coerceAtLeast(0L))
         val window = planWindow(queue.candidates, inputs.cache.entries, capacity, knownSizes)
-        val allowed = mayCache(inputs.settings.mode, inputs.network)
+        val allowed = inputs.loggedIn && mayCache(inputs.settings.mode, inputs.network)
         inFlight?.takeIf { !allowed || it.trackId !in window.trackIds }?.job?.cancel()
 
         val protectedIds = window.trackIds.toSet() + listOfNotNull(queue.playingId)
@@ -165,6 +174,20 @@ class CacheAheadScheduler(
     ): Boolean {
         val kept = cache.entries.values.sumOf { if (it.tidalTrackId in protectedIds) it.sizeBytes else 0L }
         return kept + next.estimatedBytes <= capacity
+    }
+
+    /**
+     * After a clear (logout or Settings), drops the in-flight download unsettled and every
+     * backoff. The download belongs to the old cache: its commit would be refused, and counting
+     * that as a failure would hold the song back 30 s.
+     */
+    private fun noticeClear(cache: CacheSnapshot) {
+        if (cache.generation == cacheGeneration) return
+        cacheGeneration = cache.generation
+        inFlight?.job?.cancel()
+        inFlight = null
+        backoffs.values.forEach { it.timer.cancel() }
+        backoffs = emptyMap()
     }
 
     // Clears a finished download and keeps any size it learned. Success or too large forgets its
