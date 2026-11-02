@@ -42,6 +42,9 @@ data class Track(
     val isLocal: Boolean get() = source == Source.LOCAL
     val isTidal: Boolean get() = source == Source.TIDAL
 
+    /** Whether this is a Tidal track with a full copy in the cache. [ids] are bare Tidal ids. */
+    fun isCachedIn(ids: Set<String>): Boolean = isTidal && sourceId in ids
+
     /**
      * Integer quality score for comparison; higher is better.
      *

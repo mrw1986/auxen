@@ -134,7 +134,7 @@ internal fun QueueContent(
                 track = playingEntry.track,
                 isFavorite = favoriteKeys.contains(playingEntry.track.favoriteKey()),
                 isPlaying = true,
-                isCached = playingEntry.track.isTidal && playingEntry.track.sourceId in cachedIds,
+                isCached = playingEntry.track.isCachedIn(cachedIds),
                 onPlay = { onJumpTo(playingIndex) },
                 onToggleFavorite = { onToggleFavorite(playingEntry.track) },
             )
@@ -207,7 +207,7 @@ private fun ReorderableQueueList(
                     track = track,
                     isFavorite = favoriteKeys.contains(track.favoriteKey()),
                     isPlaying = false,
-                    isCached = track.isTidal && track.sourceId in cachedIds,
+                    isCached = track.isCachedIn(cachedIds),
                     onPlay = { if (realIndex >= 0) onJumpTo(realIndex) },
                     onToggleFavorite = { onToggleFavorite(track) },
                     trailing = {

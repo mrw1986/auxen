@@ -380,7 +380,7 @@ fun ArtistDetailScreen(
                 AuxenTrackRow(
                     track = track,
                     isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
-                    isCached = track.isTidal && track.sourceId in cachedIds,
+                    isCached = track.isCachedIn(cachedIds),
                     onPlay = { viewModel.play(track) },
                     onToggleFavorite = { viewModel.toggleFavorite(track) },
                     onLongPress = { sheetTrack = track },

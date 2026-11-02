@@ -71,7 +71,7 @@ class AuxenBrowseTree {
     private fun playableTrack(track: Track, cachedIds: Set<String>): MediaItem {
         val base = Graph.mediaItemFor(track)
         val metadata = base.mediaMetadata.buildUpon().setIsPlayable(true)
-        if (track.isTidal && track.sourceId in cachedIds) {
+        if (track.isCachedIn(cachedIds)) {
             val extras = Bundle().apply {
                 base.mediaMetadata.extras?.let { putAll(it) }
                 putLong(MediaConstants.EXTRAS_KEY_DOWNLOAD_STATUS, MediaConstants.EXTRAS_VALUE_STATUS_DOWNLOADED)
