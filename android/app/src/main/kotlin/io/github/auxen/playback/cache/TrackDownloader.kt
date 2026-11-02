@@ -42,29 +42,46 @@ class TrackDownloader(
 ) {
 
     /**
-     * Fills [into] (an existing, empty folder) with the track.
+     * Fills [into] (an existing, empty folder) with the track, writing at most [maxBytes].
+     * [durationSeconds] lets a DASH stream check its size from its real format up front.
      *
+     * @throws SongTooLargeException once the track is known not to fit [maxBytes]. A
+     *   Content-Length or format estimate over it stops before any body byte is written.
      * @throws IOException on any network, HTTP or manifest failure. The messages this class
      *   writes name the part ("segment 5", "init", "audio"), never its URL. Whatever [resolve]
      *   throws passes through as is.
      */
-    suspend fun download(trackId: String, into: File): DownloadResult = withContext(Dispatchers.IO) {
+    suspend fun download(
+        trackId: String,
+        into: File,
+        maxBytes: Long = Long.MAX_VALUE,
+        durationSeconds: Double? = null,
+    ): DownloadResult = withContext(Dispatchers.IO) {
         var plan = plan(resolve(trackId, false))
+        checkFormatEstimate(trackId, plan.info.takeIf { plan.manifest != null }, durationSeconds, maxBytes)
         var refreshed = false
         var contentType: String? = null
+        var doneBytes = 0L
         var next = 0
         while (next < plan.parts.size) {
             ensureActive()
             try {
-                contentType = fetch(plan.parts[next], into)
+                val fetched = fetch(plan.parts[next], into, maxBytes - doneBytes)
+                contentType = fetched.contentType
+                doneBytes += fetched.bytes
                 next++
             } catch (e: HttpStatusException) {
                 if (e.code !in EXPIRED_CODES || refreshed) throw e
                 refreshed = true
                 // Resume at the part that failed. Everything before it is already on disk.
                 plan = refreshedPlan(trackId, plan)
+            } catch (e: OverBudgetException) {
+                throw SongTooLargeException(trackId, wholeSongBytes(plan, next, doneBytes + e.bytes))
             }
         }
+        // The local manifest is written last and counts too, so the whole folder stays in budget.
+        val manifestBytes = plan.manifest?.toByteArray()?.size ?: 0
+        if (doneBytes + manifestBytes > maxBytes) throw SongTooLargeException(trackId, doneBytes + manifestBytes)
         result(plan, into, contentType)
     }
 
@@ -78,21 +95,22 @@ class TrackDownloader(
         return fresh
     }
 
-    /** GETs [part] into its file and returns the response's media type. */
-    private suspend fun fetch(part: Part, into: File): String? {
+    /** GETs [part] into its file, writing at most [room] bytes. */
+    private suspend fun fetch(part: Part, into: File, room: Long): Fetched {
         val url = part.url.toHttpUrlOrNull() ?: throw IOException("Bad URL for ${part.label}")
         val call = http.newCall(Request.Builder().url(url).build())
         return runCall(call) { response ->
             if (!response.isSuccessful) throw HttpStatusException(response.code, part.label)
             val body = response.body ?: throw IOException("No body for ${part.label}")
+            val expected = body.contentLength()
+            if (expected > room) throw OverBudgetException(expected)
             // Truncates, so a retried part starts again from byte 0.
-            val written = File(into, part.file).outputStream().use { copyChunks(body.byteStream(), it) }
+            val written = File(into, part.file).outputStream().use { copyChunks(body.byteStream(), it, room) }
             // OkHttp checks the length only on HTTP/1.1. An HTTP/2 stream that ends early reads as
             // a clean EOF, and a cut-short part would otherwise be cached as a whole song.
             if (written == 0L) throw IOException("Empty body for ${part.label}")
-            val expected = body.contentLength()
             if (expected >= 0 && written != expected) throw IOException("Short body for ${part.label}")
-            body.contentType()?.let { "${it.type}/${it.subtype}" }
+            Fetched(body.contentType()?.let { "${it.type}/${it.subtype}" }, written)
         }
     }
 
@@ -123,19 +141,50 @@ class TrackDownloader(
         }
     }
 
-    /** Copies [input] to [output] and returns the byte count. */
-    private suspend fun copyChunks(input: InputStream, output: OutputStream): Long {
+    /** Copies [input] to [output] and returns the byte count. Stops before passing [limit]. */
+    private suspend fun copyChunks(input: InputStream, output: OutputStream, limit: Long): Long {
         val chunk = ByteArray(CHUNK_BYTES)
         var written = 0L
         while (true) {
             currentCoroutineContext().ensureActive()
             val read = input.read(chunk)
             if (read < 0) return written
+            // Checked before the write, so the disk never holds more than the budget.
+            if (written + read > limit) throw OverBudgetException(written + read)
             output.write(chunk, 0, read)
             written += read
         }
     }
 }
+
+/**
+ * Refuses a DASH stream up front when its real format, unlike a list endpoint's quality label,
+ * puts it over [maxBytes]. Skipped when [info] (null for progressive) or the duration is missing,
+ * since the fallback guess errs high and would turn away songs that fit.
+ */
+private fun checkFormatEstimate(trackId: String, info: StreamInfo?, durationSeconds: Double?, maxBytes: Long) {
+    val bitDepth = info?.bitDepth ?: return
+    val sampleRateHz = info.sampleRateHz ?: return
+    val seconds = durationSeconds ?: return
+    val estimate = estimateBytes(seconds, bitDepth, sampleRateHz)
+    if (estimate > maxBytes) throw SongTooLargeException(trackId, estimate)
+}
+
+/**
+ * The whole song's size from [bytes] known through part [partIndex]. A DASH overrun has only
+ * seen some segments, so it scales up by the share of parts done.
+ */
+private fun wholeSongBytes(plan: Plan, partIndex: Int, bytes: Long): Long {
+    if (plan.manifest == null) return bytes
+    val parts = plan.parts.size.toLong()
+    return if (bytes > Long.MAX_VALUE / parts) Long.MAX_VALUE else bytes * parts / (partIndex + 1)
+}
+
+/** One part on disk: the response's media type and the bytes written. */
+private class Fetched(val contentType: String?, val bytes: Long)
+
+/** A part's response would take the download past its budget. [bytes] counts this part only. */
+private class OverBudgetException(val bytes: Long) : IOException("Over the download budget")
 
 /** One file of a download: [label] names it in errors, since [url] carries a token. */
 private class Part(val label: String, val file: String, val url: String)

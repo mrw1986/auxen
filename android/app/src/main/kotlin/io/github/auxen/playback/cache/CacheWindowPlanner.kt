@@ -32,10 +32,13 @@ fun playOrder(start: Int, next: (Int) -> Int): List<Int> {
 }
 
 /** Rough on-disk size of a Tidal stream: raw PCM bits shrunk by a typical FLAC ratio. */
-fun estimateBytes(track: Track): Long {
-    val seconds = track.durationSeconds?.takeIf { it > 0 && it.isFinite() } ?: FALLBACK_DURATION_SECONDS
-    val bitDepth = track.bitDepth?.takeIf { it > 0 } ?: FALLBACK_BIT_DEPTH
-    val sampleRate = track.sampleRateHz?.takeIf { it > 0 } ?: FALLBACK_SAMPLE_RATE_HZ
+fun estimateBytes(track: Track): Long = estimateBytes(track.durationSeconds, track.bitDepth, track.sampleRateHz)
+
+/** The same guess from a duration and format, such as a resolved stream's real one. */
+fun estimateBytes(durationSeconds: Double?, bitDepth: Int?, sampleRateHz: Int?): Long {
+    val seconds = durationSeconds?.takeIf { it > 0 && it.isFinite() } ?: FALLBACK_DURATION_SECONDS
+    val bitDepth = bitDepth?.takeIf { it > 0 } ?: FALLBACK_BIT_DEPTH
+    val sampleRate = sampleRateHz?.takeIf { it > 0 } ?: FALLBACK_SAMPLE_RATE_HZ
     // Rounded, not truncated: 0.7 isn't exact in binary and would shave a byte off.
     return (seconds * bitDepth * sampleRate * CHANNELS * FLAC_COMPRESSION_RATIO / 8).roundToLong()
 }

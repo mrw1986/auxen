@@ -5,6 +5,7 @@ import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.provider.StreamInfo
 import java.io.File
+import java.io.IOException
 import kotlinx.coroutines.flow.StateFlow
 
 /** How a queued Tidal track's media id starts: `TIDAL:<id>`. */
@@ -47,6 +48,14 @@ data class DownloadResult(
     override fun toString(): String =
         "DownloadResult(kind=$kind, entryFile=$entryFile, sizeBytes=$sizeBytes, mimeType=$mimeType)"
 }
+
+/**
+ * A download stopped because [trackId] won't fit the room it was given. [sizeBytes] is the best
+ * known size: the Content-Length, an estimate from the stream's real format, or what was written
+ * so far scaled up to the whole song.
+ */
+class SongTooLargeException(val trackId: String, val sizeBytes: Long) :
+    IOException("Track $trackId is about $sizeBytes bytes, more than its cache budget")
 
 /** The cache as the downloader and scheduler write to it. */
 interface CacheIndex {

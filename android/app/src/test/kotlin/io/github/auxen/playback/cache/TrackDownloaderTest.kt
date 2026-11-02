@@ -514,4 +514,99 @@ class TrackDownloaderTest {
     fun `a re-resolve to a progressive stream fails the download`() = runBlocking<Unit> {
         assertRefreshRejected(StreamInfo(uri = FRESH_BTS_URL, mimeType = "audio/flac"))
     }
+
+    private suspend fun expectTooLarge(block: suspend () -> Unit): SongTooLargeException {
+        val error = runCatching { block() }.exceptionOrNull()
+        assertTrue("expected a SongTooLargeException, got $error", error is SongTooLargeException)
+        return error as SongTooLargeException
+    }
+
+    @Test
+    fun `a Content-Length over budget stops before reading the body`() = runBlocking<Unit> {
+        cdn.serve(BTS_URL, Random(5).nextBytes(200_000))
+        val reads = AtomicLong()
+        cdn.onBodyRead = { _, _, _ -> reads.incrementAndGet() }
+
+        val error = expectTooLarge {
+            downloader(FakeResolver(StreamInfo(uri = BTS_URL))).download(TRACK_ID, into, maxBytes = 199_999)
+        }
+
+        assertEquals(TRACK_ID, error.trackId)
+        assertEquals(200_000L, error.sizeBytes)
+        assertEquals(0L, reads.get())
+        assertTrue(into.list()!!.isEmpty())
+        assertFalse(error.message.orEmpty(), "cdn.example" in error.message.orEmpty())
+    }
+
+    @Test
+    fun `a body that runs past its budget stops at the budget`() = runBlocking<Unit> {
+        val body = Random(6).nextBytes(500_000)
+        cdn.serve(BTS_URL, body)
+        // No Content-Length, as a chunked response has none.
+        cdn.claimLength(BTS_URL, -1)
+        val served = AtomicLong()
+        cdn.onBodyRead = { _, bytes, _ -> served.set(bytes) }
+
+        val error = expectTooLarge {
+            downloader(FakeResolver(StreamInfo(uri = BTS_URL))).download(TRACK_ID, into, maxBytes = 100_000)
+        }
+
+        assertTrue("${error.sizeBytes}", error.sizeBytes > 100_000)
+        assertTrue(File(into, "audio").length() <= 100_000)
+        assertTrue("read ${served.get()}", served.get() < body.size)
+    }
+
+    @Test
+    fun `a DASH stream whose real format is over budget stops before the first segment`() = runBlocking<Unit> {
+        serveDash("x")
+        val seconds = 315.037
+        val expected = estimateBytes(seconds, bitDepth = 24, sampleRateHz = 96_000)
+
+        val error = expectTooLarge {
+            downloader(FakeResolver(dashInfo())).download(TRACK_ID, into, expected - 1, seconds)
+        }
+
+        assertEquals(expected, error.sizeBytes)
+        assertTrue(cdn.requests.isEmpty())
+        assertTrue(into.list()!!.isEmpty())
+    }
+
+    @Test
+    fun `a DASH download that runs past its budget stops and scales up its size`() = runBlocking<Unit> {
+        serveDash("x")
+        val total = initBody("x").size + (1..SEGMENTS).sumOf { segmentBody(it, "x").size.toLong() }
+        val budget = total / 2
+
+        val error = expectTooLarge { downloader(FakeResolver(dashInfo())).download(TRACK_ID, into, budget) }
+
+        // Scaled from the segments done, so it's past the budget though only part was fetched.
+        assertTrue("${error.sizeBytes}", error.sizeBytes > budget)
+        assertTrue(cdn.requests.size < 1 + SEGMENTS)
+        assertTrue(into.listFiles()!!.sumOf { it.length() } <= budget)
+    }
+
+    @Test
+    fun `a download that fits its budget exactly works as before`() = runBlocking<Unit> {
+        val body = Random(8).nextBytes(150_000)
+        cdn.serve(BTS_URL, body)
+
+        val result = downloader(FakeResolver(StreamInfo(uri = BTS_URL))).download(TRACK_ID, into, maxBytes = 150_000)
+
+        assertEquals(150_000L, result.sizeBytes)
+        assertArrayEquals(body, File(into, "audio").readBytes())
+    }
+
+    @Test
+    fun `a DASH download counts its local manifest against the budget`() = runBlocking<Unit> {
+        serveDash("x")
+        val full = downloader(FakeResolver(dashInfo())).download(TRACK_ID, tmp.newFolder("full")).sizeBytes
+
+        val fits = downloader(FakeResolver(dashInfo())).download(TRACK_ID, into, maxBytes = full)
+        assertEquals(full, fits.sizeBytes)
+
+        val tight = tmp.newFolder("tight")
+        val error = expectTooLarge { downloader(FakeResolver(dashInfo())).download(TRACK_ID, tight, full - 1) }
+        assertEquals(full, error.sizeBytes)
+        assertFalse(File(tight, "manifest.mpd").exists())
+    }
 }
