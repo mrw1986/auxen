@@ -31,6 +31,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.media3.common.util.UnstableApi
 import io.github.auxen.R
 import io.github.auxen.model.QueueEntry
 import io.github.auxen.model.Track
@@ -56,6 +57,7 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
  * Thin VM-collecting shell over [QueueContent], same split as
  * `SettingsContent`/`AutoEqPickerResults`.
  */
+@UnstableApi
 @Composable
 fun QueueScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     val queue by viewModel.queue.collectAsState()

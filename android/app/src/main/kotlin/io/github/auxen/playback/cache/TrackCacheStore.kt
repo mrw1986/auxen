@@ -1,6 +1,7 @@
 package io.github.auxen.playback.cache
 
 import android.util.Log
+import androidx.media3.common.util.UnstableApi
 import io.github.auxen.Graph
 import io.github.auxen.db.CachedTrackDao
 import io.github.auxen.db.CachedTrackEntity
@@ -42,6 +43,7 @@ private val STAGING_NAME = Regex("(.+)-(\\d+)-(-?\\d+)")
  * Every mutation runs under one lock on [Dispatchers.IO]. The sync readers
  * ([cachedPlayback], [streamInfoFor], [snapshot]) never lock: Media3 loader threads call them.
  */
+@UnstableApi
 class TrackCacheStore(
     private val root: File,
     private val dao: CachedTrackDao,

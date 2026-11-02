@@ -42,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.media3.common.util.UnstableApi
 import io.github.auxen.BuildConfig
 import io.github.auxen.R
 import io.github.auxen.model.SourcePriority
@@ -64,6 +65,7 @@ import io.github.auxen.ui.theme.ThemeMode
  * it without a live [PlayerViewModel].
  */
 @OptIn(ExperimentalMaterial3Api::class)
+@UnstableApi
 @Composable
 fun SettingsScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     val themeMode by viewModel.themeMode.collectAsState()

@@ -3,6 +3,7 @@ package io.github.auxen.playback.cache
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import io.github.auxen.Graph
 
 /**
@@ -108,8 +109,10 @@ fun isPlayingResolvedCopy(player: Player, trackId: String): Boolean {
  * real queue change from a swap that only fired PLAYLIST_CHANGED. A new Play All of the same
  * album has the same media ids but fresh uids, so it counts as a change.
  */
+@UnstableApi
 fun queueEntryKeys(player: Player): List<String> = List(player.mediaItemCount) { queueEntryKey(player.getMediaItemAt(it)) }
 
+@UnstableApi
 private fun queueEntryKey(item: MediaItem): String =
     item.mediaMetadata.extras?.getString(Graph.QUEUE_UID_KEY) ?: item.mediaId
 
