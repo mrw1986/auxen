@@ -270,6 +270,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         .map { formatCacheReadout(it.totalBytes, it.count) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, formatCacheReadout(0, 0))
 
+    /** Bare Tidal ids with a full copy on disk, for the track rows' "Available offline" icon. */
+    val cachedIds: StateFlow<Set<String>> = Graph.trackCache.snapshot
+        .map { it.ids }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
     // runCatching like the other settings writes: a disk or DB error mustn't crash the app.
     fun setCacheMode(mode: CacheNetworkMode) {
         viewModelScope.launch { runCatching { Graph.cacheSettings.setMode(mode) } }

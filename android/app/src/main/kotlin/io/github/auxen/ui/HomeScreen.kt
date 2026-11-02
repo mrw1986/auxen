@@ -70,6 +70,7 @@ fun HomeScreen(
     val recentlyAdded by viewModel.recentlyAdded.collectAsState()
     val localTracks by viewModel.localTracks.collectAsState()
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
+    val cachedIds by viewModel.cachedIds.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val filter by viewModel.homeFilter.collectAsState()
     val loading by viewModel.homeLoading.collectAsState()
@@ -167,6 +168,7 @@ fun HomeScreen(
                 AuxenTrackRow(
                     track = track,
                     isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+                    isCached = track.isTidal && track.sourceId in cachedIds,
                     onPlay = { viewModel.play(track) },
                     onToggleFavorite = { viewModel.toggleFavorite(track) },
                     onLongPress = { sheetTrack = track },

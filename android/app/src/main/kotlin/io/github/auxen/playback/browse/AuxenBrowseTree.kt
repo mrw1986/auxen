@@ -1,7 +1,10 @@
 package io.github.auxen.playback.browse
 
+import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.session.MediaConstants
 import io.github.auxen.Graph
 import io.github.auxen.db.FavoriteAlbumEntity
 import io.github.auxen.db.FavoriteArtistEntity
@@ -15,6 +18,7 @@ import io.github.auxen.model.Track
  * Graph.mediaItemFor, so any leaf this returns is playable through the existing
  * ResolvingDataSource. Folder nodes carry isBrowsable=true/isPlayable=false.
  */
+@UnstableApi
 class AuxenBrowseTree {
 
     fun root(): MediaItem = folder(AuxenBrowseIds.ROOT, "Auxen", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
@@ -41,16 +45,17 @@ class AuxenBrowseTree {
             folder(AuxenBrowseIds.artist(it.sourceId), it.name, MediaMetadata.MEDIA_TYPE_ARTIST, it.artUrl)
         }.ifEmpty { listOf(emptyNode("No followed artists yet")) }
 
-    fun trackList(tracks: List<Track>): List<MediaItem> =
-        tracks.map(::playableTrack).ifEmpty { listOf(emptyNode("Nothing here yet")) }
+    /** [cachedIds] are the bare Tidal ids with a full copy on disk; those leaves get Auto's "downloaded" badge. */
+    fun trackList(tracks: List<Track>, cachedIds: Set<String> = emptySet()): List<MediaItem> =
+        tracks.map { playableTrack(it, cachedIds) }.ifEmpty { listOf(emptyNode("Nothing here yet")) }
 
-    fun albumDetail(tidalId: String, tracks: List<Track>): List<MediaItem> =
+    fun albumDetail(tidalId: String, tracks: List<Track>, cachedIds: Set<String> = emptySet()): List<MediaItem> =
         if (tracks.isEmpty()) listOf(emptyNode("No tracks"))
-        else listOf(playAll(AuxenBrowseIds.playAllAlbum(tidalId))) + tracks.map(::playableTrack)
+        else listOf(playAll(AuxenBrowseIds.playAllAlbum(tidalId))) + tracks.map { playableTrack(it, cachedIds) }
 
-    fun artistDetail(tidalId: String, tracks: List<Track>): List<MediaItem> =
+    fun artistDetail(tidalId: String, tracks: List<Track>, cachedIds: Set<String> = emptySet()): List<MediaItem> =
         if (tracks.isEmpty()) listOf(emptyNode("No tracks"))
-        else listOf(playAll(AuxenBrowseIds.playAllArtist(tidalId))) + tracks.map(::playableTrack)
+        else listOf(playAll(AuxenBrowseIds.playAllArtist(tidalId))) + tracks.map { playableTrack(it, cachedIds) }
 
     /**
      * [Graph.mediaItemFor] doesn't stamp `isPlayable` on its [MediaMetadata] (none of
@@ -58,12 +63,22 @@ class AuxenBrowseTree {
      * browse contract does: a leaf without it won't render as tappable. Rebuild on
      * top of the shared mapper rather than touching it, so this stays local to the
      * browse tree instead of changing behavior for every other consumer.
+     *
+     * A cached Tidal leaf also gets the standard download-status extra, on a copy
+     * of the shared mapper's extras so the track JSON and queue uid stay. The Tidal
+     * gate matters: cache ids are bare Tidal ids, and a MediaStore id can be the same number.
      */
-    private fun playableTrack(track: Track): MediaItem {
+    private fun playableTrack(track: Track, cachedIds: Set<String>): MediaItem {
         val base = Graph.mediaItemFor(track)
-        return base.buildUpon()
-            .setMediaMetadata(base.mediaMetadata.buildUpon().setIsPlayable(true).build())
-            .build()
+        val metadata = base.mediaMetadata.buildUpon().setIsPlayable(true)
+        if (track.isTidal && track.sourceId in cachedIds) {
+            val extras = Bundle().apply {
+                base.mediaMetadata.extras?.let { putAll(it) }
+                putLong(MediaConstants.EXTRAS_KEY_DOWNLOAD_STATUS, MediaConstants.EXTRAS_VALUE_STATUS_DOWNLOADED)
+            }
+            metadata.setExtras(extras)
+        }
+        return base.buildUpon().setMediaMetadata(metadata.build()).build()
     }
 
     fun emptyNode(text: String): MediaItem = inert(mediaId = "auxen://browse/empty", title = text)

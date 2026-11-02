@@ -61,6 +61,7 @@ fun QueueScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
     val queue by viewModel.queue.collectAsState()
     val playingIndex by viewModel.queueIndex.collectAsState()
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
+    val cachedIds by viewModel.cachedIds.collectAsState()
     QueueContent(
         queue = queue,
         playingIndex = playingIndex,
@@ -70,6 +71,7 @@ fun QueueScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
         onMove = viewModel::moveInQueue,
         onToggleFavorite = viewModel::toggleFavorite,
         onClear = viewModel::clearQueue,
+        cachedIds = cachedIds,
         modifier = modifier,
     )
 }
@@ -84,6 +86,7 @@ internal fun QueueContent(
     onMove: (Int, Int) -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onClear: () -> Unit,
+    cachedIds: Set<String> = emptySet(),
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -129,6 +132,7 @@ internal fun QueueContent(
                 track = playingEntry.track,
                 isFavorite = favoriteKeys.contains(playingEntry.track.favoriteKey()),
                 isPlaying = true,
+                isCached = playingEntry.track.isTidal && playingEntry.track.sourceId in cachedIds,
                 onPlay = { onJumpTo(playingIndex) },
                 onToggleFavorite = { onToggleFavorite(playingEntry.track) },
             )
@@ -139,6 +143,7 @@ internal fun QueueContent(
             queue = queue,
             playingIndex = playingIndex,
             favoriteKeys = favoriteKeys,
+            cachedIds = cachedIds,
             onJumpTo = onJumpTo,
             onRemove = onRemove,
             onMove = onMove,
@@ -166,6 +171,7 @@ private fun ReorderableQueueList(
     queue: List<QueueEntry>,
     playingIndex: Int,
     favoriteKeys: Set<String>,
+    cachedIds: Set<String>,
     onJumpTo: (Int) -> Unit,
     onRemove: (Int) -> Unit,
     onMove: (Int, Int) -> Unit,
@@ -199,6 +205,7 @@ private fun ReorderableQueueList(
                     track = track,
                     isFavorite = favoriteKeys.contains(track.favoriteKey()),
                     isPlaying = false,
+                    isCached = track.isTidal && track.sourceId in cachedIds,
                     onPlay = { if (realIndex >= 0) onJumpTo(realIndex) },
                     onToggleFavorite = { onToggleFavorite(track) },
                     trailing = {

@@ -122,6 +122,7 @@ fun SearchScreen(
     val artists by viewModel.searchArtists.collectAsState()
     val history by viewModel.searchHistoryItems.collectAsState()
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
+    val cachedIds by viewModel.cachedIds.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     var typeFilter by rememberSaveable { mutableStateOf("All") }
     var tab by rememberSaveable { mutableIntStateOf(0) }
@@ -279,6 +280,7 @@ fun SearchScreen(
                                 AuxenTrackRow(
                                     track = track,
                                     isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+                                    isCached = track.isTidal && track.sourceId in cachedIds,
                                     onPlay = { viewModel.play(track) },
                                     onToggleFavorite = { viewModel.toggleFavorite(track) },
                                     onLongPress = { sheetTrack = track },

@@ -222,4 +222,56 @@ class AuxenTrackRowUiTest {
 
         compose.onNodeWithText("3:47").assertExists()
     }
+
+    @Test
+    fun `a cached Tidal row shows the offline icon`() {
+        compose.setContent {
+            AuxenTheme(darkTheme = true) {
+                AuxenTrackRow(
+                    track = track(source = Source.TIDAL),
+                    isFavorite = false,
+                    onPlay = {},
+                    onToggleFavorite = {},
+                    isCached = true,
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription("Available offline").assertExists()
+    }
+
+    @Test
+    fun `an uncached row has no offline icon`() {
+        compose.setContent {
+            AuxenTheme(darkTheme = true) {
+                AuxenTrackRow(
+                    track = track(source = Source.TIDAL),
+                    isFavorite = false,
+                    onPlay = {},
+                    onToggleFavorite = {},
+                    isCached = false,
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription("Available offline").assertDoesNotExist()
+    }
+
+    /** The cache only holds Tidal songs. A local file is always on the device, so no marker. */
+    @Test
+    fun `a local row never shows the offline icon`() {
+        compose.setContent {
+            AuxenTheme(darkTheme = true) {
+                AuxenTrackRow(
+                    track = track(source = Source.LOCAL),
+                    isFavorite = false,
+                    onPlay = {},
+                    onToggleFavorite = {},
+                    isCached = true,
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription("Available offline").assertDoesNotExist()
+    }
 }

@@ -121,6 +121,8 @@
     <string name="settings_cache_clear_confirm_body">Cached songs will need service to play again.</string>
     <string name="settings_cache_clear_confirm">Clear</string>
     <string name="settings_cache_clear_cancel">Cancel</string>
+    <!-- Predictive cache, Task 13: the icon on a track row whose song is cached. -->
+    <string name="track_cached_cd">Available offline</string>
 
     <string name="settings_about_title">About</string>
     <string name="settings_about_version">Version %1$s</string>

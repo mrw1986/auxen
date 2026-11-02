@@ -70,6 +70,7 @@ fun AlbumDetailScreen(
     val localTracks by viewModel.localTracks.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
+    val cachedIds by viewModel.cachedIds.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     var sheetTrack by remember { mutableStateOf<Track?>(null) }
     var infoTrack by remember { mutableStateOf<Track?>(null) }
@@ -237,6 +238,7 @@ fun AlbumDetailScreen(
                     track = track,
                     trackNumber = track.trackNumber,
                     isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+                    isCached = track.isTidal && track.sourceId in cachedIds,
                     onPlay = { viewModel.play(track) },
                     onToggleFavorite = { viewModel.toggleFavorite(track) },
                     onLongPress = { sheetTrack = track },

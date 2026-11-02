@@ -87,6 +87,7 @@ fun CollectionScreen(
 ) {
     val favorites by viewModel.favorites.collectAsState()
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
+    val cachedIds by viewModel.cachedIds.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val favoriteAlbumRows by viewModel.favoriteAlbums.collectAsState()
     val favoriteArtistRows by viewModel.favoriteArtists.collectAsState()
@@ -194,6 +195,7 @@ fun CollectionScreen(
                         AuxenTrackRow(
                             track = track,
                             isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+                            isCached = track.isTidal && track.sourceId in cachedIds,
                             onPlay = { viewModel.play(track) },
                             onToggleFavorite = { viewModel.toggleFavorite(track) },
                             onLongPress = { sheetTrack = track },

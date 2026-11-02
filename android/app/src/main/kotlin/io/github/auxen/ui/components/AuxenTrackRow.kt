@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -27,11 +28,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.github.auxen.R
 import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import io.github.auxen.ui.theme.AuxenColors
@@ -45,7 +48,8 @@ fun formatDuration(seconds: Double?): String {
 
 /**
  * The canonical track row — Android port of the desktop
- * `make_standard_track_row`: [Art][Title(+E) / Subtitle(+Quality)][Duration][Heart][trailing].
+ * `make_standard_track_row`: [Art][Title(+E) / Subtitle(+Quality)][Cached][Duration][Heart][trailing].
+ * The cached marker shows only for a Tidal song with a full copy on disk.
  * The source pill is intentionally omitted (it is redundant on a Tidal-filtered
  * list and available in the track action sheet); the quality pill rides on the
  * subtitle line so the title column gets the full freed width on phone widths.
@@ -60,6 +64,7 @@ fun AuxenTrackRow(
     onToggleFavorite: () -> Unit,
     modifier: Modifier = Modifier,
     isPlaying: Boolean = false,
+    isCached: Boolean = false,
     trackNumber: Int? = null,
     onLongPress: (() -> Unit)? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
@@ -158,6 +163,17 @@ fun AuxenTrackRow(
             }
         }
         Spacer(Modifier.width(8.dp))
+        // Only Tidal songs are cached. A local file is always on the device, so it
+        // never gets the marker, even if a caller passes isCached for it.
+        if (isCached && track.isTidal) {
+            Icon(
+                Icons.Filled.OfflinePin,
+                contentDescription = stringResource(R.string.track_cached_cd),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+        }
         Text(
             formatDuration(track.durationSeconds),
             style = MaterialTheme.typography.bodySmall,

@@ -1256,25 +1256,29 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
-    private suspend fun childrenFor(parentId: String): List<MediaItem> =
-        when (val target = AuxenBrowseIds.parse(parentId)) {
+    // The cached badge is read when Auto opens a folder. A song that finishes caching
+    // while its folder is open shows its badge the next time the folder opens.
+    private suspend fun childrenFor(parentId: String): List<MediaItem> {
+        val cached = Graph.trackCache.snapshot.value.ids
+        return when (val target = AuxenBrowseIds.parse(parentId)) {
             BrowseTarget.Root -> browseTree.rootChildren()
-            BrowseTarget.Recent -> browseTree.trackList(Graph.library.recentlyPlayed(limit = 50))
-            BrowseTarget.Favorites -> browseTree.trackList(Graph.library.favorites().first())
+            BrowseTarget.Recent -> browseTree.trackList(Graph.library.recentlyPlayed(limit = 50), cached)
+            BrowseTarget.Favorites -> browseTree.trackList(Graph.library.favorites().first(), cached)
             BrowseTarget.Playlists -> browseTree.playlistCategory(Graph.library.playlists().first())
             BrowseTarget.Albums -> browseTree.albumCategory(Graph.library.favoriteAlbums().first())
             BrowseTarget.Artists -> browseTree.artistCategory(Graph.library.favoriteArtists().first())
-            is BrowseTarget.Playlist -> browseTree.trackList(playlistTracksFor(target.id))
+            is BrowseTarget.Playlist -> browseTree.trackList(playlistTracksFor(target.id), cached)
             is BrowseTarget.Album -> when (val f = browseFetcher.albumTracks(target.tidalId)) {
-                is BrowseFetch.Ok -> browseTree.albumDetail(target.tidalId, f.tracks)
+                is BrowseFetch.Ok -> browseTree.albumDetail(target.tidalId, f.tracks, cached)
                 BrowseFetch.Failed -> listOf(browseTree.errorNode())
             }
             is BrowseTarget.Artist -> when (val f = browseFetcher.artistTracks(target.tidalId)) {
-                is BrowseFetch.Ok -> browseTree.artistDetail(target.tidalId, f.tracks)
+                is BrowseFetch.Ok -> browseTree.artistDetail(target.tidalId, f.tracks, cached)
                 BrowseFetch.Failed -> listOf(browseTree.errorNode())
             }
             else -> listOf(browseTree.errorNode())
         }
+    }
 
     /** Local playlist tracks, importing a Tidal playlist's items on first open
      *  (mirrors PlayerViewModel.loadPlaylist). */

@@ -1,5 +1,7 @@
 package io.github.auxen.playback.browse
 
+import androidx.media3.session.MediaConstants
+import io.github.auxen.Graph
 import io.github.auxen.db.FavoriteAlbumEntity
 import io.github.auxen.db.FavoriteArtistEntity
 import io.github.auxen.db.PlaylistEntity
@@ -7,6 +9,7 @@ import io.github.auxen.model.Source
 import io.github.auxen.model.Track
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -109,6 +112,48 @@ class AuxenBrowseTreeTest {
         assertEquals(AuxenBrowseIds.ALBUMS, tree.item(AuxenBrowseIds.ALBUMS)?.mediaId)
         assertEquals(AuxenBrowseIds.playAllAlbum("111"), tree.item(AuxenBrowseIds.playAllAlbum("111"))?.mediaId)
         assertNull(tree.item("TIDAL:42"))
+    }
+
+    @Test fun `cached tidal leaf carries the downloaded status extra`() {
+        val cached = setOf("42")
+        val leaves = listOf(
+            tree.trackList(listOf(track("42", "Song")), cachedIds = cached).single(),
+            tree.albumDetail("111", listOf(track("42", "Song")), cachedIds = cached)[1],
+            tree.artistDetail("9", listOf(track("42", "Song")), cachedIds = cached)[1],
+        )
+        leaves.forEach { leaf ->
+            assertEquals("TIDAL:42", leaf.mediaId)
+            assertEquals(
+                MediaConstants.EXTRAS_VALUE_STATUS_DOWNLOADED,
+                leaf.mediaMetadata.extras?.getLong(MediaConstants.EXTRAS_KEY_DOWNLOAD_STATUS),
+            )
+        }
+    }
+
+    @Test fun `uncached leaf has no download status`() {
+        val nodes = tree.trackList(
+            listOf(
+                track("42", "Cached"),
+                track("43", "Not cached"),
+                // The cache holds bare Tidal ids. A MediaStore id can be the same number,
+                // so a local song must not borrow a Tidal song's badge.
+                Track(title = "Local", artist = "A", source = Source.LOCAL, sourceId = "42"),
+            ),
+            cachedIds = setOf("42"),
+        )
+        val uncached = nodes.drop(1)
+        assertEquals(listOf("TIDAL:43", "LOCAL:42"), uncached.map { it.mediaId })
+        uncached.forEach { leaf ->
+            assertFalse(leaf.mediaMetadata.extras!!.containsKey(MediaConstants.EXTRAS_KEY_DOWNLOAD_STATUS))
+        }
+    }
+
+    @Test fun `download status keeps the existing track extras`() {
+        val leaf = tree.trackList(listOf(track("42", "Song")), cachedIds = setOf("42")).single()
+        val extras = leaf.mediaMetadata.extras!!
+        assertEquals(track("42", "Song"), Graph.trackFor(leaf))
+        assertNotNull(extras.getString(Graph.QUEUE_UID_KEY))
+        assertTrue(leaf.mediaMetadata.isPlayable == true)
     }
 
     @Test fun `id parse round-trips`() {

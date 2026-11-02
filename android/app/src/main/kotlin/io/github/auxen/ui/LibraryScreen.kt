@@ -94,6 +94,7 @@ fun LibraryScreen(
     val tracks by viewModel.localTracks.collectAsState()
     val loading by viewModel.libraryLoading.collectAsState()
     val favoriteKeys by viewModel.favoriteKeys.collectAsState()
+    val cachedIds by viewModel.cachedIds.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val tab by viewModel.libraryTab.collectAsState()
     val sort by viewModel.librarySort.collectAsState()
@@ -240,6 +241,7 @@ fun LibraryScreen(
                         AuxenTrackRow(
                             track = track,
                             isFavorite = "${track.source.name}:${track.sourceId}" in favoriteKeys,
+                            isCached = track.isTidal && track.sourceId in cachedIds,
                             onPlay = { viewModel.play(track) },
                             onToggleFavorite = { viewModel.toggleFavorite(track) },
                             onLongPress = { sheetTrack = track },
