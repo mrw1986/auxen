@@ -6,6 +6,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ShuffleOrder
 import androidx.media3.test.utils.FakeClock
 import androidx.test.core.app.ApplicationProvider
 import org.junit.After
@@ -64,6 +65,16 @@ class PlayerQueueAdapterTest {
 
         assertEquals(listOf(1, 2), queue.playOrderFrom(1))
         assertEquals(2, nextIndexForCache(exo, 1))
+    }
+
+    @Test fun `play order follows the shuffle order`() {
+        load("1", "2", "3", "4")
+        // Set after the load, which would otherwise reshuffle at random.
+        exo.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(intArrayOf(2, 0, 3, 1), /* randomSeed= */ 0))
+        exo.shuffleModeEnabled = true
+
+        assertEquals(listOf(0, 3, 1), queue.playOrderFrom(0))
+        assertEquals(listOf(2, 0, 3, 1), queue.playOrderFrom(2))
     }
 
     @Test fun `replaceUri keeps the media id and sets the mime type`() {
