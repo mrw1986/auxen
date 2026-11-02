@@ -154,42 +154,62 @@ class AutoResumeTest {
 
     @Test fun `a reconnect resumes the offline pause, stamped on the controller clock`() {
         var now = 0L
+        var reconnects = 0
         val resumes = mutableListOf<Pair<Int, String>>()
         val controller = AutoResumeController(clock = { now }) { index, mediaId -> resumes += index to mediaId }
-        controller.onNetwork(online = true)
+        controller.onNetwork(online = true) { reconnects++ }
 
         now = 1_000
-        assertFalse(controller.onNetwork(online = false))
+        controller.onNetwork(online = false) { reconnects++ }
         controller.onOfflineAction(OfflineAction.PausedNothingAhead(index = 3, mediaId = "TIDAL:7"))
         now = 1_000 + AUTO_RESUME_WINDOW_MILLIS
+        assertEquals(0, reconnects)
 
-        assertTrue(controller.onNetwork(online = true))
+        controller.onNetwork(online = true) { reconnects++ }
+        assertEquals(1, reconnects)
         assertEquals(listOf(3 to "TIDAL:7"), resumes)
     }
 
     @Test fun `a reconnect past the window still counts as one but resumes nothing`() {
         var now = 0L
+        var reconnects = 0
         val resumes = mutableListOf<Pair<Int, String>>()
         val controller = AutoResumeController(clock = { now }) { index, mediaId -> resumes += index to mediaId }
-        controller.onNetwork(online = false)
+        controller.onNetwork(online = false) { reconnects++ }
         controller.onOfflineAction(OfflineAction.PausedNothingAhead(index = 3, mediaId = "TIDAL:7"))
 
         now = AUTO_RESUME_WINDOW_MILLIS + 1
-        assertTrue(controller.onNetwork(online = true))
+        controller.onNetwork(online = true) { reconnects++ }
+        assertEquals(1, reconnects)
         assertEquals(emptyList<Pair<Int, String>>(), resumes)
     }
 
     @Test fun `only an offline to online change is a reconnect`() {
+        var reconnects = 0
         val resumes = mutableListOf<Pair<Int, String>>()
         val controller = AutoResumeController(clock = { 0 }) { index, mediaId -> resumes += index to mediaId }
         controller.onOfflineAction(OfflineAction.PausedNothingAhead(index = 3, mediaId = "TIDAL:7"))
 
         // The first state is where the collector starts, not a change.
-        assertFalse(controller.onNetwork(online = true))
+        controller.onNetwork(online = true) { reconnects++ }
         // A metered to unmetered change emits online again.
-        assertFalse(controller.onNetwork(online = true))
+        controller.onNetwork(online = true) { reconnects++ }
+        assertEquals(0, reconnects)
         assertEquals(emptyList<Pair<Int, String>>(), resumes)
         assertTrue(controller.isWaiting)
+    }
+
+    @Test fun `a reconnect runs onReconnect before resuming, so a re-pause keeps its notice`() {
+        // The resume's own play can pause again with nothing cached and re-show the notice.
+        // Clearing after it would wipe that fresh notice.
+        val calls = mutableListOf<String>()
+        val controller = AutoResumeController(clock = { 0 }) { _, _ -> calls += "resume" }
+        controller.onNetwork(online = false) { calls += "clear" }
+        controller.onOfflineAction(OfflineAction.PausedNothingAhead(index = 3, mediaId = "TIDAL:7"))
+
+        controller.onNetwork(online = true) { calls += "clear" }
+
+        assertEquals(listOf("clear", "resume"), calls)
     }
 
     @Test fun `a transition-path pause resumes the stopped song from the start`() {

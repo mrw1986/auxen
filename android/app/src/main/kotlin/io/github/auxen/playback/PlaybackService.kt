@@ -410,11 +410,12 @@ class PlaybackService : MediaLibraryService() {
 
         // The validated network can drop after a network error already came in. A reconnect
         // clears the "nothing cached ahead" notice whether or not it resumes, so a stale one
-        // never outlives the outage.
+        // never outlives the outage. The clear runs before the resume, so a resume that pauses
+        // again with nothing cached keeps the notice it just showed.
         mainScope.launch {
             Graph.network.state.collect { state ->
                 autoResume.onOfflineAction(offlineSkipper.onNetworkChanged(state))
-                if (autoResume.onNetwork(state.online)) Graph.offlineStatus.clear()
+                autoResume.onNetwork(state.online) { Graph.offlineStatus.clear() }
             }
         }
         getSystemService(AudioManager::class.java).registerAudioDeviceCallback(outputLoss, Handler(Looper.getMainLooper()))

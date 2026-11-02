@@ -130,14 +130,15 @@ class AutoResumeController(
     }
 
     /**
-     * Feed every network state. Returns true on an offline to online change, after resuming if
-     * that was in time. A metered/unmetered change while online isn't one.
+     * Feed every network state. Runs [onReconnect] on an offline to online change, then resumes
+     * if that was in time. A metered/unmetered change while online isn't one.
      */
-    fun onNetwork(online: Boolean): Boolean {
+    fun onNetwork(online: Boolean, onReconnect: () -> Unit) {
         val reconnected = this.online == false && online
         this.online = online
-        if (reconnected) on(AutoResumeEvent.NetworkBack(clock()))
-        return reconnected
+        if (!reconnected) return
+        onReconnect()
+        on(AutoResumeEvent.NetworkBack(clock()))
     }
 }
 
