@@ -1,14 +1,28 @@
 package io.github.auxen.playback
 
+import android.app.Application
+import android.net.Uri
 import androidx.media3.common.PlaybackException
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.FileDataSource.FileDataSourceException
+import androidx.media3.datasource.HttpDataSource
 import io.github.auxen.provider.StreamInfo
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.io.FileNotFoundException
 import java.io.IOException
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 
+// Robolectric because PlaybackException and DataSpec need SystemClock and Uri.
+@RunWith(RobolectricTestRunner::class)
+@Config(application = Application::class)
 class RecoverableErrorsTest {
 
     private fun dash() = TidalDashStreamException(
@@ -76,5 +90,62 @@ class RecoverableErrorsTest {
     @Test fun `another error under the cache root is NOT a missing cache file`() {
         val denied = FileDataSourceException(SecurityException("no"), PlaybackException.ERROR_CODE_IO_NO_PERMISSION)
         assertFalse(isMissingCacheFile(denied, "${cacheRoot}42/segment-3.mp4", cacheRoot))
+    }
+
+    // ---- offline ----
+
+    private fun sourceError(cause: Throwable, code: Int = PlaybackException.ERROR_CODE_IO_UNSPECIFIED) =
+        PlaybackException("Source error", cause, code)
+
+    private fun forbidden(cause: IOException? = null) = HttpDataSource.InvalidResponseCodeException(
+        403, "Forbidden", cause, emptyMap(), DataSpec(Uri.parse("https://example.invalid/track")), ByteArray(0),
+    )
+
+    @Test fun `UnknownHostException nested in a source error is a network failure`() {
+        val error = sourceError(IOException("resolve", UnknownHostException("unresolved")))
+        assertTrue(isNetworkFailure(error))
+    }
+
+    @Test fun `SocketTimeoutException is a network failure`() {
+        assertTrue(isNetworkFailure(sourceError(SocketTimeoutException("timeout"))))
+    }
+
+    @Test fun `ConnectException and NoRouteToHostException are network failures`() {
+        assertTrue(isNetworkFailure(sourceError(ConnectException("refused"))))
+        assertTrue(isNetworkFailure(IOException("wrapped", NoRouteToHostException("no route"))))
+    }
+
+    @Test fun `a connection failed or timed out code is a network failure without a known cause`() {
+        val failed = PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
+        val timedOut = PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
+        assertTrue(isNetworkFailure(sourceError(IOException("opaque"), failed)))
+        assertTrue(isNetworkFailure(sourceError(IOException("opaque"), timedOut)))
+    }
+
+    @Test fun `an InvalidResponseCodeException is not a network failure`() {
+        assertFalse(isNetworkFailure(sourceError(forbidden(), PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS)))
+        // An HTTP status means the server answered, whatever else the chain or code says.
+        val mixed = IOException("wrapped", forbidden(cause = UnknownHostException("x")))
+        assertFalse(isNetworkFailure(sourceError(mixed, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED)))
+    }
+
+    @Test fun `other errors are not network failures`() {
+        assertFalse(isNetworkFailure(sourceError(IOException("disk"))))
+        assertFalse(isNetworkFailure(fileNotFound()))
+        assertFalse(isNetworkFailure(IllegalStateException("boom")))
+    }
+
+    @Test fun `offline failure needs no validated network`() {
+        val error = sourceError(UnknownHostException("unresolved"))
+        assertFalse(isOfflineFailure(error, online = true))
+        assertTrue(isOfflineFailure(error, online = false))
+        assertFalse(isOfflineFailure(sourceError(forbidden()), online = false))
+    }
+
+    @Test fun `banner is suppressed for DASH swaps and recent offline handling`() {
+        val plain = sourceError(IOException("Response code: 500"))
+        assertTrue(shouldSuppressPlaybackBanner(IOException("Source error", dash()), offlineHandledRecently = false))
+        assertTrue(shouldSuppressPlaybackBanner(plain, offlineHandledRecently = true))
+        assertFalse(shouldSuppressPlaybackBanner(plain, offlineHandledRecently = false))
     }
 }

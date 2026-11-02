@@ -60,9 +60,13 @@ import io.github.auxen.playback.cache.CacheAheadScheduler
 import io.github.auxen.playback.cache.CacheKind
 import io.github.auxen.playback.cache.CacheQueueSnapshot
 import io.github.auxen.playback.cache.CacheRecoveryGate
+import io.github.auxen.playback.cache.OfflineAction
+import io.github.auxen.playback.cache.OfflineSkipper
+import io.github.auxen.playback.cache.PlayerQueueAdapter
 import io.github.auxen.playback.cache.TrackDownloader
 import io.github.auxen.playback.cache.cacheCandidates
 import io.github.auxen.playback.cache.isPlayingResolvedCopy
+import io.github.auxen.playback.cache.nextIndexForCache
 import io.github.auxen.playback.cache.playOrder
 import io.github.auxen.playback.cache.queueItemUpdate
 import io.github.auxen.playback.cache.queueMediaIds
@@ -240,6 +244,9 @@ class PlaybackService : MediaLibraryService() {
     /** Downloads the songs coming up so they play from disk. Built in [onCreate]. */
     private var cacheAhead: CacheAheadScheduler? = null
 
+    /** Keeps playback going from the cache with no network. Built in [onCreate]. */
+    private lateinit var offlineSkipper: OfflineSkipper
+
     /**
      * Queue tracks decoded on the last cache-window walk, by mediaId, so the replans every
      * player event sets off skip the JSON decode. Rebuilt on each walk, so it never outgrows
@@ -331,6 +338,12 @@ class PlaybackService : MediaLibraryService() {
             network = Graph.network.state,
             freeDeviceBytes = Graph.trackCache::freeDeviceBytes,
         )
+        offlineSkipper = OfflineSkipper(
+            PlayerQueueAdapter { mediaSession?.player },
+            Graph.trackCache::cachedPlayback,
+            { Graph.network.state.value },
+            Graph.offlineStatus,
+        )
 
         // Attach the platform effects, the main Player.Listener, and the
         // audio-session-id kick -- all re-runnable per player, so a Bit-Perfect
@@ -363,6 +376,11 @@ class PlaybackService : MediaLibraryService() {
         // pass: whatever queue is set gets one from its own PLAYLIST_CHANGED.
         mainScope.launch {
             Graph.trackCache.snapshot.drop(1).collect { mediaSession?.player?.let(::syncQueueWithCache) }
+        }
+
+        // The validated network can drop after a network error already came in.
+        mainScope.launch {
+            Graph.network.state.collect { offlineSkipper.onNetworkChanged(it) }
         }
 
         // Restore the persisted queue paused: the user decides when to hit
@@ -470,6 +488,9 @@ class PlaybackService : MediaLibraryService() {
 
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                // Offline, an uncached song is skipped before anything counts it as playing. The
+                // skip's own transition comes right after this one and does the work below.
+                if (offlineSkipper.onItemStarting() is OfflineAction.Skipped) return
                 pendingPlayMediaId = mediaItem?.mediaId
                 // Records immediately for mid-playback transitions (isPlaying
                 // still true); defers to onIsPlayingChanged for cold starts and
@@ -503,6 +524,8 @@ class PlaybackService : MediaLibraryService() {
                     val queueIds = queueMediaIds(player)
                     val queueChanged = queueIds != lastQueueIds
                     lastQueueIds = queueIds
+                    // A new queue may have cached songs, so the offline message is stale.
+                    if (queueChanged) Graph.offlineStatus.clear()
                     // Belt-and-suspenders against pendingSleepTimerPause
                     // surviving into an unrelated new queue -- see that
                     // field's KDoc (fix round, review of commit 60c7699,
@@ -565,6 +588,11 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) {
+                    // Clear first, so a play that still finds nothing cached shows the message again.
+                    Graph.offlineStatus.clear()
+                    offlineSkipper.onItemStarting()
+                }
                 if (playWhenReady) {
                     preResolveUpcoming(player)
                     router?.route(player.currentMediaItem?.mediaId, playWhenReady)
@@ -596,6 +624,9 @@ class PlaybackService : MediaLibraryService() {
                     currentPlayer.play()
                     return
                 }
+
+                // No network: resume from the cache, skip to a song that plays offline, or pause.
+                if (offlineSkipper.onError(error) != OfflineAction.None) return
 
                 val http = findCause<HttpDataSource.InvalidResponseCodeException>(error)
                 val expired = http != null && http.responseCode in intArrayOf(401, 403, 410)
@@ -759,10 +790,7 @@ class PlaybackService : MediaLibraryService() {
             scheduler.update(CacheQueueSnapshot(emptyList(), playingId = null, active = false))
             return
         }
-        // Repeat-one counts as off, as in Player.getNextMediaItemIndex, so the walk gets past the looping song.
-        val repeatMode = if (player.repeatMode == Player.REPEAT_MODE_ONE) Player.REPEAT_MODE_OFF else player.repeatMode
-        val shuffle = player.shuffleModeEnabled
-        val order = playOrder(player.currentMediaItemIndex) { i -> timeline.getNextWindowIndex(i, repeatMode, shuffle) }
+        val order = playOrder(player.currentMediaItemIndex) { i -> nextIndexForCache(player, i) }
         val memo = HashMap<String, Track>()
         val candidates = cacheCandidates(order, { player.getMediaItemAt(it).mediaId }) { i ->
             val item = player.getMediaItemAt(i)

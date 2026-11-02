@@ -25,6 +25,7 @@ import io.github.auxen.playback.QueueStateStore
 import io.github.auxen.playback.TrackResolver
 import io.github.auxen.playback.cache.CacheSettingsStore
 import io.github.auxen.playback.cache.ConnectivityNetworkMonitor
+import io.github.auxen.playback.cache.OfflineStatus
 import io.github.auxen.playback.cache.TrackCacheStore
 import io.github.auxen.playback.cache.trackCacheDataStore
 import io.github.auxen.provider.local.LocalProvider
@@ -183,6 +184,9 @@ object Graph {
         private set
     lateinit var network: ConnectivityNetworkMonitor
         private set
+    /** What the service last did about having no network, for the player banner. */
+    lateinit var offlineStatus: OfflineStatus
+        private set
 
     fun init(context: Context) {
         httpClient = OkHttpClient.Builder()
@@ -206,6 +210,7 @@ object Graph {
         )
         cacheSettings = CacheSettingsStore(context.trackCacheDataStore)
         network = ConnectivityNetworkMonitor(context)
+        offlineStatus = OfflineStatus()
         // Fire-and-forget: the snapshot starts empty and fills once disk and table are reconciled.
         // Loads the local, so a late coroutine can't load a store a later init() replaced.
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {

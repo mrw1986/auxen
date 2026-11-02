@@ -34,9 +34,10 @@ import io.github.auxen.model.Track
 import io.github.auxen.playback.PlaybackService
 import io.github.auxen.playback.cache.CacheNetworkMode
 import io.github.auxen.playback.cache.CacheSettings
+import io.github.auxen.playback.cache.OFFLINE_NOTHING_CACHED_MESSAGE
 import io.github.auxen.playback.cache.formatCacheReadout
 import io.github.auxen.playback.isRecoverableCacheError
-import io.github.auxen.playback.isRecoverableDashError
+import io.github.auxen.playback.shouldSuppressPlaybackBanner
 import io.github.auxen.provider.local.MusicFolder
 import io.github.auxen.provider.local.decodeFolders
 import io.github.auxen.provider.local.encodeFolders
@@ -767,7 +768,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     // recovered by PlaybackService (swap in the DASH source + re-
                     // prepare); the track goes on to play, so don't flash a failure
                     // banner for it. Genuine failures throw a different exception.
-                    if (isRecoverableDashError(error)) return
+                    // Same for an offline failure the service just resumed, skipped
+                    // or paused: it handles the error before this callback arrives.
+                    if (shouldSuppressPlaybackBanner(error, Graph.offlineStatus.handledRecently())) return
                     // A cached file that went missing: PlaybackService drops it and streams the song instead.
                     if (isRecoverableCacheError(error.errorCode, c.currentMediaItem?.mediaId)) return
                     val chain = generateSequence(error as Throwable) { it.cause }
@@ -778,6 +781,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 }
             })
         }, MoreExecutors.directExecutor())
+
+        // The service paused because nothing ahead plays offline. Clearing only touches its own
+        // message, so a real error that replaced it stays up.
+        viewModelScope.launch {
+            Graph.offlineStatus.nothingCachedAhead.collect { nothingAhead ->
+                if (nothingAhead) {
+                    playbackError.value = OFFLINE_NOTHING_CACHED_MESSAGE
+                } else {
+                    playbackError.compareAndSet(OFFLINE_NOTHING_CACHED_MESSAGE, null)
+                }
+            }
+        }
 
         viewModelScope.launch {
             while (isActive) {

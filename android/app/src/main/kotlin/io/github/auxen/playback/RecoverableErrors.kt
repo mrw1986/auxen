@@ -3,6 +3,11 @@ package io.github.auxen.playback
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSourceException
+import androidx.media3.datasource.HttpDataSource
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 
 /**
  * True when [error]'s cause chain contains a [TidalDashStreamException] — the
@@ -45,3 +50,36 @@ fun isMissingCacheFile(error: Throwable, uri: String, cacheRootUri: String): Boo
     uri.startsWith(cacheRootUri) &&
         generateSequence(error as Throwable?) { it.cause }
             .any { it is DataSourceException && it.reason == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND }
+
+private val NETWORK_ERROR_CODES = setOf(
+    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+)
+
+/**
+ * True when [error] means the device couldn't reach the server: a DNS, connect or timeout
+ * failure anywhere in the cause chain, or Media3's connection failed/timed out code. An HTTP
+ * status anywhere in the chain means the server did answer, so that's never a network failure.
+ */
+fun isNetworkFailure(error: Throwable): Boolean {
+    val chain = generateSequence(error as Throwable?) { it.cause }.toList()
+    if (chain.any { it is HttpDataSource.InvalidResponseCodeException }) return false
+    return chain.any {
+        it is UnknownHostException || it is ConnectException ||
+            it is SocketTimeoutException || it is NoRouteToHostException ||
+            (it is PlaybackException && it.errorCode in NETWORK_ERROR_CODES)
+    }
+}
+
+/**
+ * A network failure with no validated network. A validated network can still fail a request,
+ * and then the normal error path (and its banner) applies, since a retry might work.
+ */
+fun isOfflineFailure(error: Throwable, online: Boolean): Boolean = !online && isNetworkFailure(error)
+
+/**
+ * True when the UI shouldn't show [error]: [PlaybackService] is already swapping in a DASH copy,
+ * or it just handled an offline failure by resuming from cache, skipping or pausing.
+ */
+fun shouldSuppressPlaybackBanner(error: Throwable, offlineHandledRecently: Boolean): Boolean =
+    isRecoverableDashError(error) || offlineHandledRecently
