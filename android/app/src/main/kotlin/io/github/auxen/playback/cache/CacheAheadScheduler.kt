@@ -56,7 +56,7 @@ private class Backoff(val attempts: Int, val timer: Job)
 
 /**
  * Downloads the songs coming up in the queue, one at a time and nearest first, so they play
- * from disk.
+ * from disk. The song playing now, if it isn't cached yet, goes after the songs ahead of it.
  *
  * Every decision runs in one coroutine. [update] only posts the queue, and a single collector
  * re-plans whenever the queue, settings, network or cache index changes, or a download or retry
@@ -138,7 +138,11 @@ class CacheAheadScheduler(
         inFlight?.takeIf { !allowed || it.trackId !in window.trackIds }?.job?.cancel()
 
         val protectedIds = window.trackIds.toSet() + listOfNotNull(queue.playingId)
+        // The playing song starts last. It's already streaming, and on a slow link its download
+        // would split the link with the player and still be behind when the song ends. Its room
+        // stays held, since it's still in the window.
         val next = window.toDownload
+            .sortedBy { it.trackId == queue.playingId }
             .firstOrNull { isReady(it.trackId) }
             ?.takeIf { inFlight == null && allowed && queue.active }
             ?.takeIf { fitsOnceEvicted(inputs.cache, protectedIds, it, capacity) }

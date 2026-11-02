@@ -52,9 +52,18 @@ private fun row(id: String, sizeBytes: Long = ESTIMATE, lastPlayedAtMillis: Long
     trackJson = "{}",
 )
 
-private fun queue(vararg ids: String, active: Boolean = true, estimate: Long = ESTIMATE) = CacheQueueSnapshot(
+/**
+ * Tidal songs [ids] in play order. Nothing Tidal is playing unless [playing] names one, as when a
+ * local song plays and these come next.
+ */
+private fun queue(
+    vararg ids: String,
+    active: Boolean = true,
+    estimate: Long = ESTIMATE,
+    playing: String? = null,
+) = CacheQueueSnapshot(
     candidates = ids.map { CacheCandidate(it, Track(title = "Song $it", artist = "A", source = Source.TIDAL, sourceId = it), estimate) },
-    playingId = ids.firstOrNull(),
+    playingId = playing,
     active = active,
 )
 
@@ -196,6 +205,40 @@ class CacheAheadSchedulerTest {
         assertEquals(listOf("1", "2", "3"), downloads.calls)
         assertEquals(listOf("1", "2", "3"), index.commits)
         assertEquals(1, downloads.maxRunning)
+    }
+
+    @Test fun `caches the songs ahead before the one playing`() = runTest {
+        val index = index()
+        val scheduler = scheduler(index)
+
+        scheduler.update(queue("1", "2", "3", playing = "1"))
+        runCurrent()
+        assertEquals(listOf("2"), downloads.calls)
+        downloads.finish("2")
+        runCurrent()
+        assertEquals(listOf("2", "3"), downloads.calls)
+        downloads.finish("3")
+        runCurrent()
+
+        // Still in the window, so its room was held all along.
+        assertEquals(listOf("2", "3", "1"), downloads.calls)
+    }
+
+    @Test fun `keeps the next song's download going when it starts playing`() = runTest {
+        val index = index()
+        val scheduler = scheduler(index)
+        scheduler.update(queue("1", "2", "3", playing = "1"))
+        runCurrent()
+        assertEquals(listOf("2"), downloads.calls)
+
+        scheduler.update(queue("2", "3", playing = "2"))
+        runCurrent()
+        assertEquals(emptyList<String>(), downloads.cancelled)
+
+        downloads.finish("2")
+        runCurrent()
+        assertEquals(listOf("2"), index.commits)
+        assertEquals(listOf("2", "3"), downloads.calls)
     }
 
     @Test fun `skips songs already cached`() = runTest {
@@ -354,7 +397,7 @@ class CacheAheadSchedulerTest {
         val index = index(row("1", 1_100), row("old", 100, lastPlayedAtMillis = 10))
         val scheduler = scheduler(index)
 
-        scheduler.update(queue("1", "2"))
+        scheduler.update(queue("1", "2", playing = "1"))
         runCurrent()
 
         assertEquals(listOf("old"), index.evicted)
@@ -549,12 +592,12 @@ class CacheAheadSchedulerTest {
     @Test fun `marks the playing song played when its download commits`() = runTest {
         val index = index()
         val scheduler = scheduler(index)
-        scheduler.update(queue("1", "2"))
+        scheduler.update(queue("1", "2", playing = "1"))
         runCurrent()
 
-        downloads.finish("1")
-        runCurrent()
         downloads.finish("2")
+        runCurrent()
+        downloads.finish("1")
         runCurrent()
 
         // Song 1 was heard while it downloaded. Song 2 hasn't played yet.
