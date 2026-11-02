@@ -1,6 +1,7 @@
 package io.github.auxen.playback
 
 import android.os.SystemClock
+import androidx.media3.common.Player
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -106,3 +107,11 @@ object SleepTimerController {
         clock = SystemClock::elapsedRealtime
     }
 }
+
+/**
+ * Whether an armed "finish this track" pause fires on a transition with [reason]. Any move to
+ * the next song counts, but a swap of the playing item doesn't. When this is true it wins: the
+ * service pauses and skips the offline check, so an uncached next song is never skipped past.
+ */
+internal fun sleepPauseFiresOn(reason: Int, armed: Boolean): Boolean =
+    armed && reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED

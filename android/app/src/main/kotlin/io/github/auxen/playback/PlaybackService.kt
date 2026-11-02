@@ -488,9 +488,12 @@ class PlaybackService : MediaLibraryService() {
 
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                // Offline, an uncached song is skipped before anything counts it as playing. The
-                // skip's own transition comes right after this one and does the work below.
-                if (offlineSkipper.onItemStarting() is OfflineAction.Skipped) return
+                // An armed "finish this track" pause wins, so the song it stops on is never
+                // skipped. Otherwise, offline, an uncached song is skipped before anything counts
+                // it as playing. The skip's own transition comes right after this one and does
+                // the work below.
+                val sleepPauseDue = sleepPauseFiresOn(reason, pendingSleepTimerPause)
+                if (!sleepPauseDue && offlineSkipper.onItemStarting() is OfflineAction.Skipped) return
                 pendingPlayMediaId = mediaItem?.mediaId
                 // Records immediately for mid-playback transitions (isPlaying
                 // still true); defers to onIsPlayingChanged for cold starts and
@@ -501,7 +504,7 @@ class PlaybackService : MediaLibraryService() {
                 router?.route(mediaItem?.mediaId, player.playWhenReady)
                 // A swap of the playing item isn't the next track starting. A real queue change
                 // already disarmed the pause in onTimelineChanged, which fires first.
-                if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) checkSleepTimerPause(player)
+                if (sleepPauseDue) checkSleepTimerPause(player)
                 // Belt-and-suspenders: the AudioTrack (and therefore the
                 // platform effects attached to its session) can be recreated
                 // between tracks or on a route change without necessarily
