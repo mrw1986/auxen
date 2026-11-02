@@ -10,6 +10,7 @@ import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -281,6 +282,20 @@ class CacheAheadSchedulerTest {
         assertEquals(emptyList<String>(), downloads.calls)
 
         loggedIn.value = true
+        runCurrent()
+
+        assertEquals(listOf("1"), downloads.calls)
+    }
+
+    @Test fun `starts nothing until the stored session has been read`() = runTest {
+        // Like the session store before its first read: no value yet.
+        val session = MutableSharedFlow<Boolean>(replay = 1)
+        val scheduler = CacheAheadScheduler(backgroundScope, index(), downloads::download, settings, network, session) { free }
+        scheduler.update(queue("1", "2"))
+        runCurrent()
+        assertEquals(emptyList<String>(), downloads.calls)
+
+        session.tryEmit(true)
         runCurrent()
 
         assertEquals(listOf("1"), downloads.calls)

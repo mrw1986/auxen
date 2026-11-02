@@ -81,7 +81,7 @@ class CacheAheadScheduler(
     ) -> DownloadResult,
     settings: Flow<CacheSettings>,
     network: StateFlow<NetworkState>,
-    loggedIn: StateFlow<Boolean>,
+    loggedIn: Flow<Boolean>,
     private val freeDeviceBytes: () -> Long,
 ) {
     private val queue = MutableStateFlow(CacheQueueSnapshot.EMPTY)
@@ -111,7 +111,8 @@ class CacheAheadScheduler(
         // The index starts empty. Planning against that would re-fetch cached songs, trim with
         // nothing protected, and race load()'s wipe of the staging folders.
         index.awaitLoaded()
-        // combine takes five typed flows at most, so settings and login ride together.
+        // combine takes five typed flows at most, so settings and login ride together. It waits for
+        // a value from each, so nothing caches before the stored session has been read.
         val account = combine(settings, loggedIn) { s, l -> s to l }
         combine(queue, account, network, index.snapshot, tick) { q, (s, l), n, c, _ -> Inputs(q, s, l, n, c) }
             .collect { decideGuarded(loopScope, it) }

@@ -2,12 +2,17 @@ package io.github.auxen.provider.tidal
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import io.github.auxen.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -15,6 +20,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.IOException
 
 private val Context.tidalDataStore by preferencesDataStore(name = "tidal_session")
 
@@ -53,6 +59,16 @@ class TidalAuth(context: Context, private val client: OkHttpClient) {
 
     /** Persisted session tokens. */
     data class Session(val accessToken: String, val refreshToken: String?, val expiresAtMillis: Long)
+
+    /**
+     * Whether a session is stored. That's the signed-in state: it holds offline and on an Android
+     * Auto cold start before anything has bootstrapped, and [logout] clears it. A store that
+     * can't be read counts as signed out.
+     */
+    val hasSession: Flow<Boolean> = appContext.tidalDataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[KEY_ACCESS] != null }
+        .distinctUntilChanged()
 
     suspend fun storedSession(): Session? {
         val prefs = appContext.tidalDataStore.data.first()

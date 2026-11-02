@@ -365,7 +365,7 @@ class PlaybackService : MediaLibraryService() {
             download = downloader::download,
             settings = Graph.cacheSettings.settings,
             network = Graph.network.state,
-            loggedIn = Graph.tidal.loggedIn,
+            loggedIn = Graph.tidalAuth.hasSession,
             freeDeviceBytes = Graph.trackCache::freeDeviceBytes,
         )
         offlineSkipper = OfflineSkipper(

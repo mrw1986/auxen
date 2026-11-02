@@ -7,8 +7,6 @@ import io.github.auxen.provider.MusicProvider
 import io.github.auxen.provider.StreamInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -40,9 +38,7 @@ class TidalProvider(
     private val bootstrapped = MutableStateFlow(false)
     private var userId: String? = null
 
-    /** Whether a session is bootstrapped. Observable, so caching stops the moment the user logs out. */
-    val loggedIn: StateFlow<Boolean> = bootstrapped.asStateFlow()
-
+    /** Whether a session is bootstrapped, which needs the network. Caching uses [TidalAuth.hasSession]. */
     val isLoggedIn: Boolean get() = bootstrapped.value
 
     /** The signed-in user's Tidal id (the favorites collection owner), or null before a successful [restoreSession]. */
