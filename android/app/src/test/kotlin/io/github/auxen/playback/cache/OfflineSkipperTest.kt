@@ -30,7 +30,8 @@ class OfflineSkipperTest {
     private var network = offline
     private val cache = mutableMapOf<String, CachedPlayback>()
 
-    private fun skipper(queue: FakePlayerQueue) = OfflineSkipper(queue, { cache[it] }, { network }, status)
+    private fun skipper(queue: FakePlayerQueue) =
+        OfflineSkipper(queue, { cache[it] }, { network }, status, clock = { now })
 
     private fun cacheProgressive(id: String) {
         cache[id] = CachedPlayback(CacheKind.PROGRESSIVE, "file:///cache/$id/track.flac")
@@ -247,6 +248,27 @@ class OfflineSkipperTest {
 
         assertEquals(OfflineAction.ResumedFromCache(41_000), skipper.onNetworkChanged(offline))
         assertEquals(listOf("seekTo(0, 41000)", "prepareAndPlay"), queue.calls)
+    }
+
+    @Test fun `a held error up to a minute old is handled when the network drops`() {
+        val queue = FakePlayerQueue("TIDAL:1", position = 41_000)
+        val error = queue.fail()
+        cacheProgressive("1")
+        now = error.timestampMs + 60_000
+
+        assertEquals(OfflineAction.ResumedFromCache(41_000), skipper(queue).onNetworkChanged(offline))
+    }
+
+    @Test fun `a held error over a minute old is ignored when the network drops`() {
+        // The player kept an old error from a validated network. A later drop mustn't restart audio.
+        val queue = FakePlayerQueue("TIDAL:1", position = 41_000)
+        val error = queue.fail()
+        cacheProgressive("1")
+        now = error.timestampMs + 60_001
+
+        assertEquals(OfflineAction.None, skipper(queue).onNetworkChanged(offline))
+        assertTrue(queue.calls.isEmpty())
+        assertFalse(status.handledRecently())
     }
 
     @Test fun `a network change without a held error does nothing`() {

@@ -1,5 +1,6 @@
 package io.github.auxen.playback.cache
 
+import android.os.SystemClock
 import androidx.media3.common.C
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
@@ -8,6 +9,9 @@ import io.github.auxen.model.Source
 import io.github.auxen.playback.isOfflineFailure
 
 private val LOCAL_MEDIA_ID_PREFIX = "${Source.LOCAL.name}:"
+
+/** How long a held player error still counts as the reason playback stopped. */
+const val HELD_ERROR_MAX_AGE_MS = 60_000L
 
 /** The slice of the player the offline skipper reads and drives. */
 interface PlayerQueue {
@@ -106,6 +110,7 @@ class OfflineSkipper(
     private val cached: (String) -> CachedPlayback?,
     private val network: () -> NetworkState,
     private val status: OfflineStatus,
+    private val clock: () -> Long = SystemClock::elapsedRealtime,
 ) {
 
     /**
@@ -121,9 +126,14 @@ class OfflineSkipper(
 
     fun onError(error: PlaybackException): OfflineAction = handleError(error, network().online)
 
-    /** A validated network can outlive the radio, so its loss may come after the error did. */
+    /**
+     * A validated network can outlive the radio, so its loss may come after the error did. An
+     * error held longer than [HELD_ERROR_MAX_AGE_MS] is from playback that already stopped, and
+     * a later drop mustn't restart it.
+     */
     fun onNetworkChanged(state: NetworkState): OfflineAction {
         val error = queue.playerError ?: return OfflineAction.None
+        if (clock() - error.timestampMs > HELD_ERROR_MAX_AGE_MS) return OfflineAction.None
         return handleError(error, state.online)
     }
 
