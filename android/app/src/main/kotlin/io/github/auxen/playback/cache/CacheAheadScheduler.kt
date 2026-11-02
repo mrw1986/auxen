@@ -31,7 +31,12 @@ data class CacheQueueSnapshot(
     val candidates: List<CacheCandidate>,
     val playingId: String?,
     val active: Boolean,
-)
+) {
+    companion object {
+        /** Nothing queued: the scheduler's start state. */
+        val EMPTY = CacheQueueSnapshot(emptyList(), playingId = null, active = false)
+    }
+}
 
 private data class Inputs(
     val queue: CacheQueueSnapshot,
@@ -79,7 +84,7 @@ class CacheAheadScheduler(
     loggedIn: StateFlow<Boolean>,
     private val freeDeviceBytes: () -> Long,
 ) {
-    private val queue = MutableStateFlow(CacheQueueSnapshot(emptyList(), playingId = null, active = false))
+    private val queue = MutableStateFlow(CacheQueueSnapshot.EMPTY)
 
     // Bumped when a download or a retry timer ends, so the loop looks again.
     private val tick = MutableStateFlow(0L)

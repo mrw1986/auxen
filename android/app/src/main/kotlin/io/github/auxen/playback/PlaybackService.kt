@@ -842,7 +842,7 @@ class PlaybackService : MediaLibraryService() {
         val timeline = player.currentTimeline
         if (timeline.isEmpty) {
             cacheTrackMemo = emptyMap()
-            scheduler.update(CacheQueueSnapshot(emptyList(), playingId = null, active = false))
+            scheduler.update(CacheQueueSnapshot.EMPTY)
             return
         }
         val order = playOrder(player.currentMediaItemIndex) { i -> nextIndexForCache(player, i) }
