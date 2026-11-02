@@ -56,6 +56,8 @@ import io.github.auxen.playback.browse.BrowseFetch
 import io.github.auxen.playback.browse.BrowseQueueResolver
 import io.github.auxen.playback.browse.BrowseTarget
 import io.github.auxen.playback.browse.TidalBrowseFetcher
+import io.github.auxen.playback.cache.AutoResumeController
+import io.github.auxen.playback.cache.AutoResumeEvent
 import io.github.auxen.playback.cache.CacheAheadScheduler
 import io.github.auxen.playback.cache.CacheKind
 import io.github.auxen.playback.cache.CacheQueueSnapshot
@@ -73,6 +75,7 @@ import io.github.auxen.playback.cache.queueItemUpdate
 import io.github.auxen.playback.cache.queueMediaIds
 import io.github.auxen.playback.cache.reconcileQueueWithCache
 import io.github.auxen.playback.cache.replacePlayingItem
+import io.github.auxen.playback.cache.resumeOfflinePause
 import io.github.auxen.playback.cache.swapDashCopies
 import io.github.auxen.playback.cache.tidalTrackIdOf
 import io.github.auxen.ui.MainActivity
@@ -247,6 +250,12 @@ class PlaybackService : MediaLibraryService() {
     /** Keeps playback going from the cache with no network. Built in [onCreate]. */
     private lateinit var offlineSkipper: OfflineSkipper
 
+    /** The live session player, as the offline helpers read and drive it. */
+    private val offlineQueue = PlayerQueueAdapter { mediaSession?.player }
+
+    /** Plays again when the network comes back soon after a "nothing cached ahead" pause. Main thread only. */
+    private val autoResume = AutoResumeController { index, mediaId -> resumeOfflinePause(offlineQueue, index, mediaId) }
+
     /**
      * Queue tracks decoded on the last cache-window walk, by mediaId, so the replans every
      * player event sets off skip the JSON decode. Rebuilt on each walk, so it never outgrows
@@ -307,6 +316,9 @@ class PlaybackService : MediaLibraryService() {
                 // round, review of commit a252273/85c106d, finding 2).
                 pendingSleepTimerPause = false
                 if (remaining > 0) delay(remaining)
+                // A timer that runs out during an offline pause beats the auto-resume, finish-track
+                // or not: the outage already stopped the track it would have finished.
+                withContext(Dispatchers.Main) { autoResume.on(AutoResumeEvent.SleepTimerFired) }
                 if (timerState.finishTrack) {
                     pendingSleepTimerPause = true
                     // Waits for the current track to end instead of
@@ -339,7 +351,7 @@ class PlaybackService : MediaLibraryService() {
             freeDeviceBytes = Graph.trackCache::freeDeviceBytes,
         )
         offlineSkipper = OfflineSkipper(
-            PlayerQueueAdapter { mediaSession?.player },
+            offlineQueue,
             Graph.trackCache::cachedPlayback,
             { Graph.network.state.value },
             Graph.offlineStatus,
@@ -378,9 +390,14 @@ class PlaybackService : MediaLibraryService() {
             Graph.trackCache.snapshot.drop(1).collect { mediaSession?.player?.let(::syncQueueWithCache) }
         }
 
-        // The validated network can drop after a network error already came in.
+        // The validated network can drop after a network error already came in. A reconnect
+        // clears the "nothing cached ahead" notice whether or not it resumes, so a stale one
+        // never outlives the outage.
         mainScope.launch {
-            Graph.network.state.collect { offlineSkipper.onNetworkChanged(it) }
+            Graph.network.state.collect { state ->
+                autoResume.onOfflineAction(offlineSkipper.onNetworkChanged(state))
+                if (autoResume.onNetwork(state.online)) Graph.offlineStatus.clear()
+            }
         }
 
         // Restore the persisted queue paused: the user decides when to hit
@@ -491,9 +508,13 @@ class PlaybackService : MediaLibraryService() {
                 // An armed "finish this track" pause wins, so the song it stops on is never
                 // skipped. Otherwise, offline, an uncached song is skipped before anything counts
                 // it as playing. The skip's own transition comes right after this one and does
-                // the work below.
+                // the work below. A different song cancels the auto-resume, fed first so a pause on
+                // this same song starts a fresh wait.
+                autoResume.on(AutoResumeEvent.ItemChanged(mediaItem?.mediaId.orEmpty()))
                 val sleepPauseDue = sleepPauseFiresOn(reason, pendingSleepTimerPause)
-                if (!sleepPauseDue && offlineSkipper.onItemStarting() is OfflineAction.Skipped) return
+                val offline = if (sleepPauseDue) OfflineAction.None else offlineSkipper.onItemStarting()
+                autoResume.onOfflineAction(offline)
+                if (offline is OfflineAction.Skipped) return
                 pendingPlayMediaId = mediaItem?.mediaId
                 // Records immediately for mid-playback transitions (isPlaying
                 // still true); defers to onIsPlayingChanged for cold starts and
@@ -525,8 +546,12 @@ class PlaybackService : MediaLibraryService() {
                     // Built from mediaIds, so a cache swap leaves it unchanged.
                     updateCacheWindow(player)
                     val queueChanged = queueChanges.changed(queueMediaIds(player))
-                    // A new queue may have cached songs, so the offline message is stale.
-                    if (queueChanged) Graph.offlineStatus.clear()
+                    // A new queue may have cached songs, so the offline message is stale, and
+                    // the song an offline pause was waiting on may be gone.
+                    if (queueChanged) {
+                        Graph.offlineStatus.clear()
+                        autoResume.on(AutoResumeEvent.QueueChanged)
+                    }
                     // Belt-and-suspenders against pendingSleepTimerPause
                     // surviving into an unrelated new queue -- see that
                     // field's KDoc (fix round, review of commit 60c7699,
@@ -557,6 +582,7 @@ class PlaybackService : MediaLibraryService() {
                 if (playbackState == Player.STATE_ENDED && pendingSleepTimerPause) {
                     pendingSleepTimerPause = false
                     SleepTimerController.cancel()
+                    autoResume.on(AutoResumeEvent.SleepTimerFired)
                 }
                 // Buffering toward play counts as active for caching.
                 updateCacheWindow(player)
@@ -589,10 +615,14 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                // Any play supersedes the auto-resume; the play a resume starts finds it already
+                // Idle. A pause changes nothing: while waiting, the player is already paused.
+                if (playWhenReady) autoResume.on(AutoResumeEvent.UserPlay)
                 if (playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) {
-                    // Clear first, so a play that still finds nothing cached shows the message again.
+                    // Clear first, so a play that still finds nothing cached shows the message again
+                    // and starts a fresh wait.
                     Graph.offlineStatus.clear()
-                    offlineSkipper.onItemStarting()
+                    autoResume.onOfflineAction(offlineSkipper.onItemStarting())
                 }
                 if (playWhenReady) {
                     preResolveUpcoming(player)
@@ -627,7 +657,9 @@ class PlaybackService : MediaLibraryService() {
                 }
 
                 // No network: resume from the cache, skip to a song that plays offline, or pause.
-                if (offlineSkipper.onError(error) != OfflineAction.None) return
+                val offline = offlineSkipper.onError(error)
+                autoResume.onOfflineAction(offline)
+                if (offline != OfflineAction.None) return
 
                 val http = findCause<HttpDataSource.InvalidResponseCodeException>(error)
                 val expired = http != null && http.responseCode in intArrayOf(401, 403, 410)
@@ -855,6 +887,7 @@ class PlaybackService : MediaLibraryService() {
         pendingSleepTimerPause = false
         player.pause()
         SleepTimerController.cancel()
+        autoResume.on(AutoResumeEvent.SleepTimerFired)
     }
 
     /**
@@ -1236,6 +1269,8 @@ class PlaybackService : MediaLibraryService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = mediaSession
 
     override fun onTaskRemoved(rootIntent: Intent?) {
+        // An offline pause that may still resume on its own counts as playing.
+        if (autoResume.isWaiting) return
         val player = mediaSession?.player
         if (player == null || !player.playWhenReady || player.mediaItemCount == 0) {
             stopSelf()
