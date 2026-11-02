@@ -283,6 +283,38 @@ class CacheAheadSchedulerTest {
         assertEquals(listOf("1"), downloads.calls)
     }
 
+    @Test fun `Off mode cancels the in-flight download`() = runTest {
+        val index = index()
+        val scheduler = scheduler(index)
+        scheduler.update(queue("1", "2"))
+        runCurrent()
+
+        settings.value = CacheSettings(CacheNetworkMode.OFF, LIMIT)
+        runCurrent()
+
+        assertEquals(listOf("1"), downloads.cancelled)
+        assertEquals(index.stagings, index.discarded)
+        assertFalse(index.stagings.single().exists())
+        assertEquals(emptyList<String>(), index.commits)
+        assertEquals(listOf("1"), downloads.calls)
+    }
+
+    @Test fun `an emptied queue cancels the in-flight download`() = runTest {
+        val index = index()
+        val scheduler = scheduler(index)
+        scheduler.update(queue("1", "2"))
+        runCurrent()
+
+        // What the service sends when the timeline empties.
+        scheduler.update(CacheQueueSnapshot(emptyList(), playingId = null, active = false))
+        runCurrent()
+
+        assertEquals(listOf("1"), downloads.cancelled)
+        assertEquals(index.stagings, index.discarded)
+        assertEquals(emptyList<String>(), index.commits)
+        assertEquals(listOf("1"), downloads.calls)
+    }
+
     @Test fun `cancels the in-flight download when its song leaves the window`() = runTest {
         val index = index()
         val scheduler = scheduler(index)
@@ -358,6 +390,26 @@ class CacheAheadSchedulerTest {
         advanceTimeBy(1)
         runCurrent()
         assertEquals(listOf("1", "2", "3", "1"), downloads.calls)
+    }
+
+    @Test fun `a song that keeps failing waits 600 s on every later retry`() = runTest {
+        val scheduler = scheduler(index())
+        scheduler.update(queue("1"))
+        runCurrent()
+
+        // Attempts 1-3 use the listed delays. From then on the last one repeats.
+        val waits = RETRY_DELAYS_MILLIS + RETRY_DELAYS_MILLIS.last() + RETRY_DELAYS_MILLIS.last()
+        assertEquals(listOf(30_000L, 120_000L, 600_000L, 600_000L, 600_000L), waits)
+        waits.forEachIndexed { failed, wait ->
+            downloads.fail("1")
+            runCurrent()
+            advanceTimeBy(wait - 1)
+            runCurrent()
+            assertEquals("still waiting after failure ${failed + 1}", failed + 1, downloads.calls.size)
+            advanceTimeBy(1)
+            runCurrent()
+            assertEquals("retried after failure ${failed + 1}", failed + 2, downloads.calls.size)
+        }
     }
 
     @Test fun `stop cancels everything`() = runTest {
