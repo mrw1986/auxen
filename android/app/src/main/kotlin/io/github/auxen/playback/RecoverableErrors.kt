@@ -4,6 +4,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSourceException
 import androidx.media3.datasource.HttpDataSource
+import io.github.auxen.playback.cache.tidalTrackIdOf
 import java.net.ConnectException
 import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
@@ -36,13 +37,14 @@ fun isRecoverableDashError(error: Throwable): Boolean =
  * entry and falls back to the network, so the UI shouldn't show it as a failure.
  */
 fun isRecoverableCacheError(errorCode: Int, mediaId: String?): Boolean =
-    errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND && mediaId?.startsWith("TIDAL:") == true
+    errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND && mediaId?.let(::tidalTrackIdOf) != null
 
 /**
- * True when a load failed because a file under [cacheRootUri] is gone, like a cached DASH
- * folder's manifest or segment. Retrying the same file can't help, so the load error policy
- * skips straight to [PlaybackService]'s missing-file recovery. A cached progressive song loads
- * through its `auxen` URI, which a retry re-resolves to the network, so it isn't matched here.
+ * True when a load failed because a file under [cacheRootUri] is gone: a cached progressive
+ * song's file, or a cached DASH folder's manifest or segment. [uri] is the load's resolved URI,
+ * so a progressive song queued on its `auxen` URI shows up here as its `file://` path too.
+ * Retrying the same file can't help, so the load error policy skips straight to
+ * [PlaybackService]'s missing-file recovery.
  */
 @UnstableApi
 fun isMissingCacheFile(error: Throwable, uri: String, cacheRootUri: String): Boolean =

@@ -1080,9 +1080,9 @@ class PlaybackService : MediaLibraryService() {
      * can't loop. False when it didn't take the error.
      */
     private fun recoverMissingCacheFile(player: Player, error: PlaybackException): Boolean {
-        val mediaId = player.currentMediaItem?.mediaId
-        if (!isRecoverableCacheError(error.errorCode, mediaId) || mediaId == null) return false
-        val trackId = mediaId.removePrefix("TIDAL:")
+        val mediaId = player.currentMediaItem?.mediaId ?: return false
+        if (!isRecoverableCacheError(error.errorCode, mediaId)) return false
+        val trackId = tidalTrackIdOf(mediaId) ?: return false
         if (!cacheRecoveryGate.tryAcquire(trackId)) return false
         mainScope.launch {
             try {
