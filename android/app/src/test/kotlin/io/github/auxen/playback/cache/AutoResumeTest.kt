@@ -192,8 +192,25 @@ class AutoResumeTest {
         assertTrue(controller.isWaiting)
     }
 
-    @Test fun `a resume plays the stopped song from the start`() {
-        val queue = RecordingQueue("TIDAL:1", "TIDAL:2", "TIDAL:3")
+    @Test fun `a transition-path pause resumes the stopped song from the start`() {
+        val queue = RecordingQueue("TIDAL:1", "TIDAL:2", "TIDAL:3", currentIndex = 1, positionMs = 0)
+
+        resumeOfflinePause(queue, index = 1, mediaId = "TIDAL:2")
+
+        assertEquals(listOf("seekTo(1, 0)", "prepareAndPlay"), queue.calls)
+    }
+
+    @Test fun `an error-path pause resumes at the stopped position`() {
+        // Also where a seek the user made during the wait leaves it.
+        val queue = RecordingQueue("TIDAL:1", "TIDAL:2", "TIDAL:3", currentIndex = 1, positionMs = 95_000)
+
+        resumeOfflinePause(queue, index = 1, mediaId = "TIDAL:2")
+
+        assertEquals(listOf("seekTo(1, 95000)", "prepareAndPlay"), queue.calls)
+    }
+
+    @Test fun `a resume starts from the top when the player sits on another song`() {
+        val queue = RecordingQueue("TIDAL:1", "TIDAL:2", "TIDAL:3", currentIndex = 0, positionMs = 40_000)
 
         resumeOfflinePause(queue, index = 1, mediaId = "TIDAL:2")
 
@@ -218,12 +235,14 @@ class AutoResumeTest {
 }
 
 /** A queue of [ids] that reads an index outside it as "", like [PlayerQueueAdapter], and records commands. */
-private class RecordingQueue(vararg ids: String) : PlayerQueue {
+private class RecordingQueue(
+    vararg ids: String,
+    override val currentIndex: Int = 0,
+    override val positionMs: Long = 0L,
+) : PlayerQueue {
     private val mediaIds = ids.toList()
     val calls = mutableListOf<String>()
 
-    override val currentIndex = 0
-    override val positionMs = 0L
     override val playWhenReady = false
     override val playerError: PlaybackException? = null
 

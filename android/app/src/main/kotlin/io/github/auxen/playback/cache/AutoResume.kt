@@ -142,11 +142,13 @@ class AutoResumeController(
 }
 
 /**
- * Plays [index] from the start, unless the queue moved under the pause and [mediaId] isn't
+ * Plays [index] from where it stopped, unless the queue moved under the pause and [mediaId] isn't
  * there any more. [PlayerQueueAdapter] reads an index past the end as "", so that never matches.
+ * A transition pause sits at 0 already, an error pause resumes where it failed, and a seek made
+ * during the wait holds. A position from another song never carries over.
  */
 fun resumeOfflinePause(queue: PlayerQueue, index: Int, mediaId: String) {
     if (queue.mediaIdAt(index) != mediaId) return
-    queue.seekTo(index, 0)
+    queue.seekTo(index, if (queue.currentIndex == index) queue.positionMs else 0)
     queue.prepareAndPlay()
 }
