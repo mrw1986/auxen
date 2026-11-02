@@ -122,12 +122,16 @@ private class FakeCacheIndex(
 private class FakeDownloads {
     val calls = mutableListOf<String>()
     val cancelled = mutableListOf<String>()
+
+    /** The byte budget each call got, in call order. */
+    val budgets = mutableListOf<Pair<String, Long>>()
     var maxRunning = 0
         private set
     private val pending = mutableMapOf<String, CompletableDeferred<Long>>()
 
-    suspend fun download(trackId: String, staging: File): DownloadResult {
+    suspend fun download(trackId: String, staging: File, maxBytes: Long, durationSeconds: Double?): DownloadResult {
         calls += trackId
+        budgets += trackId to maxBytes
         val done = CompletableDeferred<Long>()
         pending[trackId] = done
         maxRunning = maxOf(maxRunning, pending.size)
@@ -145,6 +149,9 @@ private class FakeDownloads {
     fun finish(trackId: String, sizeBytes: Long = ESTIMATE) = assertTrue(pending.getValue(trackId).complete(sizeBytes))
 
     fun fail(trackId: String) = assertTrue(pending.getValue(trackId).completeExceptionally(IOException("HTTP 500 for audio")))
+
+    fun tooLarge(trackId: String, sizeBytes: Long) =
+        assertTrue(pending.getValue(trackId).completeExceptionally(SongTooLargeException(trackId, sizeBytes)))
 }
 
 // Robolectric only so android.util.Log works on the failure path.
@@ -446,6 +453,63 @@ class CacheAheadSchedulerTest {
 
         assertEquals(listOf("old"), index.evicted)
         assertTrue("1" in index.snapshot.value.ids)
+    }
+
+    @Test fun `does not re-download a song evicted for coming in over its estimate`() = runTest {
+        val index = index(row("1", 400), row("2", 400))
+        val scheduler = scheduler(index)
+        // 800 cached + 100 estimated for song 3 fits the limit, so it downloads.
+        scheduler.update(queue("1", "2", "3"))
+        runCurrent()
+        assertEquals(listOf("3"), downloads.calls)
+
+        // It lands at 300, so 1100 is over the limit and song 3 falls out of the window.
+        downloads.finish("3", sizeBytes = 300)
+        runCurrent()
+        assertEquals(listOf("3"), index.evicted)
+
+        // Later passes know its real size and leave it out.
+        repeat(3) {
+            network.value = if (network.value == ONLINE_WIFI) ONLINE_METERED else ONLINE_WIFI
+            runCurrent()
+        }
+        assertEquals(listOf("3"), index.evicted)
+        assertEquals(listOf("3"), downloads.calls)
+    }
+
+    @Test fun `a song too large for its budget is remembered without a backoff`() = runTest {
+        val index = index(row("1"))
+        val scheduler = scheduler(index)
+        scheduler.update(queue("1", "2", "3"))
+        runCurrent()
+        assertEquals(listOf("2"), downloads.calls)
+
+        // 100 cached + 950 is over the limit, so song 2 (and the run after it) leaves the window.
+        downloads.tooLarge("2", 950)
+        runCurrent()
+        assertEquals(listOf(index.stagings.single()), index.discarded)
+        network.value = ONLINE_METERED
+        runCurrent()
+        assertEquals(listOf("2"), downloads.calls)
+
+        // No backoff to wait out: room for its real size restarts it at once, with that room.
+        settings.value = CacheSettings(CacheNetworkMode.WIFI_AND_MOBILE, 2_000)
+        runCurrent()
+        assertEquals(listOf("2", "2"), downloads.calls)
+        assertEquals("2" to 1_900L, downloads.budgets.last())
+        assertEquals(emptyList<String>(), index.evicted)
+    }
+
+    @Test fun `gives the download the room left once evictions are done`() = runTest {
+        val index = index(row("2", 300), row("old", 400, lastPlayedAtMillis = 10))
+        val scheduler = scheduler(index)
+
+        // 700 cached + 500 for song 1 is 200 over, so "old" goes and 300 stays cached.
+        scheduler.update(queue("1", "2", estimate = 500))
+        runCurrent()
+
+        assertEquals(listOf("old"), index.evicted)
+        assertEquals(listOf("1" to LIMIT - 300), downloads.budgets)
     }
 
     @Test fun `keeps the in-flight download as its staging fills the device`() = runTest {

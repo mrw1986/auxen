@@ -40,7 +40,17 @@ private data class Inputs(
     val cache: CacheSnapshot,
 )
 
-private class InFlight(val trackId: String, val job: Deferred<Boolean>)
+/** How one download ended. [sizeBytes] is the song's real size, once the download learned it. */
+private sealed class Outcome(val sizeBytes: Long?) {
+    class Committed(sizeBytes: Long) : Outcome(sizeBytes)
+
+    /** The song won't fit its budget. Not a failure: the next pass plans with its real size. */
+    class TooLarge(sizeBytes: Long) : Outcome(sizeBytes)
+
+    class Failed(sizeBytes: Long? = null) : Outcome(sizeBytes)
+}
+
+private class InFlight(val trackId: String, val job: Deferred<Outcome>)
 
 private class Backoff(val attempts: Int, val timer: Job)
 
@@ -57,7 +67,12 @@ private class Backoff(val attempts: Int, val timer: Job)
 class CacheAheadScheduler(
     scope: CoroutineScope,
     private val index: CacheIndex,
-    private val download: suspend (trackId: String, staging: File) -> DownloadResult,
+    private val download: suspend (
+        trackId: String,
+        staging: File,
+        maxBytes: Long,
+        durationSeconds: Double?,
+    ) -> DownloadResult,
     settings: Flow<CacheSettings>,
     network: StateFlow<NetworkState>,
     private val freeDeviceBytes: () -> Long,
@@ -70,6 +85,11 @@ class CacheAheadScheduler(
     // Loop-only state. Nothing outside the loop coroutine reads or writes these.
     private var inFlight: InFlight? = null
     private var backoffs: Map<String, Backoff> = emptyMap()
+
+    // Real sizes of queued songs, from a finished or too-large download, so a song that came in
+    // over its estimate isn't fetched again only to be evicted. A song's size doesn't depend on the
+    // cache, so clearing the cache forgets none of these.
+    private var knownSizes: Map<String, Long> = emptyMap()
 
     // Cached bytes plus free device bytes, sampled only while nothing downloads. The download's
     // own staging eats free space as it goes, so sampling mid-download would shrink capacity
@@ -109,11 +129,11 @@ class CacheAheadScheduler(
     private suspend fun decide(loopScope: CoroutineScope, inputs: Inputs) {
         val queue = inputs.queue
         settle(loopScope, queue.playingId)
-        dropStaleBackoffs(queue)
+        dropUnqueued(queue)
         val used = inputs.cache.totalBytes
         if (inFlight == null) pool = used + freeDeviceBytes()
         val capacity = capacityBytes(inputs.settings.limitBytes, used, (pool - used).coerceAtLeast(0L))
-        val window = planWindow(queue.candidates, inputs.cache.entries, capacity)
+        val window = planWindow(queue.candidates, inputs.cache.entries, capacity, knownSizes)
         val allowed = mayCache(inputs.settings.mode, inputs.network)
         inFlight?.takeIf { !allowed || it.trackId !in window.trackIds }?.job?.cancel()
 
@@ -124,7 +144,8 @@ class CacheAheadScheduler(
             ?.takeIf { fitsOnceEvicted(inputs.cache, protectedIds, it, capacity) }
         val bytesToFree = used + (next?.estimatedBytes ?: 0L) - capacity
         val usedAfter = evictForRoom(inputs.cache, protectedIds, bytesToFree)
-        if (next != null && usedAfter + next.estimatedBytes <= capacity) start(loopScope, next)
+        // The room left is the download's budget, so a song bigger than its estimate stops there.
+        if (next != null && usedAfter + next.estimatedBytes <= capacity) start(loopScope, next, capacity - usedAfter)
     }
 
     /**
@@ -142,19 +163,22 @@ class CacheAheadScheduler(
         return kept + next.estimatedBytes <= capacity
     }
 
-    // Clears a finished download. Success forgets its backoff, failure grows it, cancel leaves it.
+    // Clears a finished download and keeps any size it learned. Success or too large forgets its
+    // backoff, failure grows it, cancel leaves it.
     private suspend fun settle(loopScope: CoroutineScope, playingId: String?) {
         val done = inFlight?.takeIf { it.job.isCompleted } ?: return
         inFlight = null
         if (done.job.isCancelled) return
         // Already complete, so this returns at once.
-        if (!done.job.await()) {
+        val outcome = done.job.await()
+        outcome.sizeBytes?.let { knownSizes = knownSizes + (done.trackId to it) }
+        if (outcome is Outcome.Failed) {
             recordFailure(loopScope, done.trackId)
             return
         }
         backoffs = backoffs - done.trackId
         // Cached while it played, so it's been heard. Unmarked, it would outlive songs marked played.
-        if (done.trackId == playingId) markPlayedQuietly(done.trackId)
+        if (outcome is Outcome.Committed && done.trackId == playingId) markPlayedQuietly(done.trackId)
     }
 
     private suspend fun markPlayedQuietly(id: String) {
@@ -174,9 +198,10 @@ class CacheAheadScheduler(
         backoffs = backoffs + (trackId to Backoff(attempts, timer))
     }
 
-    // A song that left the queue starts fresh if it comes back, and the map stays queue-sized.
-    private fun dropStaleBackoffs(queue: CacheQueueSnapshot) {
+    // A song that left the queue starts fresh if it comes back, and the maps stay queue-sized.
+    private fun dropUnqueued(queue: CacheQueueSnapshot) {
         val queued = queue.candidates.mapTo(HashSet()) { it.trackId }
+        if (knownSizes.keys.any { it !in queued }) knownSizes = knownSizes.filterKeys { it in queued }
         val stale = backoffs.filterKeys { it !in queued }
         if (stale.isEmpty()) return
         stale.values.forEach { it.timer.cancel() }
@@ -204,38 +229,41 @@ class CacheAheadScheduler(
         return used - victims.sumOf { cache.entries.getValue(it).sizeBytes }
     }
 
-    private fun start(loopScope: CoroutineScope, candidate: CacheCandidate) {
-        val job = loopScope.async { fetch(candidate) }
+    private fun start(loopScope: CoroutineScope, candidate: CacheCandidate, maxBytes: Long) {
+        val job = loopScope.async { fetch(candidate, maxBytes) }
         job.invokeOnCompletion { bump() }
         inFlight = InFlight(candidate.trackId, job)
     }
 
     /**
-     * Downloads and commits one song. True once it's committed. Anything else, a cancel
-     * included, discards the staging folder. Failures are logged by track id and exception
-     * class only, since a message could carry a signed URL.
+     * Downloads one song, writing at most [maxBytes], and commits it. Anything short of a
+     * commit, a cancel included, discards the staging folder. Failures are logged by track id
+     * and exception class only, since a message could carry a signed URL.
      */
-    private suspend fun fetch(candidate: CacheCandidate): Boolean {
+    private suspend fun fetch(candidate: CacheCandidate, maxBytes: Long): Outcome {
         val id = candidate.trackId
         // Runs on the scope's dispatcher (IO in the service), since it creates folders.
         val staging = try {
             index.staging(id)
         } catch (e: Exception) {
             logFailure(id, e)
-            return false
+            return Outcome.Failed()
         }
         var committed = false
         try {
-            val result = download(id, staging)
+            val result = download(id, staging, maxBytes, candidate.track.durationSeconds)
             committed = index.commit(id, staging, result, candidate.track)
+            return if (committed) Outcome.Committed(result.sizeBytes) else Outcome.Failed(result.sizeBytes)
+        } catch (e: SongTooLargeException) {
+            return Outcome.TooLarge(e.sizeBytes)
         } catch (e: Exception) {
             // A real cancel rethrows here. A stray CancellationException while active is a failure.
             currentCoroutineContext().ensureActive()
             logFailure(id, e)
+            return Outcome.Failed()
         } finally {
             if (!committed) withContext(NonCancellable) { discardQuietly(id, staging) }
         }
-        return committed
     }
 
     private suspend fun discardQuietly(id: String, staging: File) {

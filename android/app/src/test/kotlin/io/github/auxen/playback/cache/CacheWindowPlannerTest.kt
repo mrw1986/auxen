@@ -205,6 +205,20 @@ class CacheWindowPlannerTest {
         assertEquals(listOf("b", "c"), window.toDownload.map { it.trackId })
     }
 
+    @Test fun `window sizes an uncached song by its known size over its estimate`() {
+        val candidates = listOf(candidate("a", 100), candidate("b", 100), candidate("c", 100))
+        val window = planWindow(candidates, emptyMap(), 450L, knownSizes = mapOf("b" to 300L))
+        assertEquals(listOf("a", "b"), window.trackIds)
+        assertEquals(listOf(100L, 300L), window.toDownload.map { it.estimatedBytes })
+    }
+
+    @Test fun `window prefers a cached row over a known size`() {
+        val candidates = listOf(candidate("a", 100), candidate("b", 100))
+        val cached = mapOf("a" to row("a", sizeBytes = 50))
+        val window = planWindow(candidates, cached, 150L, knownSizes = mapOf("a" to 900L))
+        assertEquals(listOf("a", "b"), window.trackIds)
+    }
+
     // pickEvictions
 
     @Test fun `evictions never touch protected ids`() {

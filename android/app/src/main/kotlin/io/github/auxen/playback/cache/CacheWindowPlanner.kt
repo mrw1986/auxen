@@ -83,17 +83,23 @@ data class CacheWindow(val trackIds: List<String>, val toDownload: List<CacheCan
  * Takes [candidates] in order while they fit in [capacityBytes]. Stops at the
  * first song that doesn't fit, even if a later smaller one would, so the
  * window is always an unbroken run of what plays next.
+ *
+ * A song is sized by its cached row, else its entry in [knownSizes] (a real
+ * size learned from an earlier download), else its estimate. Each song in
+ * [CacheWindow.toDownload] carries that size as its `estimatedBytes`.
  */
 fun planWindow(
     candidates: List<CacheCandidate>,
     cached: Map<String, CachedTrackEntity>,
     capacityBytes: Long,
+    knownSizes: Map<String, Long> = emptyMap(),
 ): CacheWindow {
-    val runningTotals = candidates
+    val sized = candidates.map { c -> knownSizes[c.trackId]?.let { c.copy(estimatedBytes = it) } ?: c }
+    val runningTotals = sized
         .runningFold(0L) { total, c -> satAdd(total, cached[c.trackId]?.sizeBytes ?: c.estimatedBytes) }
         .drop(1)
     val fitCount = runningTotals.takeWhile { it <= capacityBytes }.size
-    val window = candidates.take(fitCount)
+    val window = sized.take(fitCount)
     return CacheWindow(
         trackIds = window.map { it.trackId },
         toDownload = window.filter { it.trackId !in cached },
