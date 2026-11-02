@@ -280,7 +280,9 @@ class TrackCacheStoreTest {
 
         store.clear()
 
-        assertTrue(root.list()!!.isEmpty())
+        // The staging root stays, emptied: a download started after the clear may be using it.
+        assertEquals(listOf(".tmp"), root.list()!!.toList())
+        assertTrue(File(root, ".tmp").list()!!.isEmpty())
         assertTrue(dao.all().isEmpty())
         assertEquals(CacheSnapshot(generation = 1L), store.snapshot.value)
     }
@@ -294,6 +296,22 @@ class TrackCacheStoreTest {
         store.evict(listOf("7"))
 
         assertEquals(CacheSnapshot(generation = 1L), store.snapshot.value)
+    }
+
+    @Test
+    fun `a staging folder made after a clear survives that clear's sweep`() = runBlocking {
+        val old = stage("8")
+        // What staging() names a folder once clear() has bumped the generation to 1. The
+        // scheduler can start that download while the sweep is still running.
+        val fresh = File(root, ".tmp/7-1-123").apply { mkdirs() }
+        File(fresh, "audio").writeBytes(ByteArray(1_000))
+
+        store.clear()
+
+        assertTrue(File(fresh, "audio").isFile)
+        assertFalse(old.exists())
+        assertTrue(store.commit("7", fresh, result(), track("7")))
+        assertEquals(setOf("7"), ids())
     }
 
     @Test

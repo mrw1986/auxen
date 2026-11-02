@@ -157,7 +157,10 @@ class TrackCacheStore(
         state.value = CacheSnapshot(generation = generation)
         // Rows before folders: see removeLocked.
         dao.deleteAll()
-        root.listFiles()?.forEach { it.deleteRecursively() }
+        root.listFiles()?.filter { it.name != TMP_DIR }?.forEach { it.deleteRecursively() }
+        // The scheduler can start its next download on the snapshot above while this still runs,
+        // and that download stages under the new generation. Its folder stays.
+        tmpRoot.listFiles()?.filterNot(::isCurrentGeneration)?.forEach { it.deleteRecursively() }
     }
 
     override suspend fun markPlayed(trackId: String) = locked {
@@ -242,6 +245,9 @@ class TrackCacheStore(
         val entry = File(staging, entryFile)
         return entry.isFile && entry.canonicalPath.startsWith(staging.canonicalPath + File.separator)
     }
+
+    private fun isCurrentGeneration(staging: File): Boolean =
+        STAGING_NAME.matchEntire(staging.name)?.groupValues?.get(2)?.toLongOrNull() == generation
 
     private fun isUnderTmp(file: File) = file.canonicalPath.startsWith(tmpRoot.canonicalPath + File.separator)
 
