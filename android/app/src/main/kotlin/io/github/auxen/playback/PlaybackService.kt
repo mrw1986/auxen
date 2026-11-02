@@ -1301,6 +1301,8 @@ class PlaybackService : MediaLibraryService() {
         // Before any teardown, so no download starts while the player and scopes go away.
         cacheAhead?.stop()
         getSystemService(AudioManager::class.java).unregisterAudioDeviceCallback(outputLoss)
+        // With no service nothing is paused offline, so the notice mustn't outlive it.
+        Graph.offlineStatus.clear()
         // Flush a final save while the player is still alive (main thread),
         // then tear the main scope down before releasing the player.
         mediaSession?.player?.let { p ->
