@@ -63,6 +63,7 @@ import io.github.auxen.playback.cache.CacheRecoveryGate
 import io.github.auxen.playback.cache.OfflineAction
 import io.github.auxen.playback.cache.OfflineSkipper
 import io.github.auxen.playback.cache.PlayerQueueAdapter
+import io.github.auxen.playback.cache.QueueChangeTracker
 import io.github.auxen.playback.cache.TrackDownloader
 import io.github.auxen.playback.cache.cacheCandidates
 import io.github.auxen.playback.cache.isPlayingResolvedCopy
@@ -234,12 +235,11 @@ class PlaybackService : MediaLibraryService() {
     private var pendingSleepTimerPause = false
 
     /**
-     * The queue's media ids at the last PLAYLIST_CHANGED. Cache and DASH swaps fire that too but
-     * keep the ids, so only a difference here is a real queue change. Every queue set through the
-     * session, the startup restore included, seeds it through that callback; the Bit-Perfect
-     * rebuild seeds it directly. Main thread only.
+     * Spots a real queue change at PLAYLIST_CHANGED, which cache and DASH swaps fire too. Every
+     * queue set through the session, the startup restore included, reaches it through that
+     * callback; the Bit-Perfect rebuild seeds it directly. Main thread only.
      */
-    private var lastQueueIds: List<String> = emptyList()
+    private val queueChanges = QueueChangeTracker()
 
     /** Downloads the songs coming up so they play from disk. Built in [onCreate]. */
     private var cacheAhead: CacheAheadScheduler? = null
@@ -524,9 +524,7 @@ class PlaybackService : MediaLibraryService() {
                     syncQueueWithCache(player)
                     // Built from mediaIds, so a cache swap leaves it unchanged.
                     updateCacheWindow(player)
-                    val queueIds = queueMediaIds(player)
-                    val queueChanged = queueIds != lastQueueIds
-                    lastQueueIds = queueIds
+                    val queueChanged = queueChanges.changed(queueMediaIds(player))
                     // A new queue may have cached songs, so the offline message is stale.
                     if (queueChanged) Graph.offlineStatus.clear()
                     // Belt-and-suspenders against pendingSleepTimerPause
@@ -769,7 +767,7 @@ class PlaybackService : MediaLibraryService() {
         session.player = newPlayer
         configurePlayer(newPlayer)
         // setMediaItems ran before the listener was attached, so seed this here.
-        lastQueueIds = queueMediaIds(newPlayer)
+        queueChanges.seed(queueMediaIds(newPlayer))
         updateCacheWindow(newPlayer)
 
         // The old player's platform effects were already released inside

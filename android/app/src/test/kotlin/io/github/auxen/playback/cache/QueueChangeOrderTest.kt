@@ -77,13 +77,11 @@ class QueueChangeOrderTest {
         val status = OfflineStatus { 0L }
         val offline = NetworkState(online = false, unmetered = false)
         val skipper = OfflineSkipper(PlayerQueueAdapter { exo }, { null }, { offline }, status)
-        var lastIds = emptyList<String>()
+        val queueChanges = QueueChangeTracker()
         exo.addListener(object : Player.Listener {
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 if (reason != Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) return
-                val ids = queueMediaIds(exo)
-                if (ids != lastIds) status.clear()
-                lastIds = ids
+                if (queueChanges.changed(queueMediaIds(exo))) status.clear()
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {

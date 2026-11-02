@@ -179,15 +179,13 @@ class QueueCacheSyncTest {
 
     @Test
     fun `only real queue edits change the queue's media ids`() {
-        // Mirrors PlaybackService.lastQueueIds: one entry per PLAYLIST_CHANGED, true when the ids changed.
+        // Fed the way PlaybackService feeds it: one entry per PLAYLIST_CHANGED, true when the ids changed.
         val changes = mutableListOf<Boolean>()
-        var last = emptyList<String>()
+        val queueChanges = QueueChangeTracker()
         exo.addListener(object : Player.Listener {
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 if (reason != Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) return
-                val ids = queueMediaIds(exo)
-                changes += ids != last
-                last = ids
+                changes += queueChanges.changed(queueMediaIds(exo))
             }
         })
         val looper = shadowOf(Looper.getMainLooper())
@@ -208,7 +206,7 @@ class QueueCacheSyncTest {
 
         assertEquals(listOf(true, false, false, false), swapsOnly)
         assertEquals(listOf(true, false, false, false, true, true, true), changes)
-        assertEquals(listOf("TIDAL:42", "LOCAL:7", "TIDAL:1", "TIDAL:6"), last)
+        assertEquals(listOf("TIDAL:42", "LOCAL:7", "TIDAL:1", "TIDAL:6"), queueChanges.lastIds)
     }
 
     @Test
