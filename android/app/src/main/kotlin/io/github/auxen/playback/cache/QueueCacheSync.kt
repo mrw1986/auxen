@@ -63,6 +63,17 @@ fun replacePlayingItem(player: Player, item: MediaItem) {
 }
 
 /**
+ * Points the playing song back at the network after its cached file went missing, then prepares
+ * the player again. Keeps the playhead and whether it plays: the file can turn up missing while
+ * preloading during a pause, and that mustn't start playback.
+ */
+fun reloadPlayingFromNetwork(player: Player, cacheRootUri: String) {
+    val current = player.currentMediaItem ?: return
+    queueItemUpdate(current, null, cacheRootUri)?.let { replacePlayingItem(player, it) }
+    player.prepare()
+}
+
+/**
  * Points every unresolved (`auxen`) copy of Tidal [trackId] at the DASH manifest [mpdUri] and
  * returns whether any changed. Copies already on a manifest are left alone. The playing copy
  * keeps its position and play state, so a resumed or restored Hi-Res song doesn't restart.

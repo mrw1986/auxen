@@ -212,6 +212,30 @@ class QueueCacheSyncTest {
     }
 
     @Test
+    fun `reloading a missing file from the network keeps a paused song paused`() {
+        player.setMediaItems(listOf(tidal("1"), tidal("42", progressive("42").uri)), 1, 7_000)
+        player.playWhenReady = false
+
+        reloadPlayingFromNetwork(player, root)
+
+        assertEquals("auxen://tidal/42", player.uriAt(1))
+        assertFalse(player.playWhenReady)
+        assertEquals(7_000, player.currentPosition)
+    }
+
+    @Test
+    fun `reloading a missing file from the network keeps a playing song playing`() {
+        player.setMediaItems(listOf(tidal("1"), tidal("42", progressive("42").uri)), 1, 7_000)
+        player.playWhenReady = true
+
+        reloadPlayingFromNetwork(player, root)
+
+        assertEquals("auxen://tidal/42", player.uriAt(1))
+        assertTrue(player.playWhenReady)
+        assertEquals(7_000, player.currentPosition)
+    }
+
+    @Test
     fun `a fresh queue of the same songs is a queue change`() {
         val changes = trackQueueChanges()
         val looper = shadowOf(Looper.getMainLooper())

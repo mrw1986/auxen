@@ -77,10 +77,9 @@ import io.github.auxen.playback.cache.isExternalOutput
 import io.github.auxen.playback.cache.isPlayingResolvedCopy
 import io.github.auxen.playback.cache.nextIndexForCache
 import io.github.auxen.playback.cache.playOrder
-import io.github.auxen.playback.cache.queueItemUpdate
 import io.github.auxen.playback.cache.queueEntryKeys
 import io.github.auxen.playback.cache.reconcileQueueWithCache
-import io.github.auxen.playback.cache.replacePlayingItem
+import io.github.auxen.playback.cache.reloadPlayingFromNetwork
 import io.github.auxen.playback.cache.resumeOfflinePause
 import io.github.auxen.playback.cache.swapDashCopies
 import io.github.auxen.playback.cache.tidalTrackIdOf
@@ -1075,9 +1074,9 @@ class PlaybackService : MediaLibraryService() {
 
     /**
      * Handles a cached file that vanished between resolve and open, or a DASH folder missing a
-     * segment: drops the entry, points the item back at the network and plays on from the same
-     * spot. Once per track per cooldown, so a file that keeps failing can't loop. False when it
-     * didn't take the error.
+     * segment: drops the entry, points the item back at the network and carries on from the same
+     * spot, playing or paused as it was. Once per track per cooldown, so a file that keeps failing
+     * can't loop. False when it didn't take the error.
      */
     private fun recoverMissingCacheFile(player: Player, error: PlaybackException): Boolean {
         val mediaId = player.currentMediaItem?.mediaId
@@ -1096,9 +1095,7 @@ class PlaybackService : MediaLibraryService() {
             val current = p.currentMediaItem ?: return@launch
             // The user may have moved on while the evict ran.
             if (current.mediaId != mediaId) return@launch
-            queueItemUpdate(current, null, Graph.trackCache.rootUri)?.let { replacePlayingItem(p, it) }
-            p.prepare()
-            p.play()
+            reloadPlayingFromNetwork(p, Graph.trackCache.rootUri)
         }
         return true
     }
