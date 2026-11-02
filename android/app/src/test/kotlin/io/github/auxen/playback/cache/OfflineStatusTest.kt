@@ -1,5 +1,6 @@
 package io.github.auxen.playback.cache
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -36,6 +37,15 @@ class OfflineStatusTest {
 
         status.clear()
         assertFalse(status.nothingCachedAhead.value)
+    }
+
+    @Test fun `each handled mark bumps the handled count`() {
+        assertEquals(0L, status.handledCount.value)
+
+        status.markHandled()
+        status.markHandled()
+
+        assertEquals(2L, status.handledCount.value)
     }
 
     @Test fun `clear leaves the handled mark alone`() {

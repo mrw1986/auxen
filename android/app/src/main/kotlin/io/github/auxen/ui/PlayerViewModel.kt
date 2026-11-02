@@ -51,9 +51,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.decodeFromString
@@ -186,6 +188,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Last playback error, for the UI banner; null when none/dismissed. */
     val playbackError = MutableStateFlow<String?>(null)
+    private val networkErrorBanner = NetworkErrorBanner()
 
     fun dismissPlaybackError() {
         playbackError.value = null
@@ -777,7 +780,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                         .joinToString(" ← ") { t ->
                             t.javaClass.simpleName + (t.message?.let { ": $it" } ?: "")
                         }
-                    playbackError.value = "${error.errorCodeName}\n$chain"
+                    val message = "${error.errorCodeName}\n$chain"
+                    playbackError.value = message
+                    networkErrorBanner.shown(message, error.errorCode)
                 }
             })
         }, MoreExecutors.directExecutor())
@@ -791,6 +796,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     playbackError.compareAndSet(OFFLINE_NOTHING_CACHED_MESSAGE, null)
                 }
+            }
+        }
+
+        // Once the service handles an offline failure, a network error banner from before it is
+        // stale. drop(1) skips the count at subscribe time, which says nothing new.
+        viewModelScope.launch {
+            Graph.offlineStatus.handledCount.drop(1).collect {
+                playbackError.update(networkErrorBanner::afterOfflineHandled)
             }
         }
 

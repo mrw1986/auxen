@@ -248,6 +248,8 @@ class OfflineSkipperTest {
 
         assertEquals(OfflineAction.ResumedFromCache(41_000), skipper.onNetworkChanged(offline))
         assertEquals(listOf("seekTo(0, 41000)", "prepareAndPlay"), queue.calls)
+        // The VM drops the banner the unhandled error raised.
+        assertEquals(1L, status.handledCount.value)
     }
 
     @Test fun `a held error up to a minute old is handled when the network drops`() {
