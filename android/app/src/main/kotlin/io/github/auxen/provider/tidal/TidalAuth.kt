@@ -1,6 +1,7 @@
 package io.github.auxen.provider.tidal
 
 import android.content.Context
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -9,10 +10,10 @@ import io.github.auxen.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -62,13 +63,10 @@ class TidalAuth(context: Context, private val client: OkHttpClient) {
 
     /**
      * Whether a session is stored. That's the signed-in state: it holds offline and on an Android
-     * Auto cold start before anything has bootstrapped, and [logout] clears it. A store that
-     * can't be read counts as signed out.
+     * Auto cold start before anything has bootstrapped, and [logout] clears it. See [sessionStored]
+     * for what a storage read error does.
      */
-    val hasSession: Flow<Boolean> = appContext.tidalDataStore.data
-        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
-        .map { it[KEY_ACCESS] != null }
-        .distinctUntilChanged()
+    val hasSession: Flow<Boolean> = sessionStored(appContext.tidalDataStore.data)
 
     suspend fun storedSession(): Session? {
         val prefs = appContext.tidalDataStore.data.first()
@@ -170,6 +168,22 @@ class TidalAuth(context: Context, private val client: OkHttpClient) {
         val KEY_ACCESS = stringPreferencesKey("access_token")
         val KEY_REFRESH = stringPreferencesKey("refresh_token")
         val KEY_EXPIRES = stringPreferencesKey("expires_at")
+        const val SESSION_RETRY_MILLIS = 30_000L
+
+        /**
+         * Whether [prefs] holds an access token. A read error counts as signed out and the store
+         * is read again every [SESSION_RETRY_MILLIS], so one bad read can't turn caching off until
+         * the service restarts. Any other error still throws.
+         */
+        fun sessionStored(prefs: Flow<Preferences>): Flow<Boolean> = prefs
+            .retryWhen { cause, _ ->
+                if (cause !is IOException) return@retryWhen false
+                emit(emptyPreferences())
+                delay(SESSION_RETRY_MILLIS)
+                true
+            }
+            .map { it[KEY_ACCESS] != null }
+            .distinctUntilChanged()
 
         /** True when both build-time Tidal credentials are present. */
         fun credentialsConfigured(clientId: String, clientSecret: String): Boolean =
