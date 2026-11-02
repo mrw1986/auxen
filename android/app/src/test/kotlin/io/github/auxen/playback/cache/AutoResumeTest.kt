@@ -152,6 +152,24 @@ class AutoResumeTest {
         assertTrue(controller.isWaiting)
     }
 
+    @Test fun `a user play that still finds nothing cached ends up waiting`() {
+        val controller = AutoResumeController(clock = { 0 }) { _, _ -> }
+        controller.onOfflineAction(OfflineAction.PausedNothingAhead(index = 3, mediaId = "TIDAL:7"))
+
+        controller.onUserPlay { OfflineAction.PausedNothingAhead(index = 3, mediaId = "TIDAL:7") }
+
+        assertTrue(controller.isWaiting)
+    }
+
+    @Test fun `a user play that finds the song playable cancels the wait`() {
+        val controller = AutoResumeController(clock = { 0 }) { _, _ -> }
+        controller.onOfflineAction(OfflineAction.PausedNothingAhead(index = 3, mediaId = "TIDAL:7"))
+
+        controller.onUserPlay { OfflineAction.None }
+
+        assertFalse(controller.isWaiting)
+    }
+
     @Test fun `a reconnect resumes the offline pause, stamped on the controller clock`() {
         var now = 0L
         var reconnects = 0

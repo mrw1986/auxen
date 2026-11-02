@@ -637,12 +637,13 @@ class PlaybackService : MediaLibraryService() {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 // Any play supersedes the auto-resume; the play a resume starts finds it already
                 // Idle. A pause changes nothing: while waiting, the player is already paused.
-                if (playWhenReady) autoResume.on(AutoResumeEvent.UserPlay)
                 if (playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) {
                     // Clear first, so a play that still finds nothing cached shows the message again
                     // and starts a fresh wait.
                     Graph.offlineStatus.clear()
-                    autoResume.onOfflineAction(offlineSkipper.onItemStarting())
+                    autoResume.onUserPlay { offlineSkipper.onItemStarting() }
+                } else if (playWhenReady) {
+                    autoResume.on(AutoResumeEvent.UserPlay)
                 }
                 if (playWhenReady) {
                     preResolveUpcoming(player)

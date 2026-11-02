@@ -130,6 +130,15 @@ class AutoResumeController(
     }
 
     /**
+     * A user play cancels the wait, then runs the offline skipper's [check]. In that order, a
+     * play that still finds nothing cached starts a fresh wait instead of being cancelled by it.
+     */
+    fun onUserPlay(check: () -> OfflineAction) {
+        on(AutoResumeEvent.UserPlay)
+        onOfflineAction(check())
+    }
+
+    /**
      * Feed every network state. Runs [onReconnect] on an offline to online change, then resumes
      * if that was in time. A metered/unmetered change while online isn't one.
      */
