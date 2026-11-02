@@ -13,10 +13,11 @@ import io.github.auxen.model.Track
 
 /**
  * Pure builder of the Android Auto browse tree: repo snapshots + browse ids ->
- * Media3 MediaItem nodes. No Android framework calls beyond MediaItem/MediaMetadata
- * construction, no network, no DB — callers pass fetched data in. Track leaves reuse
- * Graph.mediaItemFor, so any leaf this returns is playable through the existing
- * ResolvingDataSource. Folder nodes carry isBrowsable=true/isPlayable=false.
+ * Media3 MediaItem nodes. Its only framework use is building MediaItem/MediaMetadata
+ * and the extras Bundle that marks a cached leaf as downloaded. No network, no DB —
+ * callers pass fetched data in. Track leaves reuse Graph.mediaItemFor, so any leaf
+ * this returns is playable through the existing ResolvingDataSource. Folder nodes
+ * carry isBrowsable=true/isPlayable=false.
  */
 @UnstableApi
 class AuxenBrowseTree {

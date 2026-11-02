@@ -73,8 +73,8 @@ fun QueueScreen(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
         onMove = viewModel::moveInQueue,
         onToggleFavorite = viewModel::toggleFavorite,
         onClear = viewModel::clearQueue,
-        cachedIds = cachedIds,
         modifier = modifier,
+        cachedIds = cachedIds,
     )
 }
 
@@ -88,8 +88,8 @@ internal fun QueueContent(
     onMove: (Int, Int) -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onClear: () -> Unit,
-    cachedIds: Set<String> = emptySet(),
     modifier: Modifier = Modifier,
+    cachedIds: Set<String> = emptySet(),
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         Row(
