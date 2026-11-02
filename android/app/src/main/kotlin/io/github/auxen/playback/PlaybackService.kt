@@ -3,9 +3,14 @@ package io.github.auxen.playback
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.audiofx.AudioEffect
 import android.media.audiofx.PresetReverb
 import android.media.audiofx.Virtualizer
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import androidx.media3.common.AudioAttributes
@@ -68,6 +73,7 @@ import io.github.auxen.playback.cache.PlayerQueueAdapter
 import io.github.auxen.playback.cache.QueueChangeTracker
 import io.github.auxen.playback.cache.TrackDownloader
 import io.github.auxen.playback.cache.cacheCandidates
+import io.github.auxen.playback.cache.isExternalOutput
 import io.github.auxen.playback.cache.isPlayingResolvedCopy
 import io.github.auxen.playback.cache.nextIndexForCache
 import io.github.auxen.playback.cache.playOrder
@@ -257,6 +263,18 @@ class PlaybackService : MediaLibraryService() {
     private val autoResume = AutoResumeController { index, mediaId -> resumeOfflinePause(offlineQueue, index, mediaId) }
 
     /**
+     * Cancels the auto-resume when the car or headphones go away. The player is already paused
+     * while waiting, so the noisy-audio pause never fires, and a resume would play on the speaker.
+     */
+    private val outputLoss = object : AudioDeviceCallback() {
+        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+            if (removedDevices.any { it.isSink && isExternalOutput(it.type) }) {
+                autoResume.on(AutoResumeEvent.OutputLost)
+            }
+        }
+    }
+
+    /**
      * Queue tracks decoded on the last cache-window walk, by mediaId, so the replans every
      * player event sets off skip the JSON decode. Rebuilt on each walk, so it never outgrows
      * the queue. Main thread only.
@@ -399,6 +417,7 @@ class PlaybackService : MediaLibraryService() {
                 if (autoResume.onNetwork(state.online)) Graph.offlineStatus.clear()
             }
         }
+        getSystemService(AudioManager::class.java).registerAudioDeviceCallback(outputLoss, Handler(Looper.getMainLooper()))
 
         // Restore the persisted queue paused: the user decides when to hit
         // play, and no Tidal stream resolution happens until they do.
@@ -1280,6 +1299,7 @@ class PlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         // Before any teardown, so no download starts while the player and scopes go away.
         cacheAhead?.stop()
+        getSystemService(AudioManager::class.java).unregisterAudioDeviceCallback(outputLoss)
         // Flush a final save while the player is still alive (main thread),
         // then tear the main scope down before releasing the player.
         mediaSession?.player?.let { p ->

@@ -1,9 +1,11 @@
 package io.github.auxen.playback.cache
 
+import android.media.AudioDeviceInfo
 import androidx.media3.common.PlaybackException
 import io.github.auxen.playback.cache.AutoResumeEvent.ItemChanged
 import io.github.auxen.playback.cache.AutoResumeEvent.NetworkBack
 import io.github.auxen.playback.cache.AutoResumeEvent.OfflinePaused
+import io.github.auxen.playback.cache.AutoResumeEvent.OutputLost
 import io.github.auxen.playback.cache.AutoResumeEvent.QueueChanged
 import io.github.auxen.playback.cache.AutoResumeEvent.SleepTimerFired
 import io.github.auxen.playback.cache.AutoResumeEvent.UserPlay
@@ -54,6 +56,35 @@ class AutoResumeTest {
     @Test fun `a sleep timer firing cancels`() {
         assertEquals(AutoResumeStep(Idle), reduceAutoResume(waiting, SleepTimerFired))
         assertEquals(AutoResumeStep(Idle), reduceAutoResume(Idle, SleepTimerFired))
+    }
+
+    @Test fun `losing an external output cancels`() {
+        assertEquals(AutoResumeStep(Idle), reduceAutoResume(waiting, OutputLost))
+        assertEquals(AutoResumeStep(Idle), reduceAutoResume(Idle, OutputLost))
+    }
+
+    @Test fun `headphones, Bluetooth, USB, HDMI and line outputs are external`() {
+        val external = listOf(
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            AudioDeviceInfo.TYPE_BLE_HEADSET,
+            AudioDeviceInfo.TYPE_BLE_SPEAKER,
+            AudioDeviceInfo.TYPE_BLE_BROADCAST,
+            AudioDeviceInfo.TYPE_USB_HEADSET,
+            AudioDeviceInfo.TYPE_USB_DEVICE,
+            AudioDeviceInfo.TYPE_USB_ACCESSORY,
+            AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            AudioDeviceInfo.TYPE_HDMI,
+            AudioDeviceInfo.TYPE_LINE_ANALOG,
+            AudioDeviceInfo.TYPE_LINE_DIGITAL,
+        )
+        assertEquals(emptyList<Int>(), external.filterNot(::isExternalOutput))
+    }
+
+    @Test fun `the phone's own speaker and earpiece are not external`() {
+        assertFalse(isExternalOutput(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER))
+        assertFalse(isExternalOutput(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE))
     }
 
     @Test fun `network back while idle does nothing`() {

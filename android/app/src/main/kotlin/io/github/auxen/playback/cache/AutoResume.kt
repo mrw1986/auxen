@@ -1,5 +1,7 @@
 package io.github.auxen.playback.cache
 
+import android.annotation.SuppressLint
+import android.media.AudioDeviceInfo
 import android.os.SystemClock
 
 /** How long after a "nothing cached ahead" pause a returning network still restarts playback. */
@@ -32,14 +34,44 @@ sealed interface AutoResumeEvent {
 
     /** The sleep timer ran out. It beats the auto-resume, so a timer spent during an outage stays spent. */
     data object SleepTimerFired : AutoResumeEvent
+
+    /**
+     * An external output such as the car or headphones went away. Playing stops when that
+     * happens, so a resume mustn't start the phone speaker instead.
+     */
+    data object OutputLost : AutoResumeEvent
 }
 
 /** The next state, and the index to play when this step resumes. */
 data class AutoResumeStep(val state: AutoResumeState, val resumeIndex: Int? = null)
 
 /**
+ * Whether an [AudioDeviceInfo] type is an output outside the phone: Bluetooth, USB, wired, HDMI
+ * or line out. The constants inline at compile time, so the API 31 ones are safe on older phones.
+ */
+@SuppressLint("InlinedApi")
+fun isExternalOutput(type: Int): Boolean = type in EXTERNAL_OUTPUT_TYPES
+
+@SuppressLint("InlinedApi")
+private val EXTERNAL_OUTPUT_TYPES = setOf(
+    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+    AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+    AudioDeviceInfo.TYPE_BLE_HEADSET,
+    AudioDeviceInfo.TYPE_BLE_SPEAKER,
+    AudioDeviceInfo.TYPE_BLE_BROADCAST,
+    AudioDeviceInfo.TYPE_USB_HEADSET,
+    AudioDeviceInfo.TYPE_USB_DEVICE,
+    AudioDeviceInfo.TYPE_USB_ACCESSORY,
+    AudioDeviceInfo.TYPE_WIRED_HEADSET,
+    AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+    AudioDeviceInfo.TYPE_HDMI,
+    AudioDeviceInfo.TYPE_LINE_ANALOG,
+    AudioDeviceInfo.TYPE_LINE_DIGITAL,
+)
+
+/**
  * Only a network back within [AUTO_RESUME_WINDOW_MILLIS] of the pause resumes. A play, a queue
- * change, a different song or the sleep timer running out cancels.
+ * change, a different song, the sleep timer running out or a lost output cancels.
  */
 fun reduceAutoResume(state: AutoResumeState, event: AutoResumeEvent): AutoResumeStep = when (event) {
     is AutoResumeEvent.OfflinePaused ->
@@ -56,8 +88,11 @@ fun reduceAutoResume(state: AutoResumeState, event: AutoResumeEvent): AutoResume
         } else {
             AutoResumeStep(AutoResumeState.Idle)
         }
-    AutoResumeEvent.UserPlay, AutoResumeEvent.QueueChanged, AutoResumeEvent.SleepTimerFired ->
-        AutoResumeStep(AutoResumeState.Idle)
+    AutoResumeEvent.UserPlay,
+    AutoResumeEvent.QueueChanged,
+    AutoResumeEvent.SleepTimerFired,
+    AutoResumeEvent.OutputLost,
+    -> AutoResumeStep(AutoResumeState.Idle)
 }
 
 private fun AutoResumeState.Waiting.inWindowAt(nowMillis: Long) =
