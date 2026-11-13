@@ -1,0 +1,156 @@
+package io.github.auxen.db
+
+import androidx.room.ColumnInfo
+import androidx.room.Entity
+import androidx.room.Index
+import androidx.room.PrimaryKey
+
+/**
+ * Room schema — port of the desktop `auxen/db.py` tables needed on Android.
+ * Timestamps are epoch millis (the desktop app uses SQLite datetime text).
+ */
+
+@Entity(
+    tableName = "tracks",
+    indices = [
+        Index(value = ["source", "source_id"], unique = true),
+        Index("match_group_id"),
+        Index(value = ["title", "artist"]),
+    ],
+)
+data class TrackEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String,
+    val artist: String,
+    val album: String? = null,
+    @ColumnInfo(name = "album_artist") val albumArtist: String? = null,
+    val genre: String? = null,
+    val year: Int? = null,
+    @ColumnInfo(name = "duration") val durationSeconds: Double? = null,
+    @ColumnInfo(name = "track_number") val trackNumber: Int? = null,
+    @ColumnInfo(name = "disc_number") val discNumber: Int? = null,
+    val source: String,
+    @ColumnInfo(name = "source_id") val sourceId: String,
+    @ColumnInfo(name = "bitrate") val bitrateKbps: Int? = null,
+    val format: String? = null,
+    @ColumnInfo(name = "sample_rate") val sampleRateHz: Int? = null,
+    @ColumnInfo(name = "bit_depth") val bitDepth: Int? = null,
+    @ColumnInfo(name = "album_art_url") val albumArtUrl: String? = null,
+    @ColumnInfo(name = "match_group_id") val matchGroupId: String? = null,
+    val explicit: Boolean = false,
+    @ColumnInfo(name = "added_at") val addedAtMillis: Long = 0,
+    @ColumnInfo(name = "last_played_at") val lastPlayedAtMillis: Long? = null,
+    @ColumnInfo(name = "play_count") val playCount: Int = 0,
+)
+
+@Entity(tableName = "favorites")
+data class FavoriteEntity(
+    @PrimaryKey @ColumnInfo(name = "track_id") val trackId: Long,
+    @ColumnInfo(name = "match_group_id") val matchGroupId: String? = null,
+    @ColumnInfo(name = "added_at") val addedAtMillis: Long,
+)
+
+/**
+ * A favorited album — the local surface for Tidal saved albums (user decision
+ * 2026-07-15). Deliberately NOT a catalog mirror: only the favorite record plus
+ * the minimal display metadata Collection renders. On internal-v1 [artist] and
+ * [artUrl] are POPULATED on a pull (the album carries its artist name + cover),
+ * so a remote-only album card renders fully.
+ */
+@Entity(
+    tableName = "favorite_albums",
+    indices = [Index(value = ["source", "source_id"], unique = true)],
+)
+data class FavoriteAlbumEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val source: String,
+    @ColumnInfo(name = "source_id") val sourceId: String,
+    val title: String,
+    val artist: String? = null,
+    @ColumnInfo(name = "art_url") val artUrl: String? = null,
+    @ColumnInfo(name = "added_at") val addedAtMillis: Long,
+)
+
+/**
+ * A favorited (followed) artist — the local surface for Tidal followed artists
+ * (user decision 2026-07-15). [artUrl] is the picture @480, populated on a pull.
+ */
+@Entity(
+    tableName = "favorite_artists",
+    indices = [Index(value = ["source", "source_id"], unique = true)],
+)
+data class FavoriteArtistEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val source: String,
+    @ColumnInfo(name = "source_id") val sourceId: String,
+    val name: String,
+    @ColumnInfo(name = "art_url") val artUrl: String? = null,
+    @ColumnInfo(name = "added_at") val addedAtMillis: Long,
+)
+
+@Entity(tableName = "playlists")
+data class PlaylistEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val color: String? = null,
+    val source: String? = null,
+    @ColumnInfo(name = "tidal_playlist_id") val tidalPlaylistId: String? = null,
+)
+
+@Entity(tableName = "playlist_tracks", primaryKeys = ["playlist_id", "track_id", "position"])
+data class PlaylistTrackEntity(
+    @ColumnInfo(name = "playlist_id") val playlistId: Long,
+    @ColumnInfo(name = "track_id") val trackId: Long,
+    val position: Int,
+)
+
+@Entity(tableName = "play_history", indices = [Index("track_id"), Index("played_at")])
+data class PlayHistoryEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(name = "track_id") val trackId: Long,
+    @ColumnInfo(name = "played_at") val playedAtMillis: Long,
+    @ColumnInfo(name = "duration_listened") val durationListenedSeconds: Double? = null,
+)
+
+@Entity(tableName = "settings")
+data class SettingEntity(
+    @PrimaryKey val key: String,
+    val value: String,
+)
+
+/** Persisted playback queue — one row per queue slot, track as JSON. */
+@Entity(tableName = "queue_items")
+data class QueueItemEntity(
+    @PrimaryKey val position: Int,
+    @ColumnInfo(name = "track_json") val trackJson: String,
+)
+
+/** Recent search queries — desktop `search_history` table. */
+@Entity(tableName = "search_history")
+data class SearchHistoryEntity(
+    @PrimaryKey val query: String,
+    @ColumnInfo(name = "searched_at") val searchedAtMillis: Long,
+)
+
+/**
+ * One row per FULLY cached Tidal track; a row only exists once the files are on
+ * disk, so a partial download is never mistaken for a playable cache.
+ */
+@Entity(tableName = "cached_tracks")
+data class CachedTrackEntity(
+    @PrimaryKey @ColumnInfo(name = "tidal_track_id") val tidalTrackId: String,
+    // CacheKind.name: "PROGRESSIVE" | "DASH"
+    @ColumnInfo(name = "kind") val kind: String,
+    // "audio" for PROGRESSIVE or "manifest.mpd" for DASH, inside the track's folder.
+    @ColumnInfo(name = "entry_file") val entryFile: String,
+    @ColumnInfo(name = "size_bytes") val sizeBytes: Long,
+    @ColumnInfo(name = "mime_type") val mimeType: String?,
+    @ColumnInfo(name = "sample_rate_hz") val sampleRateHz: Int?,
+    @ColumnInfo(name = "bit_depth") val bitDepth: Int?,
+    @ColumnInfo(name = "track_gain_db") val trackGainDb: Double?,
+    @ColumnInfo(name = "album_gain_db") val albumGainDb: Double?,
+    @ColumnInfo(name = "cached_at_millis") val cachedAtMillis: Long,
+    @ColumnInfo(name = "last_played_at_millis") val lastPlayedAtMillis: Long?,
+    // Graph.json-encoded Track, so a cached track can be played with no network.
+    @ColumnInfo(name = "track_json") val trackJson: String,
+)

@@ -312,6 +312,8 @@ class SearchView(Gtk.Box):
         # Navigation callbacks for clickable artist/album labels
         self._on_nav_artist_clicked = None
         self._on_nav_album_clicked = None
+        # Plays a list of tracks from a start index: (tracks, start_index)
+        self._on_play_queue = None
 
         # Filter state — "all", "track", "album", "artist"
         self._active_filter: str = "all"
@@ -340,6 +342,7 @@ class SearchView(Gtk.Box):
         self._search_entry.add_css_class("search-entry")
         self._search_entry.set_hexpand(True)
         self._search_entry.connect("changed", self._on_search_changed)
+        self._search_entry.connect("activate", self._on_entry_activate)
         self._search_entry.connect("icon-press", self._on_icon_press)
 
         # Escape key clears the entry
@@ -376,12 +379,12 @@ class SearchView(Gtk.Box):
             btn = Gtk.ToggleButton(label=label_text)
             btn.add_css_class("filter-btn")
             btn._filter_name = filter_name  # type: ignore[attr-defined]
+            # Set the default before connecting: a toggle during __init__
+            # would re-render a results list that doesn't exist yet.
+            btn.set_active(filter_name == "all")
             btn.connect("toggled", self._on_filter_toggled)
             self._filter_box.append(btn)
             self._filter_buttons.append(btn)
-
-        # Default: "All" is active
-        self._filter_buttons[0].set_active(True)
 
         self.append(self._filter_box)
 
@@ -411,6 +414,9 @@ class SearchView(Gtk.Box):
         self._results_list = Gtk.ListBox()
         self._results_list.set_selection_mode(Gtk.SelectionMode.NONE)
         self._results_list.add_css_class("boxed-list")
+        self._results_list.connect(
+            "row-activated", self._on_result_row_activated
+        )
         results_box.append(self._results_list)
 
         self._results_stack.add_named(results_box, "results")
@@ -500,6 +506,56 @@ class SearchView(Gtk.Box):
         self._on_nav_artist_clicked = on_artist_clicked
         self._on_nav_album_clicked = on_album_clicked
 
+    def set_play_queue_callback(self, on_play_queue) -> None:
+        """Set the callback that plays (tracks, start_index)."""
+        self._on_play_queue = on_play_queue
+
+    def _visible_tracks(self) -> list:
+        """Track objects shown under the active filter, in display order."""
+        if self._active_filter not in ("all", _TYPE_TRACK):
+            return []
+        return [
+            r["_track"]
+            for r in self._cached_results
+            if r.get("_result_type", _TYPE_TRACK) == _TYPE_TRACK
+            and r.get("_track") is not None
+        ]
+
+    def _on_result_row_activated(self, _list_box, row) -> None:
+        """Play a track result on click, queueing the results after it.
+
+        Album and artist rows navigate through their own click gesture,
+        so only track rows are handled here.
+        """
+        if getattr(row, "_result_type", None) != _TYPE_TRACK:
+            return
+        track = getattr(row, "_track_data", None)
+        if track is None:
+            return
+        self._commit_history()
+
+        tracks = self._visible_tracks()
+        index = next(
+            (i for i, t in enumerate(tracks) if t is track), None
+        )
+        if self._on_play_queue is not None and index is not None:
+            self._on_play_queue(tracks, index)
+            return
+        on_play = (self._context_callbacks or {}).get("on_play")
+        if on_play is not None:
+            on_play(track)
+
+    def _with_history_commit(self, callback):
+        """Wrap a navigation callback so using a result saves the query."""
+        if callback is None:
+            return None
+
+        def _wrapped(*args):
+            self._commit_history()
+            callback(*args)
+
+        return _wrapped
+
     def _nav_album_from_track(
         self, album_name: str, artist: str
     ) -> None:
@@ -570,7 +626,9 @@ class SearchView(Gtk.Box):
                     name=result["title"],
                     artist_name=result.get("artist", ""),
                     num_tracks=result.get("_num_tracks"),
-                    on_clicked=self._on_nav_album_clicked,
+                    on_clicked=self._with_history_commit(
+                        self._on_nav_album_clicked
+                    ),
                     tidal_id=tidal_id or None,
                 )
                 row._result_type = _TYPE_ALBUM  # type: ignore[attr-defined]
@@ -585,7 +643,9 @@ class SearchView(Gtk.Box):
             elif result_type == _TYPE_ARTIST:
                 row = _make_artist_result_row(
                     name=result["title"],
-                    on_clicked=self._on_nav_artist_clicked,
+                    on_clicked=self._with_history_commit(
+                        self._on_nav_artist_clicked
+                    ),
                 )
                 row._result_type = _TYPE_ARTIST  # type: ignore[attr-defined]
                 tidal_obj = result.get("_tidal_obj")
@@ -648,22 +708,33 @@ class SearchView(Gtk.Box):
 
     # ---- Drag source helpers ----
 
-    @staticmethod
+    def _drag_track_id(self, track) -> str | None:
+        """The DB id to drag, persisting a not-yet-saved Tidal track."""
+        track_id = getattr(track, "id", None)
+        if track_id is None and self._db is not None:
+            try:
+                track_id = self._db.ensure_track_id(track)
+            except Exception:
+                logger.warning("Failed to persist dragged track", exc_info=True)
+        return None if track_id is None else str(track_id)
+
     def _attach_drag_source_to_row(
-        row: Gtk.ListBoxRow, track
+        self, row: Gtk.ListBoxRow, track
     ) -> None:
         """Attach a DragSource to a track row for drag-to-playlist."""
         if track is None:
-            return
-        track_id = getattr(track, "id", None)
-        if track_id is None:
             return
 
         drag_source = Gtk.DragSource.new()
         drag_source.set_actions(Gdk.DragAction.COPY)
 
-        def _on_prepare(_src, _x, _y, tid=track_id):
-            value = GObject.Value(GObject.TYPE_STRING, str(tid))
+        # Resolve the id at drag time, so Tidal results (no id until
+        # saved) can be dragged too.
+        def _on_prepare(_src, _x, _y, trk=track):
+            tid = self._drag_track_id(trk)
+            if tid is None:
+                return None
+            value = GObject.Value(GObject.TYPE_STRING, tid)
             return Gdk.ContentProvider.new_for_value(value)
 
         drag_source.connect("prepare", _on_prepare)
@@ -1059,6 +1130,20 @@ class SearchView(Gtk.Box):
 
     # ---- Entry event handlers ----
 
+    def _commit_history(self) -> None:
+        """Save the current query to history (2+ characters)."""
+        query = self._search_entry.get_text().strip()
+        if len(query) < 2 or self._db is None:
+            return
+        try:
+            self._db.add_search_history(query)
+        except Exception:
+            logger.warning("Failed to save search history", exc_info=True)
+
+    def _on_entry_activate(self, _entry: Gtk.Entry) -> None:
+        """Enter in the search box commits the query to history."""
+        self._commit_history()
+
     def _on_icon_press(
         self, entry: Gtk.Entry, icon_pos: Gtk.EntryIconPosition
     ) -> None:
@@ -1110,12 +1195,8 @@ class SearchView(Gtk.Box):
         """Execute the search after debounce period expires."""
         self._debounce_id = None
 
-        # Save queries with 2+ characters to history
-        if len(query) >= 2 and self._db is not None:
-            try:
-                self._db.add_search_history(query)
-            except Exception:
-                logger.warning("Failed to save search history", exc_info=True)
+        # History is saved on Enter or when a result is used, not here:
+        # saving per debounce stored every typing pause ("pi", "pink"...).
 
         # Run the search in a background thread to avoid blocking the UI
         # (especially Tidal network calls).

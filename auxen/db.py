@@ -265,6 +265,26 @@ class Database:
                 return row["id"] if row else 0
             return cur.lastrowid
 
+    def ensure_track_id(self, track: Track) -> Optional[int]:
+        """Return the track's DB id, inserting the track first if it has none.
+
+        Tidal tracks from search/explore/mixes arrive without an id, and
+        favorites, playlists and play counts all key on it. Sets
+        ``track.id`` in place so every view holding this object sees it.
+
+        An existing row is reused as-is rather than upserted, so a sparse
+        search result can't overwrite richer stored metadata.
+        """
+        if track.id is not None:
+            return track.id
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM tracks WHERE source = ? AND source_id = ?",
+                (track.source.value, track.source_id),
+            ).fetchone()
+            track.id = row["id"] if row else (self.insert_track(track) or None)
+        return track.id
+
     def get_track(self, track_id: int) -> Optional[Track]:
         """Fetch a single track by its primary key."""
         with self._lock:

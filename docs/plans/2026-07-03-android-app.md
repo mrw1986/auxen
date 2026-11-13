@@ -1,0 +1,143 @@
+# Auxen for Android — native app plan
+
+**Status:** Milestones 1–2 implemented in `android/`.
+**Goal:** A native Kotlin Android player with first-class media sessions and
+built-in Wavelet-style headphone correction, sharing Auxen's core concepts
+(unified local + Tidal library, quality-aware duplicate handling) with the
+GTK desktop app.
+
+## Why native (recap of the decision)
+
+GTK4/libadwaita and PyGObject have no Android story, so the desktop codebase
+cannot be ported directly. The Python core splits cleanly (providers, models,
+matching, smart playlists are UI-free), and those modules serve as the spec
+for their Kotlin counterparts. Android users expect Media3 media sessions
+(lockscreen/notification controls, Bluetooth AVRCP, output switching, Android
+Auto), which only a native app delivers well.
+
+## Architecture
+
+```
+android/app  (single module for now; split into :core/:playback/:ui when it grows)
+ └── io.github.auxen
+     ├── model/        Track, Source, quality scoring   ← port of auxen/models.py
+     ├── provider/     MusicProvider interface          ← port of providers/base.py
+     │   ├── local/    MediaStore-backed library        ← analog of providers/local.py
+     │   └── tidal/    OAuth device flow + v1 API       ← port of providers/tidal.py
+     ├── dsp/          EQ engine (the Wavelet part)     ← superset of equalizer.py
+     ├── playback/     MediaSessionService + ExoPlayer  ← analog of player.py + mpris.py
+     └── ui/           Jetpack Compose (Material 3)     ← analog of views/
+```
+
+### The audio path (the audiophile part)
+
+Wavelet attaches `DynamicsProcessing` to other apps' audio sessions — it's at
+the mercy of the OEM's effect implementation and processes post-mix. Auxen
+does correction **inside** the player instead:
+
+```
+ExoPlayer decoder → ReplayGainProcessor → ParametricEqProcessor → BassBoostProcessor
+                  → BalanceProcessor → LimiterProcessor → EncodingRestorerProcessor
+                  → DefaultAudioSink → AudioTrack
+```
+
+(Updated by the DSP-a engine batch, 2026-07-13. Mid-chain samples are always
+float32 with unclamped headroom; `EncodingRestorerProcessor` at the tail owns
+the conversion back to the source's 16-bit encoding for the sink's built-ins,
+and the limiter — on by default — is the chain's only clamping stage. Each
+effect has its own independently persisted enable flag via `AudioFxController`;
+per-track ReplayGain values come from a zero-dependency local tag parser
+(FLAC VorbisComment + ID3v2.3/2.4 TXXX) and Tidal's playbackinfo fields,
+routed on media transitions. The DSP-b batch added two platform effects
+outside the in-pipeline chain — `PresetReverb` and `Virtualizer`, attached to
+the sink-committed audio session id (a `setAudioSessionId(UNSET)` call after
+player construction forces the id to actually propagate to the sink; the
+constructor-generated id never does) — plus a sleep timer and the per-effect
+sections UI on the Equalizer screen.)
+
+- `dsp/Biquad.kt` — RBJ cookbook peaking/low-shelf/high-shelf, transposed
+  direct form II, double-precision state (verified against the analytic
+  transfer function: response at fc matches requested gain to <0.001 dB).
+- `dsp/ParametricEqProcessor.kt` — Media3 `AudioProcessor` installed via a
+  custom `RenderersFactory`. Filters in double precision and always emits
+  float32 for chain headroom; sink compatibility is the restorer's job.
+  Hi-Res float sources still bypass the EQ chain at the sink (a tracked
+  follow-up).
+- `dsp/Eq.kt` — the filter engine behind two now-SEPARATE stages (split
+  2026-07-13, Wavelet-style — each its own independently-toggleable
+  `ParametricEqProcessor` in the chain, each auto-setting its own preamp):
+  - the desktop app's 10-band graphic EQ (same ISO bands, same ten presets),
+    driven by `EqController`;
+  - AutoEq headphone correction (`AutoEqParser` for `ParametricEq.txt`
+    exports — PK/LSC/HSC lines, 8,850 headphone models), driven by
+    `AutoEqController`. Importing a correction profile no longer touches the
+    manual graphic EQ. (A one-time crash-safe migration moves any pre-split
+    merged profile into `AutoEqController` on first launch after upgrade.)
+
+The Equalizer screen bundles that full 8,850-profile AutoEq database as an
+asset with an in-app search picker (Wavelet parity, no network round-trip),
+MIT-attributed to the upstream AutoEq project.
+
+### Tidal
+
+`TidalAuth` implements the same OAuth device-code flow tidalapi uses
+(auth.tidal.com, `link.tidal.com/XXXXX` approval, refresh-token persistence
+in DataStore). `TidalProvider` talks to the v1 API: `/sessions` bootstrap,
+track search, and `playbackinfopostpaywall` stream resolution, handling both
+BTS manifests (direct FLAC/AAC URLs) and DASH MPDs (fed to ExoPlayer as a
+`data:` URI via media3-exoplayer-dash).
+
+Client id/secret are **not** in the repo — supply the pair the desktop app
+uses via `auxen.tidalClientId` / `auxen.tidalClientSecret` Gradle properties.
+
+### Known limitations of milestone 1
+
+- Tidal stream URLs are resolved at enqueue time and are short-lived; long
+  queues need re-resolution on error (`ResolvingDataSource`, milestone 2) —
+  **fixed in milestone 2** (ResolvingDataSource / Room).
+- EQ settings flow through an in-process singleton (`EqController`); should
+  become MediaSession custom commands if playback ever moves out of process.
+- Local library metadata is MediaStore-only (no bit depth / sample rate);
+  needs a `MediaMetadataRetriever` enrichment pass for FLAC quality display.
+- No Room database yet — favorites/playlists/play counts (db.py) not ported —
+  **fixed in milestone 2** (ResolvingDataSource / Room).
+
+## Roadmap
+
+| Milestone | Scope |
+| --- | --- |
+| **1 — this commit** | Project scaffold, playback service + media session, float EQ engine + AutoEq import, Tidal device login + search + lossless/Hi-Res streaming, local library browse, minimal Compose UI |
+| **2 — done** | Room DB (favorites, playlists, play counts), local↔Tidal matching (port `matching.py`), quality-aware duplicate resolution, queue persistence, `ResolvingDataSource` for URL refresh |
+| **3 — done (3a+3b)** | Album/artist/playlist views, Tidal home/mixes/explore, lyrics panel, last.fm scrobbling (ports of the corresponding desktop modules) |
+| 4 | Android Auto, Chromecast/output routing, gapless + crossfade (crossfade needs a second player instance), sleep timer, widgets |
+| 5 | Per-device EQ profiles (auto-switch on Bluetooth device connect — the Wavelet UX), EQ curve visualisation, downloads/offline for local sync |
+
+Milestone 3 shipped in two parts: 3a (theme, components, nav shell, mini player, Now Playing) and 3b (Home, Library, Search + history, Collection, album/artist/playlist detail). Tidal discovery surfaces (Explore/Mixes/Moods), queue reorder UI, stats, and lyrics remain for milestone 4 planning.
+
+Playlist UI is intentionally deferred to milestone 3; the DB layer and DAOs
+(favorites, playlists, play counts) landed in milestone 2.
+
+The very first track of a cold-start Hi-Res queue may still resolve through
+the (now non-retried) error path if the user hits play before pre-resolution
+completes; all subsequent transitions pre-swap gaplessly.
+
+## Building
+
+Requires Android Studio (or SDK + JDK 17+):
+
+```bash
+cd android
+./gradlew assembleDebug      # or open in Android Studio
+./gradlew test               # JVM unit tests (DSP + parser)
+```
+
+With Tidal credentials in `~/.gradle/gradle.properties`:
+
+```properties
+auxen.tidalClientId=...
+auxen.tidalClientSecret=...
+```
+
+> Note: this milestone was authored in an environment without access to
+> Google's Maven/SDK repositories, so it has not been compiled yet. Expect a
+> normal round of first-build fixes (see PR/commit description).

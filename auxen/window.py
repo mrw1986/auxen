@@ -376,6 +376,7 @@ class AuxenWindow(Adw.ApplicationWindow):
             on_artist_clicked=self._navigate_to_artist,
             on_album_clicked=self._on_album_clicked,
         )
+        self._search_view.set_play_queue_callback(self._on_play_tracks_from)
         self._collection_view.set_context_callbacks(
             context_callbacks, self._get_playlists
         )
@@ -1014,7 +1015,7 @@ class AuxenWindow(Adw.ApplicationWindow):
     def _on_now_playing_favorite_toggled(self, is_favorite: bool) -> None:
         """Handle favorite toggle from the now-playing bar heart button."""
         track = self._current_track
-        if track is None or track.id is None:
+        if self._ensure_track_id(track) is None:
             return
         if self._app_ref is None or self._app_ref.db is None:
             return
@@ -2441,6 +2442,22 @@ class AuxenWindow(Adw.ApplicationWindow):
                 )
         return []
 
+    def _on_play_tracks_from(self, tracks: list, start_index: int) -> None:
+        """Replace the queue with tracks and start at start_index."""
+        if self._app_ref and self._app_ref.player is not None and tracks:
+            self._app_ref.player.play_queue(tracks, start_index=start_index)
+
+    def _ensure_track_id(self, track):
+        """DB id for track, saving it first (Tidal results have none yet)."""
+        db = self._app_ref.db if self._app_ref else None
+        if track is None or db is None:
+            return getattr(track, "id", None)
+        try:
+            return db.ensure_track_id(track)
+        except Exception:
+            logger.warning("Failed to persist track", exc_info=True)
+            return track.id
+
     def _on_context_play(self, track) -> None:
         """Play the given track immediately via context menu."""
         if self._app_ref and self._app_ref.player is not None:
@@ -2469,7 +2486,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         """Add a track to the specified playlist."""
         if self._app_ref and self._app_ref.db is not None:
             try:
-                if track.id is not None:
+                if self._ensure_track_id(track) is not None:
                     self._app_ref.db.add_track_to_playlist(
                         playlist_id, track.id
                     )
@@ -2524,7 +2541,7 @@ class AuxenWindow(Adw.ApplicationWindow):
                 try:
                     playlist_id = self._app_ref.db.create_playlist(name)
                     for t in (tracks or []):
-                        if t.id is not None:
+                        if self._ensure_track_id(t) is not None:
                             self._app_ref.db.add_track_to_playlist(
                                 playlist_id, t.id
                             )
@@ -2545,7 +2562,7 @@ class AuxenWindow(Adw.ApplicationWindow):
         """
         if self._app_ref and self._app_ref.db is not None:
             try:
-                if track.id is not None:
+                if self._ensure_track_id(track) is not None:
                     is_fav = self._app_ref.db.is_favorite(track.id)
                     new_state = not is_fav
                     self._app_ref.db.set_favorite(track.id, new_state)

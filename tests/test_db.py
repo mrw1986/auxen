@@ -482,3 +482,45 @@ class TestMatchGroups:
 
     def test_get_tracks_in_nonexistent_group(self, db: Database) -> None:
         assert db.get_tracks_in_match_group("no-such-group") == []
+
+
+class TestEnsureTrackId:
+    """Tidal tracks from search/explore arrive without a DB id; actions that
+    need one (favorite, playlist, play count) persist them on demand."""
+
+    def test_inserts_track_without_id_and_sets_it(self, db: Database) -> None:
+        track = _make_track(source=Source.TIDAL, source_id="12345")
+        assert track.id is None
+
+        track_id = db.ensure_track_id(track)
+
+        assert track_id is not None and track_id > 0
+        assert track.id == track_id
+        assert db.get_track(track_id).source_id == "12345"
+
+    def test_existing_id_is_returned_without_insert(self, db: Database) -> None:
+        track = _make_track()
+        track.id = db.insert_track(track)
+        before = len(db.get_all_tracks())
+
+        assert db.ensure_track_id(track) == track.id
+        assert len(db.get_all_tracks()) == before
+
+    def test_same_tidal_track_twice_reuses_row(self, db: Database) -> None:
+        first = _make_track(source=Source.TIDAL, source_id="777")
+        second = _make_track(source=Source.TIDAL, source_id="777")
+
+        assert db.ensure_track_id(first) == db.ensure_track_id(second)
+
+    def test_existing_row_metadata_is_not_overwritten(self, db: Database) -> None:
+        stored = _make_track(
+            source=Source.TIDAL, source_id="555", genre="Ambient",
+            match_group_id="grp-1",
+        )
+        stored_id = db.insert_track(stored)
+        sparse = _make_track(source=Source.TIDAL, source_id="555")
+
+        assert db.ensure_track_id(sparse) == stored_id
+        kept = db.get_track(stored_id)
+        assert kept.genre == "Ambient"
+        assert kept.match_group_id == "grp-1"
